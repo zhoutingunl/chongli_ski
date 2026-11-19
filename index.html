@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#192a31">
+  <link rel="canonical" href="https://chongli-ridgeline-ski.navyfawn2049.chatgpt.site/">
+  <meta property="og:title" content="山脊之间 · 万龙与云顶">
+  <meta property="og:description" content="从红花梁山顶出发，在崇礼万龙与云顶之间联滑。">
+  <meta property="og:image" content="https://chongli-ridgeline-ski.navyfawn2049.chatgpt.site/assets/art/ridgeline.webp">
+  <meta name="description" content="在河北崇礼红花梁的真实山形上，从万龙与云顶的山顶出发，体验单板、双板和跨雪场联滑。">
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg">
+  <link rel="preload" as="image" href="./assets/art/ridgeline.webp">
+  <title>山脊之间 · 万龙与云顶滑雪</title>
+</head>
+<body>
+<div id="app">
+  <div id="world"><canvas id="gl" aria-label="崇礼三维滑雪场"></canvas></div>
+  <main id="home">
+    <div class="cover-art"></div><div class="cover-shade"></div>
+    <header class="mast">
+      <div class="wordmark"><span id="logo"></span><span>山脊之间<small>RIDGELINE</small></span></div>
+      <div class="top-tools"><button class="icon-disc" data-act="sound" aria-label="开启环境音" title="环境音"></button><button class="icon-disc" data-act="fullscreen" aria-label="全屏显示" title="全屏显示"></button></div>
+    </header>
+    <div class="start-content">
+      <div class="location"><span></span>河北 · 崇礼</div>
+      <h1>万龙<span>·</span>云顶</h1>
+      <div class="roman">Wanlong <i>/</i> Genting</div>
+      <p class="intro">从红花梁出发，滑向同一座山的两面。</p>
+      <div class="start-choices">
+        <fieldset class="choice-field"><legend>出发雪场</legend><div class="segments" id="resort-choices"></div></fieldset>
+        <fieldset class="choice-field"><legend>滑行装备</legend><div class="segments" id="gear-choices"></div></fieldset>
+      </div>
+      <div class="start-actions"><button class="launch" data-act="start"><span class="play-icon"></span>开始滑行</button><button class="quiet-button" data-act="help"><span data-glyph="controls"></span>操作指南</button></div>
+    </div>
+    <button id="map-preview" data-act="map" aria-label="打开雪场地图">
+      <canvas id="mini-map" aria-hidden="true"></canvas><div class="mini-heading"><span data-glyph="map"></span>雪场地图</div><span class="mini-open" data-glyph="expand"></span><span class="mini-credit">© OpenStreetMap</span><span class="mini-north">N<i></i></span>
+    </button>
+    <footer class="home-footer"><div class="coord"><span data-glyph="pin"></span><span>40°57′ N &nbsp; 115°24′ E</span></div><button class="narrow-map" data-act="map"><span data-glyph="map"></span>雪场地图</button><span class="footer-meta"><span data-glyph="mountain"></span>红花梁 <b>2,110 m</b></span><span class="rotate-note"><span data-glyph="rotate"></span>横屏滑行更开阔</span></footer>
+  </main>
+  <section id="hud" hidden aria-label="滑行仪表">
+    <div class="hud-vignette"></div>
+    <div class="hud-reading">
+      <div class="speed"><strong id="speed">0</strong><span>KM / H</span><small>落差 <b id="drop">0</b> m</small><i><b id="speed-bar"></b></i></div>
+      <div class="piste"><small id="elevation"></small><h2 id="trail-name"></h2><div id="gradient"></div><div id="progress"></div></div>
+    </div>
+    <div class="game-top"><div class="hud-tools"><button data-act="map" aria-label="雪场地图" title="雪场地图"></button><button data-act="sound" aria-label="环境音" title="环境音"></button><button data-act="pause" aria-label="暂停菜单" title="暂停菜单"></button></div><div class="weather"><div><span id="weather-icon"></span><b id="world-clock"></b></div><span id="weather-name"></span></div></div>
+    <div id="fork-prompt" hidden><span id="fork-text"></span><button data-act="junction" id="fork-button"></button></div>
+    <div id="steering" aria-label="左右拖动转弯"><div class="touch-line"><i></i></div><span>左右拖动转弯</span></div>
+    <div id="keyboard-hint">A / D 转弯 <i></i> W 加速 <i></i> S 刹车 <i></i> 空格 跳跃</div>
+    <div class="ride-actions"><button class="small-hud" data-act="view" title="切换视角" aria-label="切换视角"></button><button class="control brake" data-hold="brake">刹车</button><button class="control boost" data-hold="boost">加速</button><button class="control jump" data-act="jump">跳</button></div>
+    <div id="lift-strip" hidden><span data-glyph="lift"></span><span id="lift-text"></span><button data-act="skip-lift">直达山顶</button></div>
+  </section>
+  <div id="photo-bar" hidden><button data-act="exit-photo" class="glass-button">返回</button><select id="photo-place" aria-label="选择拍摄位置"><option value="rider">滑行者</option><option value="lodge">山顶餐厅</option><option value="hall">山下大厅与酒店</option></select><span>拖动环顾 · 双指缩放</span><button data-act="save-photo" class="glass-button" id="shutter"></button></div>
+  <section id="overlay" hidden aria-label="设置">
+    <div class="overlay-inner"><nav id="pause-nav"></nav><article id="panel"></article></div>
+  </section>
+  <div id="loading" hidden role="status"><div class="loading-copy"><span class="loading-crest"></span><p>进入红花梁</p><small id="load-text">铺展雪场</small><i></i></div></div>
+  <div id="toast" role="status" aria-live="polite"></div>
+</div>
+<script type="module" src="/src/main.js"></script>
+</body></html>
