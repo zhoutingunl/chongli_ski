@@ -142,6 +142,8 @@ LONG_UP = 1353185032
 LONG_LOW = 771169386
 JADE = 483990518
 GOLD = 259702567
+SILVER_UP = 259702565
+SILVER_STEEP = 1353185034
 PEONY = 878706035
 EDELWEISS = 771168491
 WEIGELA = 771168492
@@ -159,6 +161,7 @@ ITINERARIES = [
     ('wanlong-long', '长龙道 · 卧龙道', 'wanlong', 'wanlong', 'intermediate', [LONG_UP, LONG_LOW, LOUNGE]),
     ('genting-valley', '曼陀罗 · 剪秋萝', 'genting', 'genting', 'intermediate', [DATURA, LYCHNIS]),
     ('wanlong-gold', '金龙道 · 玉龙道', 'wanlong', 'wanlong', 'advanced', [GOLD, JADE]),
+    ('wanlong-silver', '银龙道 · 大奔头', 'wanlong', 'wanlong', 'advanced', [SILVER_UP, SILVER_STEEP, JADE]),
 ]
 
 
@@ -255,7 +258,25 @@ def mapped_features(xml, terrain):
     hall = next(b for b in buildings if b['id'] == 'w1153883032')
     landmarks[3].update({'buildingId': hall['id'], 'footprint': hall['footprint']})
     routes = [itinerary(r, way_nodes, coordinates, terrain.source_height) for r in ITINERARIES]
-    return {'trails': trails, 'lifts': lifts, 'routes': routes, 'landmarks': landmarks, 'buildings': buildings, 'water': water}
+    # These are game viewpoints on open snow beside the mapped upper terminals.
+    # All horizontal coordinates use the terrain grid. Eye and target heights are
+    # above their respective snow surfaces. Heading zero faces north (-z).
+    summit_places = {
+        'wanlong': {
+            'position': [-308.0, -53.5], 'heading': 2.5926,
+            'lodgeId': 'wanlong-lodge', 'liftId': 'w1564657050', 'stationEnd': 'top',
+            'camera': {'position': [-312.0, -60.0], 'height': 3.05,
+                       'target': [-304.7, -48.1], 'targetHeight': 1.36},
+        },
+        'genting': {
+            'position': [623.3, 359.5], 'heading': 5.1960,
+            'lodgeId': 'genting-lodge', 'liftId': 'w469393391', 'stationEnd': 'top',
+            'camera': {'position': [630.0, 363.0], 'height': 3.05,
+                       'target': [617.6, 356.5], 'targetHeight': 0.98},
+        },
+    }
+    return {'trails': trails, 'lifts': lifts, 'routes': routes, 'landmarks': landmarks,
+            'buildings': buildings, 'water': water, 'summitPlaces': summit_places}
 
 
 def main():

@@ -5,6 +5,14 @@ const V = (x, y, z) => new THREE.Vector3(x, y, z);
 const up = V(0, 1, 0);
 const materialCache = new Map();
 const palette = new Map();
+let resortNight = 0;
+export function setResortNight(amount=0) {
+  resortNight = THREE.MathUtils.clamp(amount,0,1);
+  for(const key of ['occupiedRoom','glazing','panorama']) {
+    const m=materialCache.get(key);
+    if(m) m.emissiveIntensity=key==='occupiedRoom'?.18+1.74*resortNight:.13*resortNight;
+  }
+}
 const tileMeters = { timber: 2.7, stone: 3.0, plaster: 4.8, glazing: 1, panorama: 1 };
 
 function color(value) {
@@ -33,10 +41,11 @@ function getMaterial(key) {
     const room = loadTexture('room');
     options.map = options.emissiveMap = room;
     options.emissive = new THREE.Color('#ebb67c');
-    options.emissiveIntensity = 0.18;
+    options.emissiveIntensity = .18+1.74*resortNight;
     options.roughness = 0.30;
   } else if (['glazing', 'panorama', 'cabinGlass'].includes(key)) {
     options.map = loadTexture('glazing');
+    if(key!=='cabinGlass') Object.assign(options,{emissiveMap:options.map,emissive:new THREE.Color('#fad9ab'),emissiveIntensity:.13*resortNight});
     options.metalness = 0.13;
     options.roughness = 0.22;
     if (key !== 'glazing') Object.assign(options, { transparent: true, opacity: key === 'panorama' ? 0.74 : 0.60, depthWrite: false });
@@ -912,14 +921,17 @@ export function createLift({points,resort='wanlong',type,kind,id='',name='',bubb
   const pos=V(0,0,0),dir=V(0,0,0), carrier=new THREE.Object3D();
   const speed=resort==='genting'?5.0:5.65;
   let phaseOffset=0;
-  function update(time,observer,occupiedT=null) {
+  function update(time,observer,occupiedT=null,travelDirection=1) {
     if(!group.visible) return;
     const view=observer?.isCamera?observer.position:observer;
     const visibleVolume=carrierFrustum(observer);
     locateStructures(view,observer,visibleVolume);
     // Align a cabin with the seated camera from boarding until disembarkation.
     // Retaining the phase offset lets the other vehicles keep moving at departure.
-    if (Number.isFinite(occupiedT)) phaseOffset=clamp01(occupiedT)*line.length-time*speed;
+    if (Number.isFinite(occupiedT)) {
+      const along=clamp01(occupiedT)*line.length;
+      phaseOffset=(travelDirection<0 ? 2*line.length+line.arc-along : along)-time*speed;
+    }
     for(const batch of styles.values()) batch.used=0;
     for(let i=0;i<carriers.length;i++) {
       const car=carriers[i]; line.sample(car.offset+time*speed+phaseOffset,pos,dir);
@@ -938,13 +950,14 @@ export function createLift({points,resort='wanlong',type,kind,id='',name='',bubb
       if(batch.used) mesh.instanceMatrix.needsUpdate=true;
     }
   }
-  function getRide(t) {
+  function getRide(t,travelDirection=1) {
     const position=V(0,0,0), direction=V(0,0,0);
-    line.lane(clamp01(t)*line.length,1,position,direction);
+    line.lane(clamp01(t)*line.length,travelDirection,position,direction);
+    if(travelDirection<0) direction.negate();
     position.y-=2.48;
     return {position,direction};
   }
   // This also makes the source standalone in a static scene before the first RAF tick.
   update(0,line.ground[0]);
-  return {group,update,getRide,seatAt:t=>getRide(t).position,length:line.length,speed};
+  return {group,update,getRide,seatAt:(t,d)=>getRide(t,d).position,length:line.length,speed};
 }

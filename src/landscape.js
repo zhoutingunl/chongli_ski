@@ -60,7 +60,7 @@ function snowMaterial(uniforms,far) {
     Object.assign(s.uniforms,uniforms);
     s.vertexShader='varying vec3 vGround;\n'+s.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvGround=position;');
     s.fragmentShader=`varying vec3 vGround;
-      uniform sampler2D trailMask,ortho,crystals; uniform vec3 lowSun; uniform float hasOrtho; uniform vec4 terrainBounds;
+      uniform sampler2D trailMask,ortho,crystals,lampMap; uniform float pisteLights; uniform vec3 lowSun; uniform float hasOrtho; uniform vec4 terrainBounds;
       `+glNoise+s.fragmentShader.replace('#include <color_fragment>',far?`
       vec2 p=vGround.xz;
       float n=noise21(p*.00081)*.56+noise21(p*.0034)*.27+noise21(p*.009)*.17;
@@ -99,42 +99,144 @@ function snowMaterial(uniforms,far) {
       local+=vec3(course*(ridges*.071-seam*.025)*(1.-smoothstep(12.,76.,dist))+grain*.043);
       diffuseColor.rgb=max(vec3(.04),local);
     `);
+    if(!far) s.fragmentShader=s.fragmentShader.replace('#include <opaque_fragment>',`
+      if(pisteLights>.005){
+        float pool=texture2D(lampMap,(vGround.xz-terrainBounds.xy)/terrainBounds.zw).r;
+        outgoingLight+=diffuseColor.rgb*vec3(.91,.76,.53)*pool*pisteLights*.91;
+      }
+      #include <opaque_fragment>
+    `);
   };
   return mat;
 }
 
-export const environments={
-  morning:{name:'清晨晴空',time:'09:18',sky:0x366d9d,horizon:0xd1dfe1,fog:0xb8cbd5,sun:0xffe7c3,light:1.63,ambient:1.48,dir:[-.50,.47,-.66],density:.000093,cloud:.30},
-  noon:{name:'午后薄云',time:'13:26',sky:0x5994c6,horizon:0xe0e8e7,fog:0xc9d7dc,sun:0xfff4e4,light:1.66,ambient:1.42,dir:[-.33,.83,.42],density:.000073,cloud:.52},
-  snow:{name:'林间小雪',time:'10:42',sky:0x82939f,horizon:0xe1e5e3,fog:0xd0d9dc,sun:0xf4f3e9,light:.79,ambient:1.74,dir:[-.34,.63,.56],density:.00045,cloud:.85},
-  dusk:{name:'山脊日落',time:'16:32',sky:0x596987,horizon:0xf4cbae,fog:0xd6c2b8,sun:0xffbb82,light:1.33,ambient:1.18,dir:[-.82,.22,.38],density:.00014,cloud:.42}
-};
 export function createSky(scene) {
-  const uniforms={zenith:{value:new THREE.Color()},horizonColor:{value:new THREE.Color()},sunDir:{value:new THREE.Vector3()},sunColor:{value:new THREE.Color()},cloudiness:{value:.3}};
+  const col=()=>({value:new THREE.Color()}),real=()=>({value:0}),dir=()=>({value:new THREE.Vector3()});
+  const uniforms={zenith:col(),horizonColor:col(),sunDir:dir(),moonDir:dir(),sunColor:col(),cloudColor:col(),cloudiness:real(),snow:real(),solar:real(),moonlight:real(),stars:real(),aurora:real(),phase:real()};
   const mat=new THREE.ShaderMaterial({uniforms,side:THREE.BackSide,depthWrite:false,depthTest:false,
     vertexShader:'varying vec3 vDir; void main(){vDir=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
-    fragmentShader:`varying vec3 vDir;uniform vec3 zenith,horizonColor,sunDir,sunColor;uniform float cloudiness;
-    `+glNoise+`
-    void main(){
-      vec3 d=normalize(vDir); float h=max(d.y,0.);
-      vec3 sky=mix(horizonColor,zenith,1.-exp(-3.6*h));
-      vec2 p=d.xz/max(h+.105,.045)*vec2(1.85,5.2);
-      float clouds=noise21(p)*.55+noise21(p*2.13)*.27+noise21(p*4.47)*.13+noise21(p*9.)*.05;
-      float veil=smoothstep(.64-cloudiness*.19,.86-cloudiness*.15,clouds)*smoothstep(-.025,.16,h);
-      sky=mix(sky,mix(horizonColor,vec3(1.),.36),veil*(.28+cloudiness*.50));
-      float cosine=max(dot(d,normalize(sunDir)),0.);
-      sky+=sunColor*(pow(cosine,9.)*.12+pow(cosine,140.)*.43+smoothstep(.99977,.999965,cosine)*2.8);
-      gl_FragColor=vec4(sky,1.);
-      #include <tonemapping_fragment>
-      #include <colorspace_fragment>
-    }`
+    fragmentShader:`varying vec3 vDir;uniform vec3 zenith,horizonColor,sunDir,sunColor,moonDir,cloudColor;
+      uniform float cloudiness,snow,solar,moonlight,stars,aurora,phase;
+      `+glNoise+`
+      float starField(vec2 coord,float frequency,float seed) {
+        vec2 q=coord*vec2(frequency,frequency*.52),cell=floor(q);
+        float chance=hash21(cell+vec2(seed,17.3));
+        vec2 center=.20+.60*vec2(hash21(cell+vec2(22.4,seed)),hash21(cell+vec2(seed+4.2,2.8)));
+        vec2 off=fract(q)-center;
+        float size=mix(.028,.105,pow(chance,17.)), width=clamp(length(fwidth(q))*.47,.016,.32);
+        float kernel=1.-smoothstep(max(0.,size-width),size+width,length(off));
+        return kernel*step(.887,chance)*(.22+.78*pow(chance,13.))*(.79+.21*sin(phase*.51+chance*112.));
+      }
+      vec3 curtain(float az,float altitude,float warp,float lift,float strength) {
+        float drift=phase*.077;
+        float path=lift+.050*sin(az*3.+drift*.23+warp)+.043*sin(az*5.1-drift*.17+warp*.74)+.018*sin(az*11.+warp);
+        float rays=noise21(vec2(az*68.+sin(az*6.+drift*.27)*1.6+warp,drift*.075));
+        rays=(.32+.68*rays*rays)*(.55+.45*noise21(vec2(az*3.7+warp,drift*.079)));
+        float y=altitude-path;
+        float main=smoothstep(-.024,.010,y)*exp(-max(0.,y)*(13.-3.3*rays));
+        float rim=exp(-abs(y)*95.);
+        float upper=smoothstep(.033,.155,y);
+        vec3 shade=mix(vec3(.045,.66,.39),vec3(.34,.12,.48),upper);
+        return strength*rays*(main*shade+rim*vec3(.035,.21,.16));
+      }
+      void main(){
+        vec3 d=normalize(vDir); float h=max(d.y,0.);
+        vec3 sky=mix(horizonColor,zenith,1.-exp(-3.8*h));
+        float sunAngle=max(dot(d,sunDir),0.);
+        float glint=pow(sunAngle,32.);
+        sky+=sunColor*solar*(.13*pow(sunAngle,7.)+.40*glint+.48*pow(sunAngle,550.)+2.65*smoothstep(.99986,.999965,sunAngle));
+        vec2 p=d.xz/max(h+.09,.05)*vec2(1.85,4.25);
+        vec2 drift=vec2(phase*(.00095+snow*.0017),phase*.00053);
+        vec2 q=p+drift;
+        float vapor=noise21(q)*.55+noise21(q*2.11+3.6)*.27+noise21(q*4.4)*.13+noise21(q*9.2)*.05;
+        float clouds=smoothstep(.67-cloudiness*.29,.88-cloudiness*.23,vapor)*smoothstep(-.04,.12,d.y);
+        float stratus=smoothstep(.47,.98,snow);
+        vec3 ceiling=mix(horizonColor,zenith,smoothstep(-.01,.57,d.y))*(.89+.19*noise21(q*.44));
+        sky=mix(sky,ceiling,stratus*.91);
+        float az=atan(d.x,-d.z);
+        if(stars>.002 && h>.008){
+          vec2 sphere=vec2(az*.15915494+.50,asin(clamp(d.y,-1.,1.))*.3183099+.5);
+          float lights=starField(sphere,294.,1.8)+.33*starField(sphere,473.,8.3);
+          sky+=vec3(.76,.86,1.02)*lights*stars*smoothstep(.015,.18,h)*(1.-clouds*.91);
+        }
+        if(moonlight>.005){
+          vec3 east=normalize(cross(vec3(0.,1.,0.),moonDir)),north=cross(moonDir,east);
+          vec2 disk=vec2(dot(d,east),dot(d,north))/.010;
+          float facing=max(dot(d,moonDir),0.), r2=dot(disk,disk);
+          float shape=(1.-smoothstep(.80,1.10,r2))*step(.995,facing);
+          float phaseLight=.21+.79*clamp(disk.x*.56+sqrt(max(0.,1.-r2))*.63+.24,0.,1.);
+          sky+=vec3(.62,.76,1.)*moonlight*(.095*pow(facing,95.)+.14*pow(facing,1200.)+shape*phaseLight*1.98);
+        }
+        if(aurora>.002 && h>.002){
+          // Broad arcs with moving, vertically striated folds, brightest above geographic north.
+          float north=.65+.35*cos(az);
+          vec3 band=curtain(az,d.y,1.25,.19,1.14)+curtain(az,d.y,4.1,.34,.58);
+          sky+=band*aurora*north*smoothstep(.0,.075,d.y)*(1.-clouds*.64);
+        }
+        vec3 cloud=mix(cloudColor,horizonColor,.20+.26*snow);
+        cloud=mix(cloud,sunColor,min(.40,glint*.56)*solar);
+        sky=mix(sky,cloud,clouds*(.27+cloudiness*.52)*(1.-stratus*.79));
+        gl_FragColor=vec4(max(sky,vec3(.0003)),1.);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`
   });
   const mesh=new THREE.Mesh(new THREE.SphereGeometry(41000,36,19),mat);mesh.renderOrder=-99;mesh.frustumCulled=false;scene.add(mesh);
-  return {mesh,apply(env){uniforms.zenith.value.set(env.sky);uniforms.horizonColor.value.set(env.horizon);uniforms.sunColor.value.set(env.sun);uniforms.sunDir.value.fromArray(env.dir).normalize();uniforms.cloudiness.value=env.cloud;}};
+  return {mesh,apply(env){
+    uniforms.zenith.value.set(env.sky);uniforms.horizonColor.value.set(env.horizon);
+    uniforms.sunColor.value.set(env.sun);uniforms.cloudColor.value.set(env.cloudColor??env.horizon);
+    uniforms.sunDir.value.fromArray(env.sunDir||env.dir).normalize();uniforms.moonDir.value.fromArray(env.moonDir||[.4,.39,-.83]).normalize();
+    uniforms.cloudiness.value=env.cloud;uniforms.snow.value=env.snowAmount||0;uniforms.solar.value=env.sunAmount??1;
+    uniforms.stars.value=env.starAmount||0;uniforms.moonlight.value=env.moonAmount||0;
+    uniforms.aurora.value=env.auroraAmount||0;uniforms.phase.value=env.elapsed||0;
+  }};
 }
+function makePisteLighting(scene,data) {
+  // One baked illuminance map puts light on the actual slope, including the connecting
+  // runs. Fixtures reuse two small geometries and distant lamps share one point sprite draw.
+  const b=data.bounds,size=1024,map=document.createElement('canvas');map.width=map.height=size;
+  const c=map.getContext('2d'); c.fillStyle='#000';c.fillRect(0,0,size,size);c.globalCompositeOperation='lighter';
+  const sx=size/(b.maxX-b.minX),sz=size/(b.maxZ-b.minZ);
+  const lights=[];
+  for(const route of data.routes) for(let s=45;s<route.length-15;s+=78) {
+    const p=route.frame(s),near=data.index.near(p.x,p.z),shoulder=clamp((near.trail?.width||35)*.53,13,31);
+    const side=route.resort==='genting'?-1:1,rx=-p.dz*side,rz=p.dx*side;
+    const x=p.x+rx*(shoulder+1.1),z=p.z+rz*(shoulder+1.1);
+    if(lights.some(o=>Math.abs(x-o.x)<48 && Math.abs(z-o.z)<48 && (x-o.x)**2+(z-o.z)**2<46*46)) continue;
+    const y=data.height(x,z),mast=8.1;
+    lights.push({x,y,z,rx,rz,mast});
+    const cx=p.x+rx*(shoulder*.27)+p.dx*7,cz=p.z+rz*(shoulder*.27)+p.dz*7;
+    c.save();c.translate((cx-b.minX)*sx,(cz-b.minZ)*sz);c.rotate(Math.atan2(p.dz*sz,p.dx*sx));c.scale((31+shoulder*.15)*sx,(20+shoulder*.18)*sz);
+    const pool=c.createRadialGradient(0,0,0,0,0,1);pool.addColorStop(0,'#e8e8e8');pool.addColorStop(.22,'#cecece');pool.addColorStop(.57,'#737373');pool.addColorStop(.83,'#262626');pool.addColorStop(1,'#000');c.fillStyle=pool;c.fillRect(-1,-1,2,2);c.restore();
+  }
+  const texture=new THREE.CanvasTexture(map);texture.flipY=false;texture.colorSpace=THREE.NoColorSpace;
+  const group=new THREE.Group();group.name='Night skiing lights';scene.add(group);
+  const poleMat=new THREE.MeshLambertMaterial({color:0x788088});
+  const masts=new THREE.InstancedMesh(new THREE.CylinderGeometry(.073,.107,1,5),poleMat,lights.length);
+  const fixtures=new THREE.InstancedMesh(new THREE.BoxGeometry(.90,.21,1.12),new THREE.MeshLambertMaterial({color:0xa5a8a7}),lights.length);
+  const dummy=new THREE.Object3D(),points=[];
+  for(let i=0;i<lights.length;i++) {
+    const l=lights[i],h=l.mast,fx=l.x-l.rx*.27,fz=l.z-l.rz*.27;
+    dummy.position.set(l.x,l.y+h*.50,l.z);dummy.rotation.set(0,0,0);dummy.scale.set(1,h,1);dummy.updateMatrix();masts.setMatrixAt(i,dummy.matrix);
+    dummy.position.set(fx,l.y+h,fz);dummy.rotation.set(-.36,Math.atan2(-l.rx,-l.rz),0,'YXZ');dummy.scale.set(1,1,1);dummy.updateMatrix();fixtures.setMatrixAt(i,dummy.matrix);
+    points.push(fx-l.rx*.22,l.y+h-.09,fz-l.rz*.22);
+  }
+  group.add(masts,fixtures);
+  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(points,3));
+  const glowUniform={amount:{value:0},scale:{value:480},fogDensity:{value:.00015}};
+  const glow=new THREE.Points(g,new THREE.ShaderMaterial({uniforms:glowUniform,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,
+    vertexShader:`uniform float scale; varying float distanceToLight;void main(){vec4 eye=modelViewMatrix*vec4(position,1.);distanceToLight=length(eye.xyz);gl_PointSize=clamp(1.3+scale*3.1/max(2.,-eye.z),1.6,42.);gl_Position=projectionMatrix*eye;}`,
+    fragmentShader:`uniform float amount,fogDensity;varying float distanceToLight;void main(){vec2 uv=2.*gl_PointCoord-1.;float r=length(uv);if(r>=1.) discard;float core=exp(-r*r*24.);float halo=exp(-r*r*4.4);float visibility=exp(-pow(distanceToLight*fogDensity,2.));gl_FragColor=vec4(mix(vec3(1.,.66,.30),vec3(1.,.91,.74),core),amount*visibility*(.28*halo+.92*core));}`
+  }));
+  const screen=new THREE.Vector2();
+  glow.onBeforeRender=(renderer,scene,camera)=>{glowUniform.scale.value=renderer.getDrawingBufferSize(screen).y*camera.projectionMatrix.elements[5]*.5;};
+  glow.renderOrder=2;group.add(glow);
+  return {texture,setLight(e){const amount=e.lampAmount||0;glowUniform.amount.value=amount;glowUniform.fogDensity.value=e.density;glow.visible=amount>.025;}};
+}
+
 export async function buildSurface(scene,data) {
-  const b=data.bounds;
-  const uniforms={crystals:{value:dataTexture(128,128,255)},lowSun:{value:new THREE.Vector3(-.5,.47,-.66)},trailMask:{value:prepareTrailMask(data)},terrainBounds:{value:new THREE.Vector4(b.minX,b.minZ,b.maxX-b.minX,b.maxZ-b.minZ)},ortho:{value:dataTexture(160,160,160)},hasOrtho:{value:0}};
+  const b=data.bounds,fixtures=makePisteLighting(scene,data);
+  const uniforms={lampMap:{value:fixtures.texture},pisteLights:{value:0},crystals:{value:dataTexture(128,128,255)},lowSun:{value:new THREE.Vector3(-.5,.47,-.66)},trailMask:{value:prepareTrailMask(data)},terrainBounds:{value:new THREE.Vector4(b.minX,b.minZ,b.maxX-b.minX,b.maxZ-b.minZ)},ortho:{value:dataTexture(160,160,160)},hasOrtho:{value:0}};
   addTerrainTiles(scene,data.field,snowMaterial(uniforms,false));
   await Promise.all([
     loadTexture(asset('art/snow-normal.webp')).then(t=>{t.wrapS=t.wrapT=THREE.RepeatWrapping;uniforms.crystals.value=t;}),
@@ -146,7 +248,7 @@ export async function buildSurface(scene,data) {
       return loadTexture(asset('geo/horizon.jpg'),THREE.SRGBColorSpace).then(t=>{far.ortho.value=t;far.hasOrtho.value=1;}).catch(()=>{});
     })
   ]);
-  return {setLight(env){uniforms.lowSun.value.fromArray(env.dir);}};
+  return {setLight(env){uniforms.lowSun.value.fromArray(env.dir);uniforms.pisteLights.value=env.lampAmount||0;fixtures.setLight(env);}};
 }
 
 async function readForest() {
@@ -220,5 +322,5 @@ export async function plantForest(scene,data) {
     const center=new THREE.Vector3(x0+cell/2,data.height(x0+cell/2,z0+cell/2)+8,z0+cell/2);
     g.boundingSphere=new THREE.Sphere(center,340);const m=new THREE.Mesh(g,sm);scene.add(m);chunks.push(m);
   }
-  return {setLight(env){uniforms.tint.value.set(env.sun).lerp(new THREE.Color(1,1,1),.71);},locate(x,z,quality){const d=quality==='lite'?1270:quality==='high'?2640:1920;for(const m of chunks){const c=m.geometry.boundingSphere.center;m.visible=(c.x-x)**2+(c.z-z)**2<d*d;}}};
+  return {setLight(env){uniforms.tint.value.set(env.treeTint??0xffffff);if(env.nightAmount)uniforms.tint.value.multiplyScalar(1-.33*env.nightAmount);},locate(x,z,quality){const d=quality==='lite'?1270:quality==='high'?2640:1920;for(const m of chunks){const c=m.geometry.boundingSphere.center;m.visible=(c.x-x)**2+(c.z-z)**2<d*d;}}};
 }

@@ -1,5 +1,7 @@
 import {clamp,resortName,difficultyColor} from './mountain.js';
 
+import {label as translated,t} from './language.js';
+
 function pisteBounds(data) {
   const pts=data.trails.flatMap(t=>t.points);
   return {minX:Math.min(...pts.map(p=>p[0]))-320,maxX:Math.max(...pts.map(p=>p[0]))+320,
@@ -94,7 +96,7 @@ export class TrailMap {
       const fontSize=mini?11:base?15:12;
       c.font=(base?'500 ':'')+fontSize+'px "PingFang SC","Microsoft YaHei",sans-serif';
       c.textAlign=l.resort==='genting'?'left':'right';c.textBaseline='middle';
-      const label=base?(mini?resortName(l.resort):resortName(l.resort)+'雪场'):l.name;
+      const label=base?translated(resortName(l.resort))+(mini?'':t('雪场',' resort')):translated(l.name);
       const tx=clamp(x+(l.resort==='genting'?9:-9),c.textAlign==='right'?c.measureText(label).width+4:4,c.textAlign==='left'?w-c.measureText(label).width-4:w-4);
       const ty=clamp(z+(base?-5:12),9,h-10);
       c.lineWidth=3;c.strokeStyle='rgba(23,38,42,.85)';c.strokeText(label,tx,ty);c.fillStyle=base?'#f5f6ee':'#dfceb1';c.fillText(label,tx,ty);

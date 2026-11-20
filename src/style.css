@@ -17,3 +17,46 @@
 #photo-place{border:1px solid var(--edge);border-radius:4px;background:#293c44;color:#f1eee4;padding:7px 20px 7px 8px;font:14px var(--serif)}#mini-map{top:31px;height:calc(100% - 32px)}@media(max-width:540px){#photo-bar>span{display:none}.finish-actions{gap:11px}.finish-actions .launch{font-size:14px}}
 .map-legend{position:absolute;left:9px;bottom:9px;display:flex;align-items:center;gap:4px;padding:4px 6px;color:#e1e6e0;background:#1a2d32cc;border-radius:3px;font:11px var(--sans)}.map-legend i{width:8px;height:2px;background:#8fc79d}.map-legend i:nth-of-type(2){background:#84b9e2}.map-legend i:nth-of-type(3){background:#e49c85}@media(orientation:portrait) and (max-width:850px){.cover-art{background-position:91% center}}
 .mini-credit{position:absolute;left:8px;bottom:5px;font:9px var(--sans);color:#d5ded8}
+
+/* Station controls occupy the corners so the lodge, lift and rider stay in view. */
+#station-card{position:absolute;left:max(4.5vw,env(safe-area-inset-left));bottom:max(6vh,env(safe-area-inset-bottom));padding:15px 19px 16px;border-left:2px solid var(--gold);background:linear-gradient(100deg,#152a35e6,#213642ac 79%,#1f344000);color:#f8f5e9;pointer-events:auto;max-width:87vw}
+.station-place,.station-actions,.look-choices{display:flex;align-items:center}
+.station-place{gap:8px;font:clamp(17px,1.55vw,25px) var(--serif);letter-spacing:.05em}
+.station-place svg{width:16px;height:16px;color:var(--gold)}
+#station-note{font:13px var(--sans);margin:7px 0;color:#d6e0df}
+.look-choices{gap:0;margin:9px 0 12px}.look-choices button{font:13px var(--sans);color:#d4dfdf;border-bottom:1px solid #dce9e642;padding:4px 10px 5px}.look-choices button[aria-pressed=true]{color:#ffdea7;border-color:#e9c482;background:#ffffff0c}
+.station-actions{gap:10px}.station-actions .launch,.station-actions .glass-button{height:38px;padding:0 17px;font-size:15px;display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap}.station-actions svg{width:15px;height:15px}
+.watching .speed,.watching #gradient,.watching #progress{display:none}.watching .piste h2{margin-bottom:0}
+#near-lift{position:absolute;left:max(4.5vw,env(safe-area-inset-left));bottom:19%;display:flex;align-items:center;gap:7px;background:#223743c4;color:#fff4d8;pointer-events:auto}#near-lift svg{width:17px;height:17px}
+.camera-tray{position:absolute;bottom:100%;right:2px;margin-bottom:10px;display:flex;flex-direction:row-reverse;align-items:center;gap:7px;pointer-events:auto}
+#tray-tools{display:flex;gap:6px}.tray-button{width:38px;height:38px;display:grid;place-items:center;border-radius:100%;background:#293d4c9e;border:1px solid #f3f3ef65;color:#fff;touch-action:manipulation}
+#tray-toggle[aria-expanded=true] svg{transform:rotate(180deg)}
+.touch-line:before{content:"";position:absolute;inset:-3px 16%;border-inline:1px solid #ffdfabcc}.edge-set .touch-line i{background:#ffd598;box-shadow:0 0 7px #d9b07a}
+.control.jump.active{background:#8d6940c7;box-shadow:0 0 0 3px #ffdc9699,0 2px 15px #25354135}
+.climate-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.climate-tile{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:7px;min-height:clamp(54px,9vh,95px);border:1px solid #d8e2e634;border-radius:11px;background:#1c2b39a3;font:clamp(15px,1.3vw,22px) var(--serif)}
+.climate-tile[aria-pressed=true],.setting-pill[aria-pressed=true],.track[aria-pressed=true]{color:#f9d9a2;border-color:#e8c587;box-shadow:inset 0 0 0 1px #e5bd7c8c;background:#524a3f7d}
+.weather-title{margin:22px 0 9px;font-weight:400}.settings-tools,.music-head,.music-head>div,.tilt-setting{display:flex;align-items:center;gap:7px}.settings-tools{border-bottom:1px solid var(--edge);padding-bottom:12px;flex-wrap:wrap}.setting-pill{padding:6px 12px;border:1px solid #d9e3e941;border-radius:40px;background:#1c2c3a95;color:var(--snow);font:15px var(--serif);white-space:nowrap}
+.music-head{justify-content:space-between;margin:14px 0 8px;font:16px var(--serif);color:#d9e2e0}
+.track-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.track{position:relative;text-align:left;display:flex;flex-direction:column;justify-content:center;gap:3px;min-height:clamp(45px,7.1vh,77px);padding:7px 13px;border:1px solid #d4dfe33b;border-radius:7px;background:#24344091}
+.track b{font:400 clamp(14px,1.24vw,22px) var(--serif)}.track small,.music-mix small{font:12px var(--serif);color:#bcc8c9}.track[data-playing=true]:after{content:"";position:absolute;right:7px;top:7px;width:5px;height:5px;border-radius:100%;background:#f6cd8f}
+.music-mix{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:11px 0 15px}.music-mix p{color:#f5d19a;font:14px var(--serif);margin:0 0 3px}.music-mix label{display:flex;align-items:center;gap:5px;white-space:nowrap;font:12px var(--sans);color:#ced8d7}.music-mix input{width:clamp(66px,12vw,175px);accent-color:#f4cf92;cursor:pointer}.music-mix output{min-width:31px}
+.settings-detail,.source-detail,.tilt-setting{margin:9px 0}.settings-detail summary,.source-detail summary{cursor:pointer;color:#d3dbd9;font:15px var(--serif);width:fit-content}.version{color:#a5b4b5;font:10px var(--sans)}
+.controls-guide .ctrl-row{grid-template-columns:minmax(64px,.5fr) minmax(160px,2.2fr) auto;gap:12px}.controls-guide .ctrl-row strong{justify-self:start;border:1px solid #c5d1d345;border-radius:4px;padding:3px 6px;font-weight:400}.controls-guide .ctrl-row span:last-child{font:11px var(--sans);color:#b4c3c5;white-space:nowrap}
+.map-action .launch:disabled{background:#415054;color:#cbd4d2;border:1px solid #b6c4c740;cursor:default}
+html[lang=en] .start-content h1{font-family:var(--latin);font-size:clamp(42px,6.4vw,108px);letter-spacing:-.035em}
+@media(max-height:650px) and (orientation:landscape){
+  #station-card{left:max(3.8vw,env(safe-area-inset-left));bottom:max(4.2vh,env(safe-area-inset-bottom));padding:8px 13px 9px}
+  .station-place{font-size:15px;gap:5px}.station-place svg{width:13px;height:13px}#station-note{font-size:11px;margin:4px 0}.look-choices{margin:3px 0 7px}.look-choices button{font-size:11px;padding:4px 9px}.station-actions{gap:7px}.station-actions .launch,.station-actions .glass-button{font-size:13px;height:31px;padding:0 12px}
+  .camera-tray{margin-bottom:5px}.tray-button{width:34px;height:34px}.climate-grid{gap:6px}.climate-tile{min-height:clamp(42px,14vh,68px);gap:2px;font-size:14px;border-radius:8px}.climate-tile svg{width:20px;height:20px}
+  .weather-title{margin:12px 0 6px}.settings-tools{padding-bottom:6px;gap:5px}.setting-pill{font-size:12px;padding:4px 9px}.music-head{margin:7px 0 5px;font-size:13px}.track{min-height:37px;padding:4px 8px;gap:1px}.track-grid{gap:4px}.track b{font-size:13px}.track small,.music-mix small{font-size:10px}
+  .music-mix{margin:6px 0 8px}.music-mix p,.music-mix label{font-size:11px}.settings-detail,.source-detail,.tilt-setting{margin:6px 0}.settings-detail summary,.source-detail summary{font-size:12px}.controls-guide .ctrl-row{padding:3px 0;gap:8px;font-size:12px}.controls-guide .ctrl-row strong{font-size:13px}.controls-guide .ctrl-row span:last-child{font-size:10px}
+  #photo-bar{white-space:nowrap}html[lang=en] .start-content h1{font-size:clamp(33px,5.8vw,63px)}
+}
+@media(orientation:portrait) and (max-width:850px){
+  #station-card{bottom:7vh;max-width:89vw}.watching .game-top{top:max(18px,env(safe-area-inset-top));bottom:auto}.watching .hud-tools button{width:28px}.watching .piste h2{font-size:19px}.music-mix{align-items:flex-start;flex-direction:column}.track{padding:5px 6px;min-height:48px}.track small{font-size:10px}.controls-guide .ctrl-row{grid-template-columns:68px 1fr;gap:4px 9px}.controls-guide .ctrl-row span:last-child{grid-column:2}.climate-grid{gap:4px}.climate-tile{min-height:53px}.station-actions .launch,.station-actions .glass-button{height:39px}
+}
+#next-flag{font:clamp(11px,.95vw,15px) var(--serif);margin-top:5px;color:#f6dbad}#next-flag:before{content:"";width:4px;height:4px;border-radius:100%;background:#f5cd89;display:inline-block;margin:0 6px 3px 0}
+.touch-line:before{inset:-3px calc(50% - 16px)}
+@media(max-height:410px) and (orientation:landscape){.game-top{gap:7px}.weather{display:block;padding-right:7px}.weather b{font-size:19px}.weather>span{font-size:10px}.weather>div{gap:4px}.weather svg{width:13px;height:13px}#next-flag{font-size:10px;margin-top:2px}}

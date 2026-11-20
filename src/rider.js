@@ -598,6 +598,9 @@ function buildBoot(batch, m, p, side, snowboard) {
       block(batch, m.alloy, i === 2 ? '#c19a68' : '#a8acaa', [side * .048, y, z + .025], [.007, .012, .031], [0, side * -.38, .10]);
     }
   });
+}
+
+function buildBinding(batch,m,p,side,snowboard) {
   if (snowboard) {
     // Highback, heel cup, ankle strap and toe cap rotate with the boot.
     batch.add(surface(15, 8, (u, v) => {
@@ -677,6 +680,32 @@ function makeDeck(batch, m, p, board, side) {
     const ink = '#d3bf91';
     cord(batch, m.hard, ink, [[-.043, .025, .37], [-.015, .025, .335], [.024, .025, .367], [.043, .025, .347]], .0020, 4);
   }
+}
+
+function flexibleDeck(node, board) {
+  const skins = node.children.filter(m => m.isMesh);
+  for (const skin of skins) {
+    const geometry = skin.geometry, a = geometry.attributes.position;
+    const nose = new Float32Array(a.count*3), tail = new Float32Array(a.count*3);
+    for (let i = 0; i < a.count; i++) {
+      const z = a.getZ(i);
+      const before = THREE.MathUtils.smoothstep(-z,.18,board ? .75:.90);
+      const after = THREE.MathUtils.smoothstep(z,.18,.73);
+      nose[i*3+1] = -.021*before + .008*after;
+      tail[i*3+1] = -.016*after + .012*before;
+    }
+    geometry.morphTargetsRelative = true;
+    geometry.morphAttributes.position = [
+      new THREE.BufferAttribute(nose,3),new THREE.BufferAttribute(tail,3)
+    ];
+    skin.updateMorphTargets();
+  }
+  return (front,back) => {
+    for (const skin of skins) {
+      skin.morphTargetInfluences[0] = front;
+      skin.morphTargetInfluences[1] = back;
+    }
+  };
 }
 
 function skiPole(batch, m, p, side) {
@@ -765,10 +794,16 @@ export function createRider(options = {}) {
   for (const s of [-1, 1]) {
     const prefix = s < 0 ? 'Left ' : 'Right ';
     const plank = deck || makePart(group, prefix + 'ski', b => makeDeck(b, m, palette, false, s));
-    const foot = makePart(plank, prefix + 'boot and binding', b => buildBoot(b, m, palette, s, board));
+    let foot;
     if (board) {
-      foot.position.set(0, 0, s * .275);
-      foot.rotation.y = s < 0 ? -1.22 : -1.66;
+      const binding = makePart(plank, prefix + 'binding', b => buildBinding(b,m,palette,s,true));
+      binding.position.set(0,0,s*.275); binding.rotation.y = s < 0 ? -1.22 : -1.66;
+      foot = makePart(plank, prefix + 'boot', b => buildBoot(b,m,palette,s,true));
+      foot.position.copy(binding.position); foot.rotation.copy(binding.rotation);
+    } else {
+      foot = makePart(plank, prefix + 'boot and binding', b => {
+        buildBoot(b,m,palette,s,false); buildBinding(b,m,palette,s,false);
+      });
     }
     const [thigh, shin] = tailoredLimb(group, prefix + 'trouser leg', leg1, .132,
       b => legGarment(b, m, palette, s, leg1, leg2));
@@ -777,107 +812,205 @@ export function createRider(options = {}) {
     const hand = makePart(group, prefix + 'glove', b => glove(b, m, palette, s));
     const pole = board ? null : makePart(group, prefix + 'pole', b => skiPole(b, m, palette, s));
     limbs.push({
-      s, plank, foot, thigh, shin, arm, forearm, hand, pole, hip: v3(), ankle: v3(), knee: v3(),
+      s, plank, foot, thigh, shin, arm, forearm, hand, pole,
+      flex: !board ? flexibleDeck(plank, false) : null, plant: null, lastStroke: 0,
+      hip: v3(), ankle: v3(), knee: v3(),
       shoulder: v3(), elbow: v3(), wrist: v3(), poleDirection: v3()
     });
   }
-  const bend = v3(), tmp = v3();
-  const posed = { turn: 0, brake: 0, air: 0, boost: 0, speed: 0, t: 0 };
+  const bend = v3(), tmp = v3(), contact = v3(), grip = v3(), leanQ = new THREE.Quaternion();
+  const deckFlex = board ? flexibleDeck(deck,true) : null;
+  const posed = {edge:0, chest:0, speed:0, t:0, turnSign:0, swing:0, lastSwap:-2};
+  const leanAxis = v3(0,0,-1);
   let disposed = false;
 
-  function update(state = {}) {
+  function update(state = {}, frameDt, clock) {
     if (disposed) return;
-    const dt = clamp(state.dt ?? 1 / 60, 0, .1);
-    posed.t = state.time ?? (posed.t + dt);
-    const factor = 1 - Math.exp(-dt * 15);
-    posed.turn = mix(posed.turn, clamp(state.steer || 0, -1, 1), factor);
-    posed.brake = mix(posed.brake, clamp(state.brake || 0, 0, 1), factor);
-    posed.air = mix(posed.air, clamp(state.air || 0, 0, 1), 1 - Math.exp(-dt * 23));
-    posed.boost = mix(posed.boost, clamp(state.boost || 0, 0, 1), factor);
-    posed.speed = mix(posed.speed, Math.max(0, state.speed || 0), 1 - Math.exp(-dt * 7));
-    const { turn, brake, air, boost, speed, t } = posed;
-    const fast = clamp(speed / 22, 0, 1);
-    const shuffle = state.walking && !board ? Math.sin(t * 5.05) : 0;
-    const edge = turn * (.24 + .76 * fast);
-    const load = Math.abs(edge);
-    const rebound = fast * (.0045 * Math.sin(t * 9.3) + .003 * Math.sin(t * 15.1 + .9)) * (1 - air);
-    const breath = .0028 * Math.sin(t * 2.1);
-    const gearPitch = air * -.085 + rebound * .07;
-    const gearYaw = -turn * (.025 + .1 * brake);
-    const pelvisYaw = (board ? -1.31 : 0) + gearYaw - edge * (board ? .11 : .075);
-    const chestYaw = (board ? -1.01 : 0) + gearYaw + edge * (board ? .15 : .12);
-    const height = (female ? .856 : .896) - (board ? .070 : 0) - .122 * fast -
-      .067 * load - .055 * brake - .054 * boost - .112 * air + rebound + breath;
-    const hipX = (board ? -.011 : 0) + edge * (board ? .105 : .157);
-    const hipZ = (board ? -.005 - .027 * fast : .044 + .039 * fast) + boost * .018 - brake * .014;
-    pelvis.position.set(hipX, height, hipZ);
-    pelvis.rotation.set(-.08 - fast * .056, pelvisYaw, -edge * .133, 'YXZ');
+    const dt = clamp(frameDt ?? state.dt ?? 1/60, 0, .1);
+    const time = clock ?? state.time ?? (posed.t + dt);
+    const rewound = time < posed.t - .05;
+    posed.t = time;
+    const drive = state.mode ? state.mode === 'run' : true;
+    const targetEdge = drive ? (state.edge ?? state.steer ?? 0) : 0;
+    const speed = drive ? Math.max(0,state.speed || 0) : 0;
+    const snapPose = !dt || rewound;
+    const ease = rate => snapPose ? 1 : 1-Math.exp(-dt*rate);
+    posed.edge = mix(posed.edge,targetEdge,ease(15));
+    posed.speed = mix(posed.speed,speed,ease(12));
+    const edge = posed.edge, turn = state.steer || 0, fast = clamp(posed.speed/21,0,1);
+    const moving = THREE.MathUtils.smoothstep(speed,.20,4);
+    const air = drive ? clamp(state.air ?? (state.airHeight || 0),0,1) : 0;
+    const inFlight = drive && (state.airborne ?? (air>.025));
+    const charge = drive ? (state.charge || 0) : 0, launch = drive ? (state.launch || 0) : 0;
+    const land = drive ? clamp(state.landing || 0,0,1.22) : 0;
+    const brake = drive ? (state.brake || 0) : 0, skid = drive ? (state.skid ?? brake*.73) : 0;
+    const boost = drive ? (state.boost || 0) : 0, trim = drive ? (state.trim || 0) : 0;
+    const cutSide = state.cutSide || Math.sign(edge || turn) || 1;
+    const slip = drive ? state.slipAngle || 0 : 0;
+    const pressure = drive ? clamp(state.pressure ?? Math.abs(edge)*moving,0,1.25) : 0;
+    const swap = drive ? state.bankSwap || 0 : 0;
+    const terrain = drive ? state.terrainFlex || 0 : 0;
+    const push = drive ? clamp(state.push ?? boost*(1-fast),0,1) : 0;
+    const stride = state.stride ?? (time*.91)%1;
+    const wave = Math.sin(stride*TAU), kick = THREE.MathUtils.smoothstep(stride,.08,.19) *
+      (1-THREE.MathUtils.smoothstep(stride,.82,.97));
+    const edgeSign = Math.abs(edge)>.12 ? Math.sign(edge) : 0;
+    if (edgeSign && edgeSign!==posed.turnSign) {
+      if (posed.turnSign && moving>.6 && time-posed.lastSwap>.30) posed.lastSwap=time;
+      posed.turnSign=edgeSign;
+    }
+    if (!drive || rewound) {posed.lastSwap=-2;posed.turnSign=0;}
+    const transferPlant = Math.max(0,1-(time-posed.lastSwap)/.23);
+    const compression = clamp(.13*fast+.071*pressure+.056*skid+.170*charge+.146*land+
+      .090*air+.038*terrain+.036*boost-.040*swap*pressure,0,.398);
+    const surfaceRide = moving*(.0045*Math.sin((state.travel??time*speed)*.69)+.003*Math.sin(time*7.2+.3))*(1-air);
+    const idle = .0045*Math.sin(time*1.75+.48);
+    const height = (female ? .867:.908) - (board ? .063:0) - compression + launch*.102 + surfaceRide + idle;
+    const lean = edge*(.13+.71*moving)*(.60+pressure*.24) + cutSide*skid*.060;
+    const intoX = .43+.57*Math.cos(slip), intoZ = -.57*Math.sin(slip);
+    const crossSlope = Math.sin(state.roll||0)*moving;
+    const hipX = (board?-.015:0) + lean*(board ? .302:.337)*intoX + wave*push*(board ? .055:.049)+crossSlope*.052;
+    const fore = trim*(board ? .174:.145);
+    const hipZ = (board?-.020:.052) + (board?-.025:.036)*fast - fore + lean*intoZ*.255 + .039*charge + .037*land;
+    const gearYaw = -edge*.024;
+    const pelvisYaw = (board?-1.33:0)+gearYaw+slip*(board ? .25:.28) - edge*(board ? .19:.092);
+    const chestTarget = (board?-.94:0) + slip*(board ? .73:.69) + edge*(board ? .25:.14)
+      + (board ? wave*push*.12 : wave*push*.091);
+    posed.chest = mix(posed.chest,chestTarget,ease(6.3));
+    const chestYaw = posed.chest;
+    const tuck = boost*(.28+.72*fast);
+    const bodyPitch = -.115-.235*fast-.205*tuck-.160*charge-.065*land-.060*pressure;
+    leanAxis.set(intoZ,0,-intoX).normalize();
+    pelvis.position.set(hipX,height,hipZ);
+    pelvis.rotation.set(-.078-.06*fast-.052*trim,pelvisYaw,.012*push*wave,'YXZ');
+    leanQ.setFromAxisAngle(leanAxis,lean*(board ? .295:.335)+crossSlope*.062);pelvis.quaternion.premultiply(leanQ);
     torso.position.copy(pelvis.position);
-    torso.rotation.set(-.13 - fast * .22 - boost * .16 + brake * .036 - air * .07,
-      chestYaw, -edge * (board ? .155 : .19) + .007 * Math.sin(t * 2), 'YXZ');
-    head.rotation.set(.096 + fast * .16 + boost * .12, board ? .76 - turn * .19 : -turn * .16,
-      edge * .065, 'YXZ');
+    torso.rotation.set(bodyPitch-(board?0:trim*.145),chestYaw,(board?-trim*.11:0)+.012*Math.sin(time*1.82),'YXZ');
+    leanQ.setFromAxisAngle(leanAxis,lean*(board ? .65:.61)+crossSlope*.135);torso.quaternion.premultiply(leanQ);
+    head.rotation.set(-bodyPitch*.66+air*.065,(board ? .76:0) - turn*.18+slip*.16,
+      lean*.23,'YXZ');
 
+    const press = drive ? (state.press ?? Math.sign(trim)*THREE.MathUtils.smoothstep(Math.abs(trim),.57,.98)) : 0;
+    const pressPitch = -press*(board ? .150 : .064);
+    const contactLift = Math.abs(Math.sin(pressPitch))*(board ? .62 : .65);
+    const boardPitch = air*(-.13 + (state.upSpeed<0 ? .19:0)) - trim*.010 + pressPitch + launch*.083;
+    const boardLift = air*.132;
+    const noseLoad=clamp(Math.max(0,trim)*.88+pressure*.24+land*.18,0,1);
+    const tailLoad=clamp(Math.max(0,-trim)*.85+charge*.28,0,1);
     if (deck) {
-      const roll = -edge * .56 - (brake * .21 * (turn < 0 ? -1 : 1));
-      deck.rotation.set(gearPitch, gearYaw, roll, 'YXZ');
-      deck.position.set(0, .002 + Math.abs(Math.sin(roll)) * .110, 0);
+      const roll = -(edge*(.28+.65*moving) + cutSide*skid*.08)*(1-.69*air);
+      deck.rotation.set(boardPitch,gearYaw,roll,'YXZ');
+      deck.position.set(0,.002+Math.abs(Math.sin(roll))*.116+boardLift+contactLift,0);
+      deckFlex(noseLoad,tailLoad);
     }
 
     for (const limb of limbs) {
-      const { s, plank, foot, hip, knee, ankle, shoulder, elbow, wrist } = limb;
-      if (!board) {
-        const step = s * shuffle;
-        const roll = -edge * (.48 + .06 * -Math.sign(edge) * s);
-        plank.rotation.set(gearPitch + air * s * .032 + step * .014, gearYaw + s * brake * .218 + s * air * .042,
-          roll, 'YXZ');
-        plank.position.set(s * (.145 + brake * .065 + air * .016),
-          .003 + Math.abs(Math.sin(roll)) * .049 + Math.max(0, step) * .013,
-          s * edge * -.050 + air * s * .061 - step * .105);
-      }
-
-      ankle.set(0, .196, .030).applyQuaternion(foot.quaternion).add(foot.position);
-      ankle.applyQuaternion(plank.quaternion).add(plank.position);
-      hip.set(s * hipWidth, -.007, .006).applyQuaternion(pelvis.quaternion).add(pelvis.position);
-      const legYaw = board ? foot.rotation.y + gearYaw : gearYaw + s * brake * .145;
-      bend.set(s * .085 + edge * .14, -.03, -1).applyAxisAngle(axisY, legYaw);
-      solveJoint(hip, ankle, bend, leg1, leg2, knee);
-      aimBone(limb.thigh, hip, knee, leg1, legYaw);
-      aimBone(limb.shin, knee, ankle, leg2, legYaw);
-
-      shoulder.set(s * width, .396, .009).applyQuaternion(torso.quaternion).add(torso.position);
-      const rhythm = Math.sin(t * 5.35 + (s > 0 ? Math.PI : 0)) * boost * (1 - fast * .78) * (1 - air) + s * shuffle * .72;
+      const {s,plank,foot,hip,knee,ankle,shoulder,elbow,wrist}=limb;
+      const inside = s*edge, outside = Math.max(0,-inside), insideLoad = Math.max(0,inside);
+      const phase = (stride+(s<0 ? .5:0))%1;
+      const stroke = Math.sin(phase*TAU), poling = push*stroke;
+      const recovered = phase>.53 ? Math.sin((phase-.53)/.47*Math.PI) : 0;
       if (board) {
-        wrist.set(s * (.392 + .066 * load + .067 * air + .026 * brake),
-          .057 + .112 * air + .053 * brake + s * edge * .080,
-          -.132 - fast * .044 + s * .045 - s * turn * .038);
+        if (s>0) {
+          const reach = kick*push;
+          foot.position.set(reach*(.245+.036*Math.sin(stride*Math.PI)),
+            reach*(stride>.6 ? .145*Math.sin((stride-.6)/.4*Math.PI):-.013),
+            .275+reach*(-.230+.64*THREE.MathUtils.smoothstep(stride,.17,.72)));
+          foot.rotation.y = -1.66 + reach*.89;
+        }
       } else {
-        wrist.set(s * (.263 + .051 * brake + .031 * load - boost * .025),
-          -.023 + .087 * fast + boost * .047 + air * .081 + rhythm * .044 - s * edge * .044,
-          -.213 - fast * .115 - boost * .053 + rhythm * .113 - s * edge * .039);
+        const step = state.walking ? s*Math.sin(time*5.05) : push*stroke;
+        const roll = -(edge*(.28+moving*(.47+.16*outside)) + cutSide*skid*.085) * (1-.76*air);
+        plank.rotation.set(boardPitch+air*s*.058+step*.024,gearYaw+s*brake*(1-skid)*.135+
+          s*air*.074-s*push*.064,roll,'YXZ');
+        plank.position.set(s*(.141+.035*pressure+.029*skid+.034*air+.025*push),
+          .002+Math.abs(Math.sin(roll))*.047+boardLift+contactLift+insideLoad*.007+Math.max(0,step)*.020,
+          -.094*insideLoad+.066*outside+air*s*.075-step*.126);
+        limb.flex(clamp(noseLoad*(.85+outside*.34),0,1),tailLoad);
       }
-      wrist.applyAxisAngle(axisY, chestYaw).add(torso.position);
-      tmp.subVectors(wrist, shoulder).clampLength(.12, arm1 + arm2 - .003);
-      wrist.copy(shoulder).add(tmp);
-      bend.set(s * .79, -.21, .80).applyAxisAngle(axisY, chestYaw);
-      solveJoint(shoulder, wrist, bend, arm1, arm2, elbow);
-      aimBone(limb.arm, shoulder, elbow, arm1, chestYaw);
-      aimBone(limb.forearm, elbow, wrist, arm2, chestYaw);
-      limb.hand.position.copy(wrist);
-      limb.hand.rotation.set(board ? -.16 - fast * .10 : .20 + fast * .28, chestYaw - s * .13,
-        s * .145 + edge * .065, 'YXZ');
 
+      ankle.set(0,.196,.030).applyQuaternion(foot.quaternion).add(foot.position);
+      ankle.applyQuaternion(plank.quaternion).add(plank.position);
+      hip.set(s*hipWidth,-.007,.006).applyQuaternion(pelvis.quaternion).add(pelvis.position);
+      if (!board) hip.y += outside*.036-insideLoad*.028;
+      const legYaw = board ? foot.rotation.y+gearYaw : gearYaw+slip*.10+s*brake*(1-skid)*.12;
+      bend.set(s*.11,-.03,-1).applyAxisAngle(axisY,legYaw);
+      bend.x+=edge*(board ? .19:.36); bend.z-=trim*.085;
+      solveJoint(hip,ankle,bend,leg1,leg2,knee);
+      aimBone(limb.thigh,hip,knee,leg1,legYaw);aimBone(limb.shin,knee,ankle,leg2,legYaw);
+
+      shoulder.set(s*width,.396,.009).applyQuaternion(torso.quaternion).add(torso.position);
+      const poleTap = s===posed.turnSign ? transferPlant : 0;
+      if (board) {
+        wrist.set(s*(.381+.085*pressure+.075*air+.068*land)-s*charge*.046,
+          .054+.12*air+.055*charge+s*edge*.14+recovered*push*.087,
+          -.166-.025*fast+s*.044-s*turn*.115+s*trim*.045);
+      } else {
+        wrist.set(s*(.259+.066*pressure+.045*skid-.037*tuck+.036*poleTap),
+          .018+.095*fast+.060*tuck+.075*air-.064*land-.045*charge+
+            poling*.093-s*edge*.092+recovered*push*.050-.045*poleTap,
+          -.226-.117*fast-.047*tuck-.039*trim+.18*poling-.088*poleTap-s*edge*.044);
+      }
+      wrist.applyAxisAngle(axisY,chestYaw).add(torso.position);
+      tmp.subVectors(wrist,shoulder).clampLength(.12,arm1+arm2-.002);
+      wrist.copy(shoulder).add(tmp);
+
+      // A planted pole tip briefly stays in the snow as the skier moves past it.
+      const worldPose = Number.isFinite(state.x) && Number.isFinite(state.z);
       if (limb.pole) {
-        const hold = tmp.set(-s * .008, -.065, -.013).applyQuaternion(limb.hand.quaternion).add(wrist);
+        if (!drive || inFlight || !worldPose || rewound) limb.plant=null;
+        const startPlant = (push>.25 && phase<.18 && (limb.lastStroke>=.18 || !limb.wasPushing)) ||
+          (poleTap>.8 && limb.lastStroke<.79 && push<.35);
+        if (!limb.plant && startPlant && drive && !inFlight && worldPose) {
+          contact.set(wrist.x+s*(.24+.065*pressure),.013,wrist.z-.34);
+          group.localToWorld(contact);
+          if (state.data?.height) contact.y=state.data.height(contact.x,contact.z)+.016;
+          limb.plant={point:contact.clone(),age:0,max:Math.min(.42,.98/Math.max(2.7,speed))};
+        }
+        limb.lastStroke = push>.25 ? phase : poleTap;limb.wasPushing=push>.25;
+        if (limb.plant) {
+          limb.plant.age+=dt;
+          contact.copy(limb.plant.point);group.worldToLocal(contact);
+          grip.copy(wrist);grip.y-=.062;
+          const d=grip.distanceTo(contact);
+          if (limb.plant.age>limb.plant.max || d>1.27 || d<.60) limb.plant=null;
+          else {
+            grip.sub(contact).setLength(1.135).add(contact);grip.y+=.062;
+            tmp.subVectors(grip,shoulder);
+            if(tmp.length()>arm1+arm2+.065)limb.plant=null;
+            else wrist.copy(shoulder).add(tmp.clampLength(.14,arm1+arm2-.001));
+          }
+        }
+      }
+
+      bend.set(s*(board ? .83:.78),-.18,.84).applyAxisAngle(axisY,chestYaw);
+      solveJoint(shoulder,wrist,bend,arm1,arm2,elbow);
+      aimBone(limb.arm,shoulder,elbow,arm1,chestYaw);aimBone(limb.forearm,elbow,wrist,arm2,chestYaw);
+      limb.hand.position.copy(wrist);
+      limb.hand.rotation.set(board?-.20-fast*.10:.20+fast*.25+poling*.23,
+        chestYaw-s*.14,s*.145+lean*.09,'YXZ');
+      if (limb.pole) {
+        const hold=tmp.set(-s*.008,-.065,-.013).applyQuaternion(limb.hand.quaternion).add(wrist);
         limb.pole.position.copy(hold);
-        const targetDrop = Math.max(.23, Math.min(1.04, hold.y - .035 - .08 * air - .038 * (rhythm + 1) * boost));
-        const spread = s * (.14 + .077 * brake);
-        const trail = Math.sqrt(Math.max(.01, 1.135 ** 2 - targetDrop ** 2 - spread ** 2));
-        limb.poleDirection.set(spread, -targetDrop, trail).normalize();
-        limb.pole.quaternion.setFromUnitVectors(axisDown, limb.poleDirection);
+        if (limb.plant) {
+          const length=limb.poleDirection.subVectors(contact,hold).length();
+          limb.poleDirection.multiplyScalar(1/Math.max(.001,length));
+          limb.pole.scale.y=clamp(length/1.135,.97,1.03);
+        } else {
+          const drop=clamp(hold.y-.11-.20*air-.16*recovered*push-.035*swap,.28,1.035);
+          const spread=s*(.165+.12*pressure+.084*poleTap);
+          const trail=Math.sqrt(Math.max(.01,1.135**2-drop**2-spread**2));
+          // Recover the shaft forward just before the next low-speed pole plant.
+          const reach = push*THREE.MathUtils.smoothstep(phase,.69,.90) +
+            (1-push)*poleTap*.65;
+          limb.poleDirection.set(spread+s*reach*.35,-drop,trail*(1-reach*1.45)).normalize();
+          limb.pole.scale.y=1;
+        }
+        limb.pole.quaternion.setFromUnitVectors(axisDown,limb.poleDirection);
       }
     }
   }
+
 
   function dispose() {
     if (disposed) return;
