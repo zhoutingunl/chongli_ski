@@ -682,13 +682,95 @@ function makeDeck(batch, m, p, board, side) {
   }
 }
 
+// The toe piece and sole stay on the deck. Only the shell above the ankle
+// hinge and its buckles follow the shin. Sin/cos weights describe the arc.
+function bootCuff(foot) {
+  const pivotY = .125, pivotZ = .032;
+  const meshes = foot.children.filter(part => part.isMesh);
+  for (const mesh of meshes) {
+    const geo = mesh.geometry, positions = geo.attributes.position;
+    const targets = Array.from({length: 4}, () => new Float32Array(positions.count * 3));
+    for (let i = 0; i < positions.count; i++) {
+      const y = positions.getY(i), weight = THREE.MathUtils.smoothstep(y, pivotY, .180);
+      if (!weight) continue;
+      const dx = positions.getX(i) * weight, dy = (y - pivotY) * weight;
+      const dz = (positions.getZ(i) - pivotZ) * weight, k = i * 3;
+      targets[0][k+1] = dz;  targets[0][k+2] = -dy;
+      targets[1][k+1] = -dy; targets[1][k+2] = -dz;
+      targets[2][k] = dy;    targets[2][k+1] = -dx;
+      targets[3][k] = -dx;   targets[3][k+1] = -dy;
+    }
+    geo.morphTargetsRelative = true;
+    geo.morphAttributes.position = targets.map(values => new THREE.BufferAttribute(values, 3));
+    mesh.updateMorphTargets();
+  }
+  return (pitch, cant, anchor) => {
+    const s = Math.sin(pitch), c = 1 - Math.cos(pitch);
+    const l = Math.sin(cant), r = 1 - Math.cos(cant);
+    for (const mesh of meshes) {
+      const w = mesh.morphTargetInfluences;
+      w[0] = s; w[1] = c; w[2] = l; w[3] = r;
+    }
+    const dy = .196 - pivotY, dz = .030 - pivotZ;
+    anchor.set(l * dy, .196 + s*dz - (c+r)*dy, .030 - s*dy - c*dz);
+  };
+}
+
+function springLegs(suspension, goal, frequency, dt, reset) {
+  if (reset || !suspension.ready) {
+    suspension.height = goal;
+    suspension.velocity = 0;
+    suspension.ready = true;
+  } else {
+    const difference = suspension.height - goal;
+    const impulse = suspension.velocity + frequency * difference;
+    const decay = Math.exp(-frequency * dt);
+    suspension.height = goal + (difference + impulse * dt) * decay;
+    suspension.velocity = (suspension.velocity - frequency * impulse * dt) * decay;
+  }
+  return suspension.height;
+}
+
+function readPiste(snow, state, speed, active) {
+  snow.available = active && state.data?.height && Number.isFinite(state.x) && Number.isFinite(state.z);
+  snow.normalLoad = 0;
+  if (!snow.available) return;
+  snow.map = state.data;
+  snow.x = state.x; snow.z = state.z;
+  const dir = state.heading ?? 0;
+  snow.sin = Math.sin(dir); snow.cos = Math.cos(dir);
+  const height = (dx, dz) => snow.map.height(snow.x + dx, snow.z + dz);
+  snow.ground = height(0, 0);
+  snow.across = (height(2*snow.cos, 2*snow.sin) - height(-2*snow.cos, -2*snow.sin)) * .25;
+  snow.back = (height(-2*snow.sin, 2*snow.cos) - height(2*snow.sin, -2*snow.cos)) * .25;
+  snow.vertical = 1 / Math.hypot(1, snow.across, snow.back);
+
+  // At a hollow the slope under the skis is flattening and the legs absorb
+  // excess load. A convex roll releases the load before the torso pitches over.
+  const travel = state.travelHeading ?? dir, sample = clamp(2.8 + speed*.41, 2.8, 12);
+  const dx = Math.sin(travel)*sample, dz = -Math.cos(travel)*sample;
+  const approach = Math.atan2(height(-dx,-dz)-snow.ground, sample);
+  const departure = Math.atan2(snow.ground-height(dx,dz), sample);
+  snow.normalLoad = clamp((approach-departure)*speed*speed/(9.81*sample), -.82, 1.28);
+}
+
+// Remove the common DEM tangent already applied by world.js. Only residual
+// relief under this edge changes its height and pitch relative to the rider.
+function snowUnder(snow, x, z) {
+  if (!snow.available) return 0;
+  const y = snow.map.height(snow.x+snow.cos*x-snow.sin*z, snow.z+snow.sin*x+snow.cos*z);
+  return clamp((y-snow.ground-snow.across*x-snow.back*z)*snow.vertical, -.08, .08);
+}
+
 function flexibleDeck(node, board) {
   const skins = node.children.filter(m => m.isMesh);
   for (const skin of skins) {
     const geometry = skin.geometry, a = geometry.attributes.position;
     const nose = new Float32Array(a.count*3), tail = new Float32Array(a.count*3);
+    const twist = board ? new Float32Array(a.count*3) : null;
     for (let i = 0; i < a.count; i++) {
       const z = a.getZ(i);
+      if (twist) twist[i*3+1] = a.getX(i) * (1 - 2*THREE.MathUtils.smoothstep(z,-.275,.275));
       const before = THREE.MathUtils.smoothstep(-z,.18,board ? .75:.90);
       const after = THREE.MathUtils.smoothstep(z,.18,.73);
       nose[i*3+1] = -.021*before + .008*after;
@@ -698,12 +780,14 @@ function flexibleDeck(node, board) {
     geometry.morphAttributes.position = [
       new THREE.BufferAttribute(nose,3),new THREE.BufferAttribute(tail,3)
     ];
+    if (twist) geometry.morphAttributes.position.push(new THREE.BufferAttribute(twist,3));
     skin.updateMorphTargets();
   }
-  return (front,back) => {
+  return (front,back,twist = 0) => {
     for (const skin of skins) {
       skin.morphTargetInfluences[0] = front;
       skin.morphTargetInfluences[1] = back;
+      if (board) skin.morphTargetInfluences[2] = Math.sin(twist);
     }
   };
 }
@@ -794,9 +878,9 @@ export function createRider(options = {}) {
   for (const s of [-1, 1]) {
     const prefix = s < 0 ? 'Left ' : 'Right ';
     const plank = deck || makePart(group, prefix + 'ski', b => makeDeck(b, m, palette, false, s));
-    let foot;
+    let foot, binding;
     if (board) {
-      const binding = makePart(plank, prefix + 'binding', b => buildBinding(b,m,palette,s,true));
+      binding = makePart(plank, prefix + 'binding', b => buildBinding(b,m,palette,s,true));
       binding.position.set(0,0,s*.275); binding.rotation.y = s < 0 ? -1.22 : -1.66;
       foot = makePart(plank, prefix + 'boot', b => buildBoot(b,m,palette,s,true));
       foot.position.copy(binding.position); foot.rotation.copy(binding.rotation);
@@ -812,7 +896,8 @@ export function createRider(options = {}) {
     const hand = makePart(group, prefix + 'glove', b => glove(b, m, palette, s));
     const pole = board ? null : makePart(group, prefix + 'pole', b => skiPole(b, m, palette, s));
     limbs.push({
-      s, plank, foot, thigh, shin, arm, forearm, hand, pole,
+      s, plank, foot, binding, thigh, shin, arm, forearm, hand, pole,
+      bendCuff: bootCuff(foot), anklePitch: .17, ankleCant: 0, relief: 0, pitchRelief: 0,
       flex: !board ? flexibleDeck(plank, false) : null, plant: null, lastStroke: 0,
       hip: v3(), ankle: v3(), knee: v3(),
       shoulder: v3(), elbow: v3(), wrist: v3(), poleDirection: v3()
@@ -820,7 +905,16 @@ export function createRider(options = {}) {
   }
   const bend = v3(), tmp = v3(), contact = v3(), grip = v3(), leanQ = new THREE.Quaternion();
   const deckFlex = board ? flexibleDeck(deck,true) : null;
-  const posed = {edge:0, chest:0, speed:0, t:0, turnSign:0, swing:0, lastSwap:-2};
+  const bootRotation = new THREE.Quaternion(), bootInverse = new THREE.Quaternion();
+  const gaze = new THREE.Quaternion(), zAxis = v3(0,0,1), legInBoot = v3(), sole = v3();
+  const aimEuler = new THREE.Euler(0,0,0,'YXZ');
+  const suspension = {height: 0, velocity: 0, ready: false};
+  const snow = {available: false, normalLoad: 0};
+  let previousMode, frontEdge = 0, rearEdge = 0, normalLoad = 0, supportedEdge = 0;
+  let centreRelief = 0, centrePitch = 0, stridePhase = 0, lastElapsed;
+
+  const posed = {edge:0, chest:0, speed:0, steer:0, grade:0, pressure:0, trim:0,
+    skid:0, slip:0, air:0, t:0, turnSign:0, lastSwap:-2, ready:false};
   const leanAxis = v3(0,0,-1);
   let disposed = false;
 
@@ -828,32 +922,71 @@ export function createRider(options = {}) {
     if (disposed) return;
     const dt = clamp(frameDt ?? state.dt ?? 1/60, 0, .1);
     const time = clock ?? state.time ?? (posed.t + dt);
-    const rewound = time < posed.t - .05;
+    const rewound = time < posed.t - .05 || state.elapsed < lastElapsed - .05;
+    const sameInstant = Math.abs(time - posed.t) < .00001;
     posed.t = time;
     const drive = state.mode ? state.mode === 'run' : true;
     const targetEdge = drive ? (state.edge ?? state.steer ?? 0) : 0;
     const speed = drive ? Math.max(0,state.speed || 0) : 0;
-    const snapPose = !dt || rewound;
+    const modeChanged = previousMode !== state.mode;
+    const snapPose = rewound || modeChanged || !posed.ready || (!dt && !sameInstant);
+    if (!dt && !snapPose) return;
+    previousMode = state.mode; lastElapsed = state.elapsed; posed.ready = true;
     const ease = rate => snapPose ? 1 : 1-Math.exp(-dt*rate);
     posed.edge = mix(posed.edge,targetEdge,ease(15));
     posed.speed = mix(posed.speed,speed,ease(12));
-    const edge = posed.edge, turn = state.steer || 0, fast = clamp(posed.speed/21,0,1);
-    const moving = THREE.MathUtils.smoothstep(speed,.20,4);
-    const air = drive ? clamp(state.air ?? (state.airHeight || 0),0,1) : 0;
-    const inFlight = drive && (state.airborne ?? (air>.025));
+    const moving = THREE.MathUtils.smoothstep(posed.speed,.20,4);
+    const fast = clamp(posed.speed/21,0,1), edge = posed.edge;
+    const incomingAir = drive ? clamp(state.air ?? (state.airHeight || 0),0,1) : 0;
+    const inFlight = drive && (state.airborne ?? (incomingAir>.025));
     const charge = drive ? (state.charge || 0) : 0, launch = drive ? (state.launch || 0) : 0;
     const land = drive ? clamp(state.landing || 0,0,1.22) : 0;
-    const brake = drive ? (state.brake || 0) : 0, skid = drive ? (state.skid ?? brake*.73) : 0;
-    const boost = drive ? (state.boost || 0) : 0, trim = drive ? (state.trim || 0) : 0;
+    const brake = drive ? (state.brake || 0) : 0, boost = drive ? (state.boost || 0) : 0;
+    posed.steer = mix(posed.steer,drive ? (state.steer || 0) : 0,ease(15));
+    posed.trim = mix(posed.trim,drive ? (state.trim || 0) : 0,ease(16));
+    posed.skid = mix(posed.skid,drive ? (state.skid ?? brake*.73) : 0,ease(14));
+    posed.slip = mix(posed.slip,drive ? (state.slipAngle || 0) : 0,ease(13));
+    posed.air = mix(posed.air,incomingAir,ease(inFlight ? 21 : 30));
+    posed.pressure = mix(posed.pressure,drive ? clamp(state.pressure ?? Math.abs(edge)*moving,0,1.25) : 0,ease(14));
+    const {steer:turn, trim, skid, slip, air, pressure} = posed;
     const cutSide = state.cutSide || Math.sign(edge || turn) || 1;
-    const slip = drive ? state.slipAngle || 0 : 0;
-    const pressure = drive ? clamp(state.pressure ?? Math.abs(edge)*moving,0,1.25) : 0;
     const swap = drive ? state.bankSwap || 0 : 0;
+    readPiste(snow,state,speed,drive && !inFlight);
+    normalLoad = mix(normalLoad,snow.normalLoad,ease(10.5));
+    posed.grade = mix(posed.grade,clamp((state.slope || 0)*Math.PI/180,-.77,1.08),ease(9.7));
+    const grade = posed.grade;
+    const steep = THREE.MathUtils.smoothstep(grade,.055,.63) * moving;
     const terrain = drive ? state.terrainFlex || 0 : 0;
-    const push = drive ? clamp(state.push ?? boost*(1-fast),0,1) : 0;
-    const stride = state.stride ?? (time*.91)%1;
-    const wave = Math.sin(stride*TAU), kick = THREE.MathUtils.smoothstep(stride,.08,.19) *
-      (1-THREE.MathUtils.smoothstep(stride,.82,.97));
+    const lip = Math.max(0,-normalLoad), hollow = Math.max(0,normalLoad);
+    // The front foot establishes the edge first. A phase lag along the
+    // snowboard produces torsional flex without rotating either sole off it.
+    frontEdge = mix(frontEdge,targetEdge,ease(17));
+    rearEdge = mix(rearEdge,targetEdge,ease(5.5));
+    const twist = board ? clamp((rearEdge-frontEdge)*.13,-.081,.081)*(1-air) : 0;
+    const entry = THREE.MathUtils.smoothstep(Math.abs(state.edgeRate || 0),.18,2.3) * moving;
+    const edgeGrowth = Math.sign(edge) * (state.edgeRate || 0);
+    const attack = THREE.MathUtils.smoothstep(edgeGrowth,.09,2.35) * moving;
+    const release = THREE.MathUtils.smoothstep(-edgeGrowth,.07,2.15) * moving;
+    supportedEdge = mix(supportedEdge,edge,ease(7.5));
+    const riderPush = drive ? clamp(state.push ?? boost*(1-fast),0,1) : 0;
+    // The route guide also supplies a skating push on slow, nearly level
+    // traverses. Give that impulse a recover/plant stroke with its own cadence.
+    const traverse = drive && state.opts?.assist && !inFlight ?
+      .74 * THREE.MathUtils.smoothstep(speed,.32,1.35) * (1-THREE.MathUtils.smoothstep(speed,2.8,3.7)) *
+      (1-THREE.MathUtils.smoothstep(grade,.015,.093)) * (1-brake)*(1-skid) : 0;
+    const push = Math.max(traverse,riderPush);
+    if (snapPose) stridePhase = state.stride ?? 0;
+    else if (push>.01) {
+      stridePhase += dt*(.71+speed*.047);
+      if (riderPush>.10 && Number.isFinite(state.stride)) {
+        const delta = (state.stride-stridePhase) * TAU;
+        stridePhase += Math.atan2(Math.sin(delta),Math.cos(delta))/TAU * ease(4.8);
+      }
+      stridePhase -= Math.floor(stridePhase);
+    }
+    const stride = stridePhase;
+    const wave = Math.sin(stride*TAU), kick = THREE.MathUtils.smoothstep(stride,.045,.265) *
+      (1-THREE.MathUtils.smoothstep(stride,.76,.987));
     const edgeSign = Math.abs(edge)>.12 ? Math.sign(edge) : 0;
     if (edgeSign && edgeSign!==posed.turnSign) {
       if (posed.turnSign && moving>.6 && time-posed.lastSwap>.30) posed.lastSwap=time;
@@ -861,47 +994,72 @@ export function createRider(options = {}) {
     }
     if (!drive || rewound) {posed.lastSwap=-2;posed.turnSign=0;}
     const transferPlant = Math.max(0,1-(time-posed.lastSwap)/.23);
-    const compression = clamp(.13*fast+.071*pressure+.056*skid+.170*charge+.146*land+
-      .090*air+.038*terrain+.036*boost-.040*swap*pressure,0,.398);
-    const surfaceRide = moving*(.0045*Math.sin((state.travel??time*speed)*.69)+.003*Math.sin(time*7.2+.3))*(1-air);
-    const idle = .0045*Math.sin(time*1.75+.48);
-    const height = (female ? .867:.908) - (board ? .063:0) - compression + launch*.102 + surfaceRide + idle;
-    const lean = edge*(.13+.71*moving)*(.60+pressure*.24) + cutSide*skid*.060;
+    const depth = .100*fast + .047*steep + .096*steep*fast +
+      (.060*pressure+.048*skid)*(1-.72*air);
+    const springLoad = hollow*.112 - lip*.055 + terrain*.046;
+    const closingSpeed = Math.max(0,(state.verticalAlong || 0) - (state.upSpeed || 0));
+    const impactSoon = inFlight && closingSpeed > .5
+      ? 1 - THREE.MathUtils.smoothstep((state.airHeight || 0)/closingSpeed,.045,.23) : 0;
+    const action = .173*charge + .177*land + .068*air*(1-impactSoon) + .036*boost;
+    const extension = .051*release + .034*swap*pressure + .038*impactSoon;
+    const compression = clamp(depth + springLoad + action - extension, -.325, .385);
+    const idle = .0038*Math.sin(time*1.75+.48);
+    const rhythm = push * (.017 * Math.sin(2*TAU*stride-.8) - .018*Math.max(0,Math.sin(TAU*stride)));
+    const restHeight = (female ? .898 : .939) - (board ? .055 : 0);
+    const targetHeight = restHeight - compression + launch*.093 + rhythm + idle;
+    const floorHeight = (board ? .475 : .493) + air * .063;
+    const height = springLegs(suspension,clamp(targetHeight,floorHeight,restHeight+.058),
+      land>.08 || launch>.26 ? 29 : 18,dt,snapPose);
+    const lean = (edge*(.13+.71*moving)*(.60+pressure*.24) + cutSide*skid*.060) * (1-.45*air);
     const intoX = .43+.57*Math.cos(slip), intoZ = -.57*Math.sin(slip);
     const crossSlope = Math.sin(state.roll||0)*moving;
-    const hipX = (board?-.015:0) + lean*(board ? .302:.337)*intoX + wave*push*(board ? .055:.049)+crossSlope*.052;
+    const angulation = supportedEdge * pressure * (board ? .027 : .046);
+    const hipX = (board ? -.015 : 0) + (lean*(board ? .310 : .351)+angulation)*intoX +
+      wave*push*(board ? .079 : .061)+crossSlope*.074;
     const fore = trim*(board ? .174:.145);
-    const hipZ = (board?-.020:.052) + (board?-.025:.036)*fast - fore + lean*intoZ*.255 + .039*charge + .037*land;
+    const footBalance = board ? -.084*attack + .053*release + .055*skid + wave*push*.051 : -.025*attack;
+    const hipZ = (board ? -.020 : .050) + (board ? -.021 : .054)*fast - fore +
+      lean*intoZ*.249 + footBalance + .046*charge + .057*land + .029*hollow;
     const gearYaw = -edge*.024;
-    const pelvisYaw = (board?-1.33:0)+gearYaw+slip*(board ? .25:.28) - edge*(board ? .19:.092);
+    const pelvisYaw = (board?-1.33:0)+gearYaw+slip*(board ? .25:.28) - edge*(board ? .213 : .103)+(board ? (frontEdge-rearEdge)*.13 : 0);
     const chestTarget = (board?-.94:0) + slip*(board ? .73:.69) + edge*(board ? .25:.14)
       + (board ? wave*push*.12 : wave*push*.091);
     posed.chest = mix(posed.chest,chestTarget,ease(6.3));
     const chestYaw = posed.chest;
     const tuck = boost*(.28+.72*fast);
-    const bodyPitch = -.115-.235*fast-.205*tuck-.160*charge-.065*land-.060*pressure;
+    const bodyPitch = -.11-.205*fast-.108*steep-.120*fast*steep-.178*tuck-.125*charge-
+      .072*land-.054*pressure+.030*hollow;
+    const hipTwist = board ? trim*.106 + attack*.087 - release*.073 : 0;
     leanAxis.set(intoZ,0,-intoX).normalize();
     pelvis.position.set(hipX,height,hipZ);
-    pelvis.rotation.set(-.078-.06*fast-.052*trim,pelvisYaw,.012*push*wave,'YXZ');
+    pelvis.rotation.set(-.068-.09*fast-.054*steep-.050*trim,pelvisYaw,hipTwist+.020*push*wave,'YXZ');
     leanQ.setFromAxisAngle(leanAxis,lean*(board ? .295:.335)+crossSlope*.062);pelvis.quaternion.premultiply(leanQ);
     torso.position.copy(pelvis.position);
     torso.rotation.set(bodyPitch-(board?0:trim*.145),chestYaw,(board?-trim*.11:0)+.012*Math.sin(time*1.82),'YXZ');
     leanQ.setFromAxisAngle(leanAxis,lean*(board ? .65:.61)+crossSlope*.135);torso.quaternion.premultiply(leanQ);
-    head.rotation.set(-bodyPitch*.66+air*.065,(board ? .76:0) - turn*.18+slip*.16,
-      lean*.23,'YXZ');
+    // Neck counter-rotation keeps the sight line down the run while the
+    // hips and shoulders work underneath it during edge changes.
+    aimEuler.set(-.045-.060*fast+.21*grade+.047*air,
+      (board ? -.18 : 0)+slip*.81-turn*.13+(board ? .035*trim : 0),
+      -.15*lean-.21*crossSlope,'YXZ');
+    gaze.setFromEuler(aimEuler);
+    head.quaternion.copy(torso.quaternion).invert().multiply(gaze);
 
     const press = drive ? (state.press ?? Math.sign(trim)*THREE.MathUtils.smoothstep(Math.abs(trim),.57,.98)) : 0;
     const pressPitch = -press*(board ? .150 : .064);
     const contactLift = Math.abs(Math.sin(pressPitch))*(board ? .62 : .65);
     const boardPitch = air*(-.13 + (state.upSpeed<0 ? .19:0)) - trim*.010 + pressPitch + launch*.083;
-    const boardLift = air*.132;
+    const boardLift = inFlight ? air*(.112-.071*impactSoon) : 0;
     const noseLoad=clamp(Math.max(0,trim)*.88+pressure*.24+land*.18,0,1);
     const tailLoad=clamp(Math.max(0,-trim)*.85+charge*.28,0,1);
     if (deck) {
       const roll = -(edge*(.28+.65*moving) + cutSide*skid*.08)*(1-.69*air);
-      deck.rotation.set(boardPitch,gearYaw,roll,'YXZ');
-      deck.position.set(0,.002+Math.abs(Math.sin(roll))*.116+boardLift+contactLift,0);
-      deckFlex(noseLoad,tailLoad);
+      const foreSnow = snowUnder(snow,0,-.58), aftSnow = snowUnder(snow,0,.58);
+      centreRelief = mix(centreRelief, (foreSnow+aftSnow)*.5,ease(18));
+      centrePitch = mix(centrePitch,Math.atan2(foreSnow-aftSnow,1.16),ease(18));
+      deck.rotation.set(boardPitch+centrePitch,gearYaw,roll,'YXZ');
+      deck.position.set(0,.002+Math.abs(Math.sin(roll))*.116+boardLift+contactLift+centreRelief,0);
+      deckFlex(noseLoad,tailLoad,twist);
     }
 
     for (const limb of limbs) {
@@ -910,34 +1068,86 @@ export function createRider(options = {}) {
       const phase = (stride+(s<0 ? .5:0))%1;
       const stroke = Math.sin(phase*TAU), poling = push*stroke;
       const recovered = phase>.53 ? Math.sin((phase-.53)/.47*Math.PI) : 0;
+      const timing = board ? (s<0 ? frontEdge : rearEdge) : supportedEdge;
       if (board) {
+        const turnInBoot = s<0 ? -1.22 : -1.66;
+        const torsionHere = -s*twist;
+        limb.binding.rotation.set(0,turnInBoot,0);
+        leanQ.setFromAxisAngle(zAxis,torsionHere);
+        limb.binding.quaternion.premultiply(leanQ);
+        foot.quaternion.copy(limb.binding.quaternion);
         if (s>0) {
           const reach = kick*push;
-          foot.position.set(reach*(.245+.036*Math.sin(stride*Math.PI)),
-            reach*(stride>.6 ? .145*Math.sin((stride-.6)/.4*Math.PI):-.013),
-            .275+reach*(-.230+.64*THREE.MathUtils.smoothstep(stride,.17,.72)));
-          foot.rotation.y = -1.66 + reach*.89;
+          const recover = stride>.60 ? Math.sin((stride-.60)/.4*Math.PI) : 0;
+          foot.position.set(reach*(.243+.048*Math.sin(stride*Math.PI)),
+            reach*recover*.136 + push*kick*(1-kick)*.30,
+            .275+reach*(-.260+.685*THREE.MathUtils.smoothstep(stride,.14,.72)));
+          foot.rotation.set(-reach*.24*recover,turnInBoot+reach*.91,0,'YXZ');
+          leanQ.setFromAxisAngle(zAxis,torsionHere*(1-reach));foot.quaternion.premultiply(leanQ);
+          if (reach>.01) {
+            // Clear the highback on release, then place the loose boot on the
+            // snow beside the board, including when the deck is on an edge.
+            let clearance = Infinity;
+            for (const end of [-.147,.125]) {
+              sole.set(0,.044,end).applyQuaternion(foot.quaternion).add(foot.position)
+                .applyQuaternion(plank.quaternion).add(plank.position);
+              clearance = Math.min(clearance,sole.y-snowUnder(snow,sole.x,sole.z));
+            }
+            const loose = THREE.MathUtils.smoothstep(reach,.32,.95);
+            const correction = (.005 + recover*.136*reach - clearance) * loose;
+            const deckUp = sole.set(0,1,0).applyQuaternion(plank.quaternion).y;
+            foot.position.y += Math.max(-clearance,correction)/Math.max(.55,deckUp);
+          }
         }
       } else {
         const step = state.walking ? s*Math.sin(time*5.05) : push*stroke;
         const roll = -(edge*(.28+moving*(.47+.16*outside)) + cutSide*skid*.085) * (1-.76*air);
-        plank.rotation.set(boardPitch+air*s*.058+step*.024,gearYaw+s*brake*(1-skid)*.135+
-          s*air*.074-s*push*.064,roll,'YXZ');
-        plank.position.set(s*(.141+.035*pressure+.029*skid+.034*air+.025*push),
-          .002+Math.abs(Math.sin(roll))*.047+boardLift+contactLift+insideLoad*.007+Math.max(0,step)*.020,
-          -.094*insideLoad+.066*outside+air*s*.075-step*.126);
+        const lateral = s*(.141+.035*pressure+.029*skid+.034*air+.029*push);
+        const advance = -.128*insideLoad+.078*outside+air*s*.080-step*.145;
+        const foreSnow = snowUnder(snow,lateral,advance-.62), aftSnow = snowUnder(snow,lateral,advance+.55);
+        limb.relief = mix(limb.relief,(foreSnow+aftSnow)*.5,ease(18));
+        limb.pitchRelief = mix(limb.pitchRelief,Math.atan2(foreSnow-aftSnow,1.17),ease(18));
+        plank.rotation.set(boardPitch+limb.pitchRelief+air*s*.058+step*.024,
+          gearYaw+s*brake*(1-skid)*.135+s*air*.074-s*push*.097,roll,'YXZ');
+        plank.position.set(lateral,.002+Math.abs(Math.sin(roll))*.047+boardLift+contactLift+
+          limb.relief+insideLoad*.006+Math.max(0,step)*.026,advance);
         limb.flex(clamp(noseLoad*(.85+outside*.34),0,1),tailLoad);
       }
 
+      bootRotation.multiplyQuaternions(plank.quaternion,foot.quaternion);
+      bootInverse.copy(bootRotation).invert();
       ankle.set(0,.196,.030).applyQuaternion(foot.quaternion).add(foot.position);
       ankle.applyQuaternion(plank.quaternion).add(plank.position);
       hip.set(s*hipWidth,-.007,.006).applyQuaternion(pelvis.quaternion).add(pelvis.position);
-      if (!board) hip.y += outside*.036-insideLoad*.028;
-      const legYaw = board ? foot.rotation.y+gearYaw : gearYaw+slip*.10+s*brake*(1-skid)*.12;
-      bend.set(s*.11,-.03,-1).applyAxisAngle(axisY,legYaw);
-      bend.x+=edge*(board ? .19:.36); bend.z-=trim*.085;
+      if (board) {
+        const lead = s<0 ? 1 : -1;
+        hip.y -= lead*(trim*.039 + attack*.029 - release*.021);
+      } else {
+        hip.y += outside*(.037+.023*steep)-insideLoad*(.033+.014*pressure);
+      }
+      const bootYaw = board ? (s<0 ? -1.22 : -1.66)+gearYaw+(s>0 ? kick*push*.91 : 0) :
+        gearYaw+slip*.10+s*brake*(1-skid)*.12;
+      bend.set(s*.102,-.035,-1).applyAxisAngle(axisY,bootYaw);
+      if (board) {
+        bend.x += timing*(s<0 ? .31 : .20) + .068*(s<0 ? attack : -release);
+        bend.z += s*(.12+.22*pressure)-trim*.16-(s<0 ? .20*attack : -.13*release);
+      } else {
+        bend.x += edge*(.32+.17*outside)+s*.055*push*stroke;
+        bend.z -= trim*.104+insideLoad*.16+.061*steep;
+      }
+      // Solve once to measure shin demand, tilt the boot cuff about its
+      // hinge, and solve to the displaced cuff anchor. The sole never slides.
       solveJoint(hip,ankle,bend,leg1,leg2,knee);
-      aimBone(limb.thigh,hip,knee,leg1,legYaw);aimBone(limb.shin,knee,ankle,leg2,legYaw);
+      legInBoot.subVectors(knee,ankle).applyQuaternion(bootInverse);
+      const shinFlex = Math.atan2(-legInBoot.z,legInBoot.y);
+      const flexion = board ? clamp(.045+.66*shinFlex,-.15,.63) : clamp(.035+.48*shinFlex,-.065,.51);
+      const cant = clamp(Math.atan2(legInBoot.x,legInBoot.y),board ? -.34 : -.118,board ? .34 : .118);
+      limb.anklePitch = mix(limb.anklePitch,flexion,ease(18));
+      limb.ankleCant = mix(limb.ankleCant,cant,ease(18));
+      limb.bendCuff(limb.anklePitch,limb.ankleCant,ankle);
+      ankle.applyQuaternion(foot.quaternion).add(foot.position).applyQuaternion(plank.quaternion).add(plank.position);
+      solveJoint(hip,ankle,bend,leg1,leg2,knee);
+      aimBone(limb.thigh,hip,knee,leg1,bootYaw);aimBone(limb.shin,knee,ankle,leg2,bootYaw);
 
       shoulder.set(s*width,.396,.009).applyQuaternion(torso.quaternion).add(torso.position);
       const poleTap = s===posed.turnSign ? transferPlant : 0;
@@ -950,6 +1160,20 @@ export function createRider(options = {}) {
           .018+.095*fast+.060*tuck+.075*air-.064*land-.045*charge+
             poling*.093-s*edge*.092+recovered*push*.050-.045*poleTap,
           -.226-.117*fast-.047*tuck-.039*trim+.18*poling-.088*poleTap-s*edge*.044);
+      }
+      // Hands continue down the fall line through the initial leg compression;
+      // in a fast tuck the elbows draw in and the grips move ahead of the knees.
+      const steadyHand = clamp(-suspension.velocity*.048,-.055,.073);
+      wrist.y += steadyHand;
+      if (board) {
+        wrist.x += s*(hollow*.034 + entry*.033);
+        wrist.y += s*(frontEdge-rearEdge)*.075 + (s<0 ? .041*attack : -.024*attack);
+        wrist.z += s*(.096*attack - .055*release) - .025*steep;
+      } else {
+        wrist.x -= s*steep*fast*.042;
+        wrist.y += steep*fast*.137 + tuck*.058 + recovered*push*.026;
+        wrist.z -= moving*.028 + steep*fast*.188 + tuck*.062 +
+          recovered*push*.090 + outside*.031 + poleTap*.035;
       }
       wrist.applyAxisAngle(axisY,chestYaw).add(torso.position);
       tmp.subVectors(wrist,shoulder).clampLength(.12,arm1+arm2-.002);
@@ -1011,6 +1235,39 @@ export function createRider(options = {}) {
     }
   }
 
+  const decks = [...new Set(limbs.map(limb => limb.plank))];
+  const noseWeights = decks.map(plank => plank.children[0].morphTargetInfluences);
+  const nosePoint = v3();
+  let visibility = 'body';
+
+  function setVisibility(mode = 'body') {
+    const next = mode === 'first' || mode === 'tips' ? mode : 'body';
+    if (next === visibility) return;
+    visibility = next;
+    for (const part of group.children) {
+      part.visible = next === 'body' || decks.includes(part) ||
+        (next === 'first' && part !== torso && part !== pelvis);
+    }
+  }
+
+  // Optical centre between the lenses, with all neck and torso articulation applied.
+  // Both camera anchors are returned in rider-group coordinates (metres).
+  function eyePosition(out = v3()) {
+    return out.set(0, .153, -.113).applyQuaternion(head.quaternion).add(head.position)
+      .applyQuaternion(torso.quaternion).add(torso.position);
+  }
+
+  function tipPosition(out = v3()) {
+    out.set(0, 0, 0);
+    for (let i = 0; i < decks.length; i++) {
+      const plank = decks[i], weights = noseWeights[i];
+      const height = (board ? .098 : .119) + .0017 - .021*weights[0] + .012*weights[1];
+      nosePoint.set(0, height, board ? -.80 : -.96);
+      nosePoint.applyQuaternion(plank.quaternion).add(plank.position);
+      out.add(nosePoint);
+    }
+    return out.multiplyScalar(1 / decks.length);
+  }
 
   function dispose() {
     if (disposed) return;
@@ -1027,5 +1284,5 @@ export function createRider(options = {}) {
   }
 
   update();
-  return { group, update, dispose };
+  return { group, update, setVisibility, eyePosition, tipPosition, dispose };
 }

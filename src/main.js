@@ -14,7 +14,7 @@ const prefKey='ridgeline.preferences.v1',recordKey='ridgeline.descents.v1';
 function read(key,fallback){try{return JSON.parse(localStorage.getItem(key))??fallback;}catch{return fallback;}}
 function store(key,value){try{localStorage.setItem(key,JSON.stringify(value));}catch{}}
 const previous=read(prefKey,{});
-const prefs={resort:'wanlong',gear:'ski',gender:'male',color:'#aa5536',view:'follow',quality:'auto',assist:true,sound:false,controls:true,
+const prefs={resort:'wanlong',gear:'ski',gender:'male',color:'#aa5536',view:'first',outsideView:'follow',quality:'auto',assist:true,sound:false,controls:true,
   time:'auto',weather:'auto',language:'zh',music:true,followMusic:true,track:'ridge',volume:75,tilt:false,...previous};
 if(!previous.time&&previous.env){
   prefs.time=({morning:'day',noon:'day',snow:'day',dusk:'sunset'})[previous.env]||'auto';
@@ -22,13 +22,17 @@ if(!previous.time&&previous.env){
 }
 if(!timeOptions.some(o=>o.id===prefs.time))prefs.time='auto';
 if(!weatherOptions.some(o=>o.id===prefs.weather))prefs.weather='auto';
-if(!viewNames[prefs.view])prefs.view='follow';
+if(!viewNames[prefs.view])prefs.view='first';
+if(!viewNames[prefs.outsideView]||prefs.outsideView==='first')prefs.outsideView='follow';
 prefs.volume=clamp(Number.isFinite(+prefs.volume)?+prefs.volume:75,0,100);
 const colors={'#aa5536':'赭红','#ba9041':'麦金','#597b78':'松绿','#476d91':'冰蓝','#c5c3b6':'雪灰'};
 const sound=new MountainSound(),music=new MountainMusic(sound);
 let data,world,mini,large,routeId=prefs.resort+'-classic',mapId=routeId,summitChoice='';
 let screen='home',page='',photoOrigin='run',recordTab='times',busy=false,toastTimer,focusBack,restoreRequested=false,recorded=false,tray=false;
-const keys=new Set(),holds=new Set(),touches=new Map();let drag=0,trim=0,multi=null;
+const keys=new Set(),holds=new Set(),touches=new Map(),drivePointers=new Map();
+let drag=0,trim=0,multi=null,backDepart=false;
+const keyDirection={ArrowUp:'up',KeyW:'up',ArrowLeft:'left',KeyA:'left',ArrowDown:'down',KeyS:'down',ArrowRight:'right',KeyD:'right'};
+const departureTurn={up:0,left:-Math.PI/2,right:Math.PI/2,down:Math.PI};
 const touchDevice=matchMedia('(pointer:coarse)').matches||navigator.maxTouchPoints>0;
 document.documentElement.classList.toggle('touch',touchDevice);
 const save=()=>store(prefKey,prefs);
@@ -52,6 +56,18 @@ function refreshSound(){
   $$('[data-act="sound"]').filter(b=>b.classList.contains('icon-disc')||b.closest('.hud-tools')).forEach(b=>{
     b.innerHTML=glyph(prefs.sound?'sound':'mute',19);b.setAttribute('aria-label',prefs.sound?t('关闭环境音','Mute environmental sound'):t('开启环境音','Enable environmental sound'));b.setAttribute('aria-pressed',String(prefs.sound));
   });
+}
+function showCameraMode(){
+  const first=prefs.view==='first',control=$('[data-act="pov"]');
+  $('#pov-icon').innerHTML=glyph(first?'eye':'ski',16);$('#pov-label').textContent=label(viewNames[prefs.view]);
+  const to=label(viewNames[first?prefs.outsideView:'first']);
+  control.title=control.ariaLabel=t('切换至'+to+'视角','Switch to '+to+' camera');
+  control.setAttribute('aria-pressed',String(first));control.hidden=screen==='lift';
+}
+function switchCamera(view){
+  if(!viewNames[view])return;
+  prefs.view=view;if(view!=='first')prefs.outsideView=view;
+  world?.cameraChanged();showCameraMode();save();if(watching())hudVisible(true);
 }
 function homeChoices(){
   $('#resort-choices').innerHTML=choice('resort','wanlong',resort('wanlong'),prefs.resort)+choice('resort','genting',resort('genting'),prefs.resort);
@@ -85,31 +101,50 @@ function setupText(){
   }
   $$('.control').forEach(b=>b.textContent=label({boost:'加速',brake:'刹车',jump:'跳'}[b.dataset.hold]));
   $('[data-hold="jump"]').setAttribute('aria-label',t('按住蓄力，松开起跳','Hold to charge, release to jump'));
-  $('#station-card [data-act="map"]').textContent=label('选择雪道');
+  $('#station-card [data-act="map"]').textContent=t('地图选道','Trail map');
+  $('#direction-pad').setAttribute('aria-label',t('滑行方向','Riding directions'));
+  const directions={up:t('向前起滑或加速','Push off forward or tuck'),left:t('向左起滑或转弯','Push off or turn left'),right:t('向右起滑或转弯','Push off or turn right'),down:t('向后起滑或刹车','Push off behind or brake')};
+  for(const key of $$('.dir-key')){key.ariaLabel=directions[key.dataset.drive];key.title=key.ariaLabel;}
+  $('#look-reset-text').textContent=t('回正视线','Face forward');showCameraMode();
   $('#station-card [data-act="launch-trail"]').textContent=t('从这里出发','Start here');
-  $('#steering>span').textContent=t('按住雪面，左右拖动','Drag the snow to steer');
+  $('#steering>span').textContent=t('左侧转弯 · 右侧环顾','Steer left · look right');
   $('#steering').setAttribute('aria-label',t('左右拖动转弯','Drag to steer'));
-  $('#keyboard-hint').innerHTML=t('A / D 转弯 <i></i> W 加速 <i></i> S 刹车 <i></i> 空格蓄力跳','A / D steer <i></i> W tuck <i></i> S brake <i></i> Hold Space to jump');
+  $('#keyboard-hint').innerHTML=t('方向键滑行 <i></i> 鼠标拖动环顾 <i></i> R 回正 <i></i> 空格蓄力跳','Arrows to ski <i></i> Drag to look <i></i> R to face forward <i></i> Hold Space to jump');
   $('#overlay').setAttribute('aria-label',label('设置'));$('.top-tools [data-act="sound"]').title=t('环境音','Environmental sound');
   $$('.mini-open,[data-glyph]').forEach(el=>el.innerHTML=glyph(el.dataset.glyph));
   homeChoices();refreshSound();if(world?.sim.route)paintHUD();
 }
 async function ensureData(){if(data)return data;data=await loadMountain();if(!mini){mini=new TrailMap($('#mini-map'),data,true);mini.select(selectedRoute());}return data;}
 function clearInputs(){
-  keys.clear();holds.clear();touches.clear();multi=null;drag=trim=0;world?.sim.cancelJump?.();world?.releaseOrbit();updateInputs();
+  keys.clear();holds.clear();touches.clear();drivePointers.clear();backDepart=false;multi=null;drag=trim=0;
+  world?.sim.cancelJump?.();updateInputs();
 }
 function updateInputs(){
-  const active=screen==='run'&&!page&&!busy,keyboard=Number(keys.has('ArrowRight')||keys.has('KeyD'))-Number(keys.has('ArrowLeft')||keys.has('KeyA'));
-  const lateral=clamp(keyboard*(keys.has('ShiftLeft')||keys.has('ShiftRight')?1:.68)+(touches.size?drag:keyboard?0:tilt.value),-1,1);
-  if(world){world.input.steer=active?lateral:0;world.input.trim=active?clamp(trim+Number(keys.has('KeyI'))-Number(keys.has('KeyK')),-1,1):0;
-    world.input.brake=active&&(holds.has('brake')||keys.has('ArrowDown')||keys.has('KeyS'));
-    world.input.boost=active&&(holds.has('boost')||keys.has('ArrowUp')||keys.has('KeyW'));}
+  const active=screen==='run'&&!page&&!busy,viewActive=inWorld()&&!page&&!busy;
+  const physical=new Set(drivePointers.values());
+  for(const key of keys){if(keyDirection[key])physical.add(keyDirection[key]);}
+  const keyboard=Number(physical.has('right'))-Number(physical.has('left'));
+  const hasTouchSteer=!multi&&[...touches.values()].some(p=>p.role==='steer');
+  const lateral=clamp(keyboard*(keys.has('ShiftLeft')||keys.has('ShiftRight')?1:.68)+(hasTouchSteer?drag:keyboard?0:tilt.value),-1,1);
+  if(!physical.has('down'))backDepart=false;
+  if(world){
+    world.input.lookX=viewActive?Number(keys.has('KeyL'))-Number(keys.has('KeyJ')):0;
+    world.input.lookY=viewActive?Number(keys.has('KeyU'))-Number(keys.has('KeyO')):0;
+    world.input.steer=active?lateral:0;
+    world.input.trim=active?clamp(trim+Number(keys.has('KeyI'))-Number(keys.has('KeyK')),-1,1):0;
+    world.input.brake=active&&(holds.has('brake')||(physical.has('down')&&!backDepart));
+    world.input.boost=active&&(holds.has('boost')||physical.has('up'));
+  }
+  for(const b of $$('.dir-key'))b.classList.toggle('active',physical.has(b.dataset.drive));
   for(const b of $$('[data-hold]'))b.classList.toggle('active',active&&(b.dataset.hold==='jump'?(holds.has('jump')||keys.has('Space')):!!world?.input[b.dataset.hold]));
   $('#steering').style.setProperty('--drag',(lateral*22)+'px');$('#steering').classList.toggle('edge-set',active&&Math.abs(lateral)>.72);
 }
 function hudVisible(show){
   $('#home').hidden=screen!=='home';$('#hud').hidden=!show||!!page;$('#photo-bar').hidden=screen!=='photo';
   document.documentElement.classList.toggle('hud-minimal',!prefs.controls||screen!=='run');
+  $('#direction-pad').hidden=!inWorld()||screen==='lift'||(!watching()&&!prefs.controls);
+  $('#look-reset').hidden=!world?.looking||!!page;
+  if(screen!=='home')showCameraMode();
   $('#hud').classList.toggle('watching',watching());$('#lift-strip').hidden=screen!=='lift';$('#station-card').hidden=!watching();
   $('#tray-tools').hidden=!tray;$('#tray-toggle').setAttribute('aria-expanded',String(tray));$('#near-lift').hidden=true;
   if(watching()){
@@ -139,12 +174,40 @@ function launch(route){
   discardMap();page='';$('#overlay').hidden=true;routeId=route.id;prefs.resort=route.resort;save();
   recorded=false;screen='run';tray=false;clearInputs();tilt.calibrate();world.start(route);hudVisible(true);paintHUD();refreshMusic();
 }
+function pushOff(direction,sign){
+  if(!watching()||page||busy||!world)return false;
+  const route=world.pushOff(departureTurn[direction]??0,sign?.routeId||summitChoice||undefined,sign?.heading);
+  if(!route)return false;
+  recorded=false;screen='run';tray=false;routeId=route.id;prefs.resort=route.resort;save();
+  tilt.calibrate();hudVisible(true);paintHUD();refreshMusic();return true;
+}
+function beginDirection(direction){
+  const departing=watching();
+  if(departing&&!pushOff(direction))return false;
+  if(screen!=='run')return false;
+  // Backward on the stationary pad chooses the outlet behind the rider.
+  // Subsequent down presses operate the brake normally.
+  if(departing&&direction==='down')backDepart=true;
+  if(!departing&&direction!=='down'&&!world.sim.airborne&&world.sim.speed<.18)
+    world.sim.speed=1.35;
+  return true;
+}
+function selectSign(sign){
+  if(!sign?.routeId)return;
+  if(watching()){pushOff('up',sign);return;}
+  if(screen==='run'&&world.sim.chooseDirection(sign.routeId,sign.signId)){
+    const route=data.routes.find(r=>r.id===sign.routeId);
+    if(route)announce(t('岔口转入','At the junction · ')+label(route.name));
+  }
+}
 function home(){
   clearInputs();world?.stop();screen='home';page='';discardMap();$('#overlay').hidden=true;$('#fork-prompt').hidden=true;
   homeChoices();hudVisible(false);sound.update(0,0);refreshMusic();
 }
 function worldEvent(type,arg){
-  if(type==='hud'&&inWorld()&&!page){paintHUD();sound.update(screen==='lift'?3:arg.speed,(arg.skid||0)*.65+(arg.brake||0)*.6,document.hidden);refreshMusic();}
+  if(type==='hud'&&inWorld()&&!page){
+    if(screen==='run'&&arg.route?.id!==routeId){routeId=arg.route.id;announce(t('转入','Joined ')+label(arg.route.name));}
+    paintHUD();sound.update(screen==='lift'?3:arg.speed,(arg.skid||0)*.65+(arg.brake||0)*.6,document.hidden);refreshMusic();}
   if(type==='finish'&&!recorded){
     recorded=true;screen='finish';const records=read(recordKey,[]);
     records.push({routeId:arg.route.id,name:arg.route.name,resort:arg.route.destination,when:new Date().toISOString(),gear:prefs.gear,time:Math.round(arg.elapsed),max:arg.maxSpeed*3.6,dist:arg.travel,drop:Math.round(arg.startY-arg.ground)});
@@ -161,14 +224,18 @@ function paintHUD(){
   $('#speed').textContent=Math.round(speed*3.6);$('#speed-bar').style.width=clamp(speed/28*100,0,100)+'%';
   $('#drop').textContent=station?0:Math.max(0,Math.round(s.startY-s.y));
   const bare=s.trail?.name?.replace(/[（(].*$/,'');let grade=label(difficultyName[s.trail?.difficulty]||'道外');
+  const approach=screen==='run'?s.approach:null;
+  if(approach)grade=t('连接道','Connector');
   if(station)grade=station.trailhead?t('雪道起点','Trailhead'):station.summit?t('山顶观景','Summit lookout'):t('索道站','Lift station');
   if(lift)grade=t('索道','Lift');
   $('#elevation').textContent=t('海拔 ','Elevation ')+meters(s.y)+' m  ·  '+grade;
   const trail=station?(station.trailhead?label(r.name):station.summit?(station.side==='wanlong'?label('红花梁'):t('云顶山顶','Genting summit')):label(station.lift.meta.name)):lift?resort(lift.resort)+' · '+label(lift.name):label(bare||'道外');
-  $('#trail-name').textContent=trail;
+  $('#trail-name').textContent=approach?t(approach.name,approach.en):trail;
+  $('#look-reset').hidden=!world.looking||!!page;
   const d=Math.abs(Math.round(s.slope)),dir=lift?(lift.dir>0?t('上行','Ascent'):t('下行','Descent')):'';
   $('#gradient').textContent=station?(station.summit?t('山顶停留','At the summit'):t('站台停留','At the station')):lift?dir:t('坡度 ','Grade ')+d+'° · '+(d<9?t('缓坡','Gentle'):d<20?t('中坡','Moderate'):t('陡坡','Steep'));
   $('#progress').textContent=station?'':lift?Math.round(lift.progress*100)+'%':resort(r.destination)+t('方向 · ',' · ')+Math.round(100*s.along/r.length)+'% · '+formatTime(s.elapsed);
+  if(approach)$('#progress').textContent=t('通往','Towards ')+t(approach.target,approach.targetEn)+' · '+formatTime(s.elapsed);
   $('#world-clock').textContent=info.clock;$('#weather-name').textContent=label(info.weatherName)+' · '+label(info.timeName);
   const icon=info.resolvedWeather==='heavy'?'heavy':info.resolvedWeather==='light'?'snow':({day:'sun',evening:'evening',sunset:'dusk',twilight:'twilight',night:'night',aurora:'aurora',dawn:'dawn'}[info.resolvedTime]||'sun');
   if($('#weather-icon').dataset.icon!==icon){$('#weather-icon').innerHTML=glyph(icon);$('#weather-icon').dataset.icon=icon;}
@@ -176,14 +243,18 @@ function paintHUD(){
   $('#next-flag').hidden=flag==null;
   if(flag!=null)$('#next-flag').textContent=t('下一面旗 · ','Next flag · ')+Math.round(flag)+' m';
   const fork=screen==='run'?s.fork:null;$('#fork-prompt').hidden=!fork;
-  if(fork){$('#fork-text').textContent=t('联滑岔口 · ','Junction · ')+Math.round(fork.ahead)+' m';$('#fork-button').textContent=r.resort==='wanlong'?t('转入山丹丹 · 去云顶','Lily Traverse to Genting'):t('转入翠菊花 · 回万龙','Aster Traverse to Wanlong');}
+  if(fork){
+    const option=fork.options?.find(o=>o.routeId===fork.route.id);
+    $('#fork-text').textContent=t('雪道岔口 · ','Junction · ')+Math.round(fork.ahead)+' m';
+    $('#fork-button').textContent=t('转入','Turn onto ')+(option?t(option.name,option.en):label(fork.route.name));
+  }
   const near=(screen==='run'&&!fork)?world.nearbyStation:null;
   $('#near-lift').hidden=!near;
   if(near)$('#near-lift-label').textContent=label(near.name)+' · '+label('上车');
   if(lift){$('#lift-text').textContent=resort(lift.resort)+' · '+label(lift.name)+' · '+dir+' '+Math.round(lift.progress*100)+'%';$('[data-act="skip-lift"]').textContent=lift.dir>0?t('直达上站','Skip to upper station'):t('直达下站','Skip to lower station');}
   if(station){
     $('#station-title').textContent=station.trailhead?label(r.name):station.summit?(station.side==='wanlong'?t('万龙山顶木屋 · 七索上站','Wanlong summit lodge · Lift 7'):t('金花阁 · 云顶一索上站','Jinhua Pavilion · Genting Lift 1')):resort(station.side)+' · '+label(station.lift.meta.name);
-    $('#station-note').textContent=station.trailhead?t('已回到起点，准备好再出发','At the trailhead. Set off when ready.'):station.summit?t('拖动雪景，环顾山顶','Drag the scenery to look around'):t('拖动环顾，乘索道返回或前往山顶选道','Look around, board a lift, or head to a trailhead');
+    $('#station-note').textContent=t('按方向键起滑 · 拖动环顾','Press a direction to ski · drag to look');
     $('#station-ride').textContent=station.end==='top'?t('乘索道下山','Ride lift down'):t('乘索道上行','Ride lift up');
   }
 }
@@ -216,7 +287,7 @@ function sourceText(){
 function renderPanel(keep=false){
   const p=$('#panel'),scroll=keep?p.scrollTop:0,openDetails=keep&&p.querySelector('.settings-detail')?.open;
   if(page==='view'){
-    p.innerHTML=heading('VIEW','视角')+'<div class="view-grid">'+Object.entries(viewNames).map(([id,txt])=>'<button class="view-tile" aria-pressed="'+(prefs.view===id)+'" data-choice="view" data-value="'+id+'">'+viewPicture(id)+'<b>'+label(txt)+'</b>'+(id===prefs.view?tick:'')+'</button>').join('')+'</div><p class="panel-foot">'+t('展开右侧箭头，点眼形图标切换滑行视角。双指拖动环顾。','Open the right arrow and tap the eye to switch riding cameras. Drag with two fingers to look around.')+'</p>';
+    p.innerHTML=heading('VIEW','视角')+'<div class="view-grid">'+Object.entries(viewNames).map(([id,txt])=>'<button class="view-tile" aria-pressed="'+(prefs.view===id)+'" data-choice="view" data-value="'+id+'">'+viewPicture(id)+'<b>'+label(txt)+'</b>'+(id===prefs.view?tick:'')+'</button>').join('')+'</div><p class="panel-foot">'+t('右上角一键切换第一人称和外部机位。拖动可环顾四周，点指南针回正。','Use the top camera switch for first or third person. Drag to look around and tap the compass to face forward.')+'</p>';
   }else if(page==='environment')p.innerHTML=environmentPanel(prefs);
   else if(page==='settings')p.innerHTML=settingsPanel(prefs,music.track,sourceText());
   else if(page==='help')p.innerHTML=controlsPanel();
@@ -251,6 +322,7 @@ function mapAction(){
   if(!ready)txt=t('请先点选雪道','Choose a trail first');
   else if(screen==='summit'&&r.resort===world.station.side)txt=t('从这条雪道出发','Start this trail');
   else if(screen==='run'&&r.id===s.route.id)txt=t('继续滑行','Resume descent');
+  else if(screen==='run'&&s.junctionFor(r.id))txt=t('在前方岔口转入','Take the upcoming junction');
   else if(screen==='run'&&r.closest(s.x,s.z).distance<=64)txt=t('沿此线路滑行','Join this trail');
   $('#map-action').innerHTML='<button class="launch" data-act="apply-route" '+(ready?'':'disabled')+'>'+txt+'</button>'+(ready?'<span class="fine">'+label(difficultyName[r.difficulty])+t(' · 落差 ',' · Drop ')+Math.round(r.drop)+' m</span>':'');
 }
@@ -269,7 +341,7 @@ function setChoice(kind,v){
   else{
     prefs[kind]=v;
     if(['gear','gender','color'].includes(kind)){if(world?.sim.route)world.changeRider();homeChoices();}
-    if(kind==='view')world?.cameraChanged();
+    if(kind==='view')switchCamera(v);
     if(kind==='time'||kind==='weather'){world?.environment();refreshMusic();}
     if(kind==='quality')world?.graphics();
   }
@@ -316,21 +388,29 @@ function action(a){
   if(a==='close-panel')return closePanel();
   if(a==='pause')return openPanel('view');
   if(a==='tray'){tray=!tray;$('#tray-tools').hidden=!tray;$('#tray-toggle').setAttribute('aria-expanded',String(tray));return;}
-  if(a==='view'&&screen==='run'&&!page){const vs=Object.keys(viewNames);prefs.view=vs[(vs.indexOf(prefs.view)+1)%vs.length];world.cameraChanged();save();announce(label(viewNames[prefs.view])+t('视角',' camera'));return;}
+  if(a==='pov'){switchCamera(prefs.view==='first'?prefs.outsideView:'first');return;}
+  if(a==='center-look'){world?.centerLook();if(watching())hudVisible(true);paintHUD();return;}
+  if(a==='view'&&inWorld()&&!page){const vs=Object.keys(viewNames);switchCamera(vs[(vs.indexOf(prefs.view)+1)%vs.length]);announce(label(viewNames[prefs.view])+t('视角',' camera'));return;}
   if(['map','help','view','rider','environment','records','settings','sources','finish'].includes(a))return openPanel(a);
   if(a==='home')return home();
   if(a==='reload')return location.reload();
   if(a==='restart'){
     if(!world?.sim.route||watching()||screen==='lift')return begin(world?.sim.route.id||routeId);
-    const route=world.sim.route;discardMap();page='';$('#overlay').hidden=true;screen='trailhead';tray=false;recorded=false;
+    const route=data.routes.find(r=>r.id===world.sim.route.id)||world.sim.route;discardMap();page='';$('#overlay').hidden=true;screen='trailhead';tray=false;recorded=false;
     clearInputs();world.trailhead(route);hudVisible(true);paintHUD();refreshMusic();return;
   }
   if(a==='launch-trail'&&screen==='trailhead')return launch(world.sim.route);
-  if(a==='junction'){const f=world?.sim.fork;if(f&&world.sim.switchRoute(f.route)){routeId=f.route.id;announce(t('已接入','Joined ')+label(f.route.name));}return;}
+  if(a==='junction'){
+    const f=world?.sim.fork;
+    if(f&&world.sim.switchRoute(f.route))announce(t('岔口转入','At the junction · ')+label(f.route.name));
+    return;
+  }
   if(a==='apply-route'){
     const r=panelRoute();
-    if(screen==='summit'&&summitChoice&&r.resort===world.station.side)launch(r);
-    else if(screen==='run'&&(r.id===world.sim.route.id||world.sim.switchRoute(r))){routeId=r.id;closePanel();paintHUD();}
+    if(screen==='summit'&&summitChoice&&r.resort===world.station.side){
+      const heading=world.summitHeading(r.id);closePanel();pushOff('up',{routeId:r.id,heading});
+    }
+    else if(screen==='run'&&(r.id===world.sim.route.id||world.sim.switchRoute(r))){closePanel();paintHUD();}
     else begin(r.id);return;
   }
   if(a==='zoom-in'||a==='zoom-out'){large?.changeZoom(a==='zoom-in'?1.24:.82);return;}
@@ -350,6 +430,7 @@ function action(a){
 }
 document.addEventListener('click',e=>{
   const b=e.target.closest('button');if(!b||busy||b.disabled)return;
+  if(b.dataset.drive&&e.detail===0){beginDirection(b.dataset.drive);return;}
   if(b.dataset.choice)setChoice(b.dataset.choice,b.dataset.value);
   else if(b.dataset.act)action(b.dataset.act);
   else if(b.dataset.hold==='jump'&&e.detail===0&&screen==='run'&&!page)world.sim.jump();
@@ -371,10 +452,23 @@ document.addEventListener('keydown',e=>{
     const moves={KeyA:[24,0],KeyD:[-24,0],KeyW:[0,24],KeyS:[0,-24],KeyQ:[0,0,-1],KeyE:[0,0,1]};
     if(moves[e.code]){e.preventDefault();world.panPhoto(...moves[e.code]);}return;
   }
+  if(!inWorld())return;
+  if(e.code==='KeyR'||e.code==='KeyV'||e.code==='KeyC'){
+    if(!e.repeat){
+      if(e.code==='KeyR')action('center-look');
+      else if(screen!=='lift')action(e.code==='KeyV'?'pov':'view');
+    }
+    e.preventDefault();return;
+  }
+  if(['KeyJ','KeyL','KeyU','KeyO'].includes(e.code)){e.preventDefault();keys.add(e.code);updateInputs();return;}
+  const way=keyDirection[e.code];
+  if(way&&screen!=='lift'){
+    e.preventDefault();if(!e.repeat&&!keys.has(e.code))beginDirection(way);
+    keys.add(e.code);updateInputs();return;
+  }
   if(screen!=='run')return;
-  if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyA','KeyD','KeyS','KeyW','KeyC','KeyI','KeyK'].includes(e.code))e.preventDefault();
+  if(['Space','KeyI','KeyK'].includes(e.code))e.preventDefault();
   if(e.code==='Space'){if(!e.repeat&&!holds.has('jump'))world.sim.beginJump();keys.add('Space');updateInputs();return;}
-  if(e.code==='KeyC'&&!e.repeat){action('view');return;}
   keys.add(e.code);updateInputs();
 });
 document.addEventListener('keyup',e=>{const was=keys.delete(e.code);if(was&&e.code==='Space'&&screen==='run'&&!page&&!holds.has('jump'))world.sim.releaseJump();updateInputs();});
@@ -384,6 +478,15 @@ document.addEventListener('visibilitychange',()=>{
   refreshMusic();
 });
 window.addEventListener('blur',()=>{clearInputs();if(inWorld()&&!page&&!busy)openPanel('view');});
+for(const b of $$('.dir-key')){
+  b.addEventListener('pointerdown',e=>{
+    if(page||busy||e.button!==0||!beginDirection(b.dataset.drive))return;
+    e.preventDefault();b.setPointerCapture(e.pointerId);drivePointers.set(e.pointerId,b.dataset.drive);updateInputs();
+  });
+  for(const type of ['pointerup','pointercancel','lostpointercapture'])b.addEventListener(type,e=>{
+    if(drivePointers.delete(e.pointerId))updateInputs();
+  });
+}
 for(const b of $$('[data-hold]')){
   const ids=new Set(),key=b.dataset.hold;
   b.addEventListener('pointerdown',e=>{
@@ -400,33 +503,48 @@ for(const b of $$('[data-hold]')){
 }
 function touchPair(){const [a,b]=[...touches.values()];return a&&b?{x:(a.x+b.x)/2,y:(a.y+b.y)/2,d:Math.hypot(a.x-b.x,a.y-b.y)}:null;}
 function touchStart(e){
-  if(page||!(inWorld()||screen==='photo')||e.button!==0)return;
+  if(page||!(inWorld()||screen==='photo')||(e.button!==0&&e.button!==2))return;
+  const pad=e.currentTarget.id==='steering',mouse=e.pointerType==='mouse';
+  const steer=screen==='run'&&(pad||(!mouse&&e.clientX<innerWidth*.44));
   e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);
-  touches.set(e.pointerId,{x:e.clientX,y:e.clientY,startX:e.clientX,startY:e.clientY});
-  if(touches.size===2){multi=touchPair();drag=trim=0;updateInputs();}
+  touches.set(e.pointerId,{x:e.clientX,y:e.clientY,startX:e.clientX,startY:e.clientY,
+    role:steer?'steer':'look',tap:!pad&&e.button===0,originTime:performance.now()});
+  if(touches.size>=2){
+    const fingers=[...touches.values()];
+    for(const pt of fingers)pt.tap=false;
+    if(screen==='run'&&fingers.length===2&&fingers[0].role!==fingers[1].role)return;
+    for(const pt of fingers)pt.role='look';
+    multi=touchPair();drag=trim=0;updateInputs();
+  }
 }
 function touchMove(e){
   const pt=touches.get(e.pointerId);if(!pt||!world)return;
   const dx=e.clientX-pt.x,dy=e.clientY-pt.y;pt.x=e.clientX;pt.y=e.clientY;
-  if(touches.size>=2){
-    const pair=touchPair();if(multi){const mx=pair.x-multi.x,my=pair.y-multi.y;
-      if(screen==='photo'){world.panPhoto(mx,my);world.zoom(multi.d/Math.max(1,pair.d));}else world.orbit(mx,my);}
+  if(Math.hypot(pt.x-pt.startX,pt.y-pt.startY)>6)pt.tap=false;
+  if(multi&&touches.size>=2){
+    const pair=touchPair();
+    const mx=pair.x-multi.x,my=pair.y-multi.y;
+    if(screen==='photo'){world.panPhoto(mx,my);world.zoom(multi.d/Math.max(1,pair.d));}
+    else world.orbit(mx,my);
     multi=pair;return;
   }
   if(screen==='photo'&&e.shiftKey){world.panPhoto(dx,dy);return;}
-  if(screen!=='run'){world.orbit(dx,dy);return;}
+  if(pt.role==='look'){world.orbit(dx,dy);return;}
   const range=Math.max(40,Math.min(innerWidth,innerHeight)*.16);
   drag=clamp((pt.x-pt.startX)/range,-1,1);trim=clamp((pt.startY-pt.y)/range,-1,1);updateInputs();
 }
 function touchEnd(e){
-  if(!touches.delete(e.pointerId))return;multi=null;
-  for(const v of touches.values()){v.startX=v.x;v.startY=v.y;}
-  if(touches.size<2&&screen==='run')world?.releaseOrbit();
-  drag=trim=0;updateInputs();
+  const pt=touches.get(e.pointerId);if(!pt)return;
+  touches.delete(e.pointerId);multi=multi?touchPair():null;
+  if(pt.role==='steer')drag=trim=0;
+  updateInputs();
+  if(pt.tap&&e.type==='pointerup'&&performance.now()-pt.originTime<650&&screen!=='photo'&&screen!=='lift')
+    selectSign(world?.pickSign(e.clientX,e.clientY));
 }
 for(const el of [$('#gl'),$('#steering')]){
   el.addEventListener('pointerdown',touchStart);el.addEventListener('pointermove',touchMove);
   for(const ev of ['pointerup','pointercancel','lostpointercapture'])el.addEventListener(ev,touchEnd);
+  el.addEventListener('contextmenu',e=>e.preventDefault());
 }
 $('#gl').addEventListener('wheel',e=>{if(screen==='photo'){e.preventDefault();world.zoom(e.deltaY>0?1.11:.90);}},{passive:false});
 $('#photo-place').addEventListener('change',e=>world?.photoPlace(e.target.value));

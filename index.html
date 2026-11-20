@@ -44,7 +44,7 @@
       <div class="speed"><strong id="speed">0</strong><span>KM / H</span><small>落差 <b id="drop">0</b> m</small><i><b id="speed-bar"></b></i></div>
       <div class="piste"><small id="elevation"></small><h2 id="trail-name"></h2><div id="gradient"></div><div id="progress"></div><div id="next-flag" hidden></div></div>
     </div>
-    <div class="game-top"><div class="hud-tools"><button data-act="map" aria-label="雪场地图" title="雪场地图"></button><button data-act="sound" aria-label="环境音" title="环境音"></button><button data-act="pause" aria-label="暂停菜单" title="暂停菜单"></button></div><div class="weather"><div><span id="weather-icon"></span><b id="world-clock"></b></div><span id="weather-name"></span></div></div>
+    <div class="game-top"><div class="hud-tools"><button data-act="pov" class="pov-switch" aria-label="切换第一人称与跟随视角"><span id="pov-icon"></span><span id="pov-label">第一人称</span></button><button data-act="map" aria-label="雪场地图" title="雪场地图"></button><button data-act="sound" aria-label="环境音" title="环境音"></button><button data-act="pause" aria-label="暂停菜单" title="暂停菜单"></button></div><div class="weather"><div><span id="weather-icon"></span><b id="world-clock"></b></div><span id="weather-name"></span></div></div>
     <div id="fork-prompt" hidden><span id="fork-text"></span><button data-act="junction" id="fork-button"></button></div>
     <div id="station-card" hidden>
       <div class="station-place"><span data-glyph="pin"></span><span id="station-title"></span></div>
@@ -53,6 +53,13 @@
       <div class="station-actions"><button class="launch" data-act="launch-trail" hidden>从这里出发</button><button class="launch" data-act="map">选择雪道</button><button class="glass-button" data-act="lift"><span data-glyph="lift"></span><span id="station-ride">乘索道</span></button></div>
     </div>
     <button id="near-lift" class="glass-button" data-act="lift" hidden><span data-glyph="lift"></span><span id="near-lift-label">上车</span></button>
+    <div id="direction-pad" role="group" aria-label="滑行方向">
+      <button class="dir-key dir-up" data-drive="up" aria-label="向前滑行"><span></span></button>
+      <button class="dir-key dir-left" data-drive="left" aria-label="向左滑行"><span></span></button>
+      <button class="dir-key dir-down" data-drive="down" aria-label="后方起滑或刹车"><span></span></button>
+      <button class="dir-key dir-right" data-drive="right" aria-label="向右滑行"><span></span></button>
+    </div>
+    <button id="look-reset" class="glass-button" data-act="center-look" hidden><span data-glyph="compass"></span><span id="look-reset-text">回正视线</span></button>
     <div id="steering" aria-label="左右拖动转弯"><div class="touch-line"><i></i></div><span>按住雪面，左右拖动</span></div>
     <div id="keyboard-hint">A / D 转弯 <i></i> W 加速 <i></i> S 刹车 <i></i> 空格 跳跃</div>
     <div class="ride-actions"><div class="camera-tray"><button id="tray-toggle" class="tray-button" data-act="tray" aria-label="机位工具" aria-expanded="false" aria-controls="tray-tools"><span data-glyph="back"></span></button><div id="tray-tools" hidden><button class="tray-button" data-act="view" title="切换视角" aria-label="切换视角"></button><button class="tray-button" data-act="photo" title="拍照" aria-label="拍照"><span data-glyph="camera"></span></button></div></div><button class="control brake" data-hold="brake">刹车</button><button class="control boost" data-hold="boost">加速</button><button class="control jump" data-hold="jump" aria-label="按住蓄力，松开起跳">跳</button></div>

@@ -1,4 +1,5 @@
 import {clamp, mixAngle} from './mountain.js';
+import {createSkiNavigation} from './navigation.js';
 
 const G = 9.81;
 const TAU = 2 * Math.PI;
@@ -27,6 +28,7 @@ function trackFrame(route, distance) {
 export class Descent {
   constructor(data, opts) {
     this.data = data; this.opts = opts; this.gear = opts.gear;
+    this.navigation = data.summitPlaces?.wanlong && data.summitPlaces?.genting ? createSkiNavigation(data) : null;
     this.mode = 'idle';
     this.x = this.z = this.y = this.heading = this.travelHeading = this.speed = 0;
     this.airHeight = this.steer = this.brake = this.trim = this.edge = 0;
@@ -34,6 +36,10 @@ export class Descent {
 
   start(route) {
     this.route = route; this.mode = 'run'; this.gear = this.opts.gear;
+    this.junctions=this.navigation?.stationsOn(route)||[];
+    this.passedJunctions=new Set();this.requestedTurn=null;this.steeringIntent=0;this.steeringAge=0;
+    this.branchShiftX=this.branchShiftZ=0;
+    this.departureTrack=route.approach?.kind==='summit'?[route.points[0]]:null;this.entryCheck=0;
     this.along = this.offset = this.edgeSpeed = this.speed = this.maxSpeed = 0;
     this.elapsed = this.travel = this.planIndex = this.freeAge = this.elapsedDrop = 0;
     this.airHeight = this.upSpeed = this.airTime = this.air = 0;
@@ -54,13 +60,21 @@ export class Descent {
     const near = this.data.index.near(this.x, this.z);
     this.onTrail = !!near.trail && near.distance < (near.trail.width || 36) * .58;
     this.trail = this.onTrail ? near.trail : null;
+    if(this.approach){this.onTrail=true;this.trail=null;return;}
     if (this.opts.assist && Math.abs(this.offset) < 9) {
-      const leg = this.route.legs?.find(l => l.endIndex > this.planIndex) || this.route.legs?.at(-1);
+      const leg = this.route.legs?.find(l => l.startIndex<=this.planIndex && l.endIndex>this.planIndex);
       if (leg) {
         this.trail = this.data.trails.find(t => t.id === leg.trailId) || this.trail;
         this.onTrail = true;
       }
     }
+  }
+
+  get approach() {
+    const area=this.route?.approach;
+    if(!area || this.along>=area.endDistance-.05)return null;
+    if(!this.opts.assist){const p=this.route.at(this.along);if(Math.hypot(this.x-p.x,this.z-p.z)>22)return null;}
+    return area;
   }
 
   beginJump() {
@@ -97,16 +111,95 @@ export class Descent {
     this.edgeSpeed = this.speed * Math.sin(angleBetween(f.angle, this.travelHeading));
   }
 
+  junctionFor(routeId) {
+    return this.junctions?.find(m=>m.along>=this.along-1 && !this.passedJunctions.has(m.sign.id) &&
+      m.sign.options.some(o=>o.routeId===routeId));
+  }
+
   switchRoute(route) {
+    const upcoming=this.junctionFor(route.id);
+    if(upcoming){this.requestedTurn={id:upcoming.sign.id,routeId:route.id};return true;}
     const nearest = route.closest(this.x, this.z);
     if (nearest.distance > 64) return false;
     const f = trackFrame(route, nearest.along);
     this.offset = -(this.x - f.x)*f.dz + (this.z - f.z)*f.dx;
     this.route = route; this.along = nearest.along; this.planIndex = f.index; this.forkTaken = true;
+    this.junctions=this.navigation?.stationsOn(route)||[];this.requestedTurn=null;
     return true;
   }
 
+  activeJunction(lookAhead=155,behind=2) {
+    return this.junctions?.find(m=>{
+      const lead=m.along-this.along,p=m.sign.junctionPosition;
+      return !this.passedJunctions.has(m.sign.id)&&lead>=-behind&&lead<=lookAhead&&
+        (this.opts.assist||Math.hypot(this.x-p[0],this.z-p[1])<Math.max(32,lead+40));
+    });
+  }
+
+  chooseDirection(routeId,signId) {
+    if(this.mode!=='run')return false;
+    const m=this.activeJunction();
+    if(!m||(signId&&signId!==m.sign.id)||!m.sign.options.some(o=>o.routeId===routeId))return false;
+    this.requestedTurn={id:m.sign.id,routeId};return true;
+  }
+
+  checkPisteMouth(dt) {
+    if(!this.departureTrack)return;
+    if(this.along>this.route.approach.endDistance+205 || this.travel>560){this.departureTrack=null;return;}
+    const foot=[this.x,this.z],last=this.departureTrack.at(-1);
+    if(Math.hypot(this.x-last[0],this.z-last[1])>4)this.departureTrack.push(foot);
+    this.entryCheck+=dt;
+    if(this.entryCheck<.15||this.speed<1||this.airborne)return;
+    this.entryCheck=0;
+    if(this.opts.assist&&Math.abs(this.steer)<.4)return;
+    const change=this.navigation.captureGate(this.route,this.departureTrack,foot,this.travelHeading);
+    if(!change)return;
+    this.route=change.route;this.along=change.along;this.planIndex=this.route.at(this.along).index;
+    this.offset=0;
+    const f=trackFrame(this.route,this.along);this.branchShiftX=this.x-f.x;this.branchShiftZ=this.z-f.z;
+    this.junctions=this.navigation.stationsOn(this.route);this.requestedTurn=null;this.departureTrack=null;
+  }
+
+  followJunction(input,dt) {
+    if(!this.junctions?.length)return;
+    const m=this.activeJunction(37,6);
+    if(!m){this.steeringAge=0;this.steeringIntent=0;return;}
+    const key=m.sign.id,lead=m.along-this.along;
+    const steer=clamp(input.steer||0,-1,1),intent=Math.abs(steer)>=.48?Math.sign(steer):0;
+    if(intent!==this.steeringIntent)this.steeringAge=0;
+    this.steeringIntent=intent;this.steeringAge=intent?this.steeringAge+dt:0;
+    let next=this.requestedTurn?.id===key?this.requestedTurn.routeId:null;
+    if(!next && lead>=2 && this.steeringAge>=.16){
+      const aim=m.sign.approach+steer*1.35;
+      next=m.sign.options.reduce((best,o)=>Math.abs(angleBetween(aim,o.heading))<Math.abs(angleBetween(aim,best.heading))?o:best).routeId;
+    }
+    if(!next && !this.opts.assist && lead<5 && lead>=-5 && this.speed>2){
+      const best=m.sign.options.reduce((a,b)=>Math.abs(angleBetween(this.travelHeading,a.heading))<Math.abs(angleBetween(this.travelHeading,b.heading))?a:b);
+      if(Math.abs(angleBetween(this.travelHeading,best.heading))<.3 && best.routeId!==m.current.routeId)next=best.routeId;
+    }
+    if(lead<-1){
+      this.passedJunctions.add(key);if(this.requestedTurn?.id===key)this.requestedTurn=null;this.steeringAge=0;
+    }
+    if(!next||lead>30||next===m.current.routeId)return;
+    const branch=this.navigation.changeBranch(this.route,m,next);
+    if(branch && branch!==this.route){
+      // Upstream distances and vertices are identical in both plans. Preserve
+      // all physical state, including the rider's current edge and lateral lane.
+      if(this.opts.assist){
+        const f=trackFrame(branch,this.along);
+        this.branchShiftX=this.x-(f.x-f.dz*this.offset);
+        this.branchShiftZ=this.z-(f.z+f.dx*this.offset);
+      }
+      this.route=branch;this.junctions=this.navigation.stationsOn(branch);
+    }
+  }
+
   get fork() {
+    if(this.navigation){
+      const m=this.activeJunction();if(!m)return null;
+      const options=m.sign.options,alt=options.find(o=>o.routeId!==m.current.routeId&&o.routeId.includes('-to-'))||options.find(o=>o.routeId!==m.current.routeId);
+      return alt?{id:m.sign.id,route:this.navigation.canonical(alt.routeId),ahead:Math.max(0,m.along-this.along),options}:null;
+    }
     if (this.forkTaken || !this.route?.id.endsWith('classic')) return null;
     const there = this.route.resort === 'wanlong' ? 'genting' : 'wanlong';
     const alt = this.data.routes.find(r => r.id === this.route.resort + '-to-' + there);
@@ -125,6 +218,7 @@ export class Descent {
   }
 
   step(dt, input) {
+    this.followJunction(input,dt);
     this.gear = this.opts.gear;
     const board = this.gear === 'board', assisted = this.opts.assist, airborne = this.airborne;
     const oldX = this.x, oldZ = this.z, oldGround = this.ground, oldDirection = this.travelHeading;
@@ -204,7 +298,8 @@ export class Descent {
       this.offset += this.edgeSpeed * dt;
       this.along = Math.min(this.route.length, this.along+Math.sqrt(Math.max(0,planarSpeed**2-this.edgeSpeed**2))*dt);
       const f = trackFrame(this.route,this.along);
-      this.x = f.x - f.dz*this.offset; this.z = f.z + f.dx*this.offset; this.planIndex = f.index;
+      const decay=Math.exp(-distance/13);this.branchShiftX*=decay;this.branchShiftZ*=decay;
+      this.x = f.x - f.dz*this.offset+this.branchShiftX; this.z = f.z + f.dx*this.offset+this.branchShiftZ; this.planIndex = f.index;
       const look = this.route.frame(Math.min(this.route.length,this.along+Math.max(5,planarSpeed*.80)));
       const anticipate = clamp(angleBetween(f.angle,look.angle)*planarSpeed*.093,-.76,.76);
       const guidedArc = -amplitude*Math.sin(phase)*planarSpeed**2/(18**2*G);
@@ -269,6 +364,7 @@ export class Descent {
     this.spray = this.airborne ? 0 : clamp(.035 + this.pressure*.30 + scrape*.072 + this.impact*.44,0,1.4) * smooth(this.speed,.55,5);
     this.maxSpeed = Math.max(this.maxSpeed,this.speed);
     this.travel += Math.hypot(this.x-oldX,this.z-oldZ,this.ground-oldGround);
+    this.checkPisteMouth(dt);
     this.surface();
     const end = this.route.points.at(-1);
     if(this.along>=this.route.length-1.6 && Math.hypot(this.x-end[0],this.z-end[1])<56){

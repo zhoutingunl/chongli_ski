@@ -34,19 +34,20 @@ export function settingsPanel(prefs,song,sources){
     '<details class="settings-detail"><summary>'+t('滑行设置','Riding options')+'</summary>'+row(t('循线辅助','Trail assist'),seg('assist',[['on','开启'],['off','关闭']],prefs.assist?'on':'off'),t('顺着所选线路滑行，关闭可自由选线。','Follow the selected line or steer freely with assist off.'))+
     row(t('屏幕按键','Touch controls'),seg('controls',[['on','显示'],['off','隐藏']],prefs.controls?'on':'off'))+'</details>'+
     '<div class="tilt-setting">'+pill('tilt',t('倾斜转弯 '+(prefs.tilt?'开':'关'),'Tilt steering '+(prefs.tilt?'on':'off')),prefs.tilt)+(prefs.tilt?button('calibrate',t('校准','Calibrate'),'setting-pill'):'')+'</div>'+
-    '<details class="source-detail"><summary>'+t('数据来源','Data sources')+'</summary>'+sources+'</details><small class="version">'+t('版本','Version')+' 1.1.0</small>';
+    '<details class="source-detail"><summary>'+t('数据来源','Data sources')+'</summary>'+sources+'</details><small class="version">'+t('版本','Version')+' 1.2.0</small>';
 }
 export function controlsPanel(){
   const controls=[
+    [t('原地起滑','Push off'),t('按方向键或点屏幕箭头，顺着路牌从脚下起滑。也可直接点路牌上的雪道名。','Press a direction, tap an on-screen arrow, or tap a trail name on a sign to set off from where you stand.'),'↑ ← ↓ →'],
+    [t('环顾四周','Look around'),t('右手拖动环顾时，左手仍可转弯。同侧双指或鼠标也可环顾。松手保留视线，点指南针回正。','Drag on the right to look while steering on the left. Two fingers on one side or a mouse drag also work. Tap the compass to face forward.'),'J / L · U / O · R'],
     [t('倾斜手机','Tilt phone'),t('在设置里打开倾斜转弯。出发或继续滑行时的握姿为正中。','Enable tilt steering in Settings. Your grip at departure or resume sets the centre.'),''],
-    [t('按住拖动','Drag sideways'),t('左右拖动转弯，越过刻度以板刃切雪。','Drag to steer. Cross the mark to set the edge.'),'A / D · ← →'],
-    [t('上下拖动','Drag vertically'),t('往上压板头，往下压板尾。','Drag up for nose pressure, down for tail pressure.'),'I / K'],
+    [t('按住拖动','Drag sideways'),t('在左侧雪面左右拖动转弯，越过刻度以板刃切雪。','Drag the left side to steer. Cross the mark to set the edge.'),'A / D · ← →'],
+    [t('上下拖动','Drag vertically'),t('在左侧往上拖压板头，往下拖压板尾。','Drag up or down on the left side for nose or tail pressure.'),'I / K'],
     [t('跳','Jump'),t('按住蓄力，松开起跳。','Hold to load your legs. Release to jump.'),t('空格','Space')],
     [t('加速','Tuck'),t('按住压低身体，双板在低速时会撑杖。','Hold to tuck. Skiers plant their poles at low speed.'),'W / ↑'],
     [t('刹车','Brake'),t('按住横板刹车，松开恢复滑行。','Hold to skid and brake. Release to glide.'),'S / ↓'],
-    [t('雪场地图','Trail map'),t('在地图选雪道出发，在索道站旁点「上车」。','Select a run on the map. Tap Board lift beside a station.'),'M'],
-    [t('机位','Camera'),t('展开右侧箭头，点眼形图标换视角。','Open the right arrow and tap the eye to cycle cameras.'),'C'],
-    [t('两指拖动','Two fingers'),t('滑行时用双指环顾，停在山顶时用单指即可。','Look around while riding. At the summit, one finger is enough.'),''],
+    [t('雪场地图','Trail map'),t('地图可以手选雪道。经过索道站时点「上车」。','Choose a specific run on the map. Tap Board lift near a station.'),'M'],
+    [t('机位','Camera'),t('右上角切换第一人称和外部机位，眼形图标轮换九种视角。','Use the top switch for first or third person, or the eye to cycle all nine views.'),'V / C'],
     [t('拍照','Photo'),t('暂停菜单中点「拍照」冻结雪场。拖动环顾，双指平移或缩放，再按快门存图。','Freeze the scene from the pause menu. Drag to look, pan or pinch with two fingers, then save.'),'WASD · Q / E']
   ];
   return heading('CONTROLS','操作说明')+'<div class="controls-guide">'+controls.map(([title,body,key])=>'<div class="ctrl-row"><strong>'+title+'</strong><span>'+body+'</span><span>'+key+'</span></div>').join('')+'</div>';

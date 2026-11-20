@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {createRider} from './rider.js';
 import {createLandmark,createLift,setResortNight} from './resort.js';
 import {Descent} from './simulation.js';
+import {createSkiNavigation} from './navigation.js';
 import {createSky,buildSurface,plantForest} from './landscape.js';
 import {createMountainClimate} from './environment.js';
 import {courseDetails,makeSnowFX} from './details.js';
@@ -43,18 +44,30 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
     const casters=[];obj.group.traverse(child=>{if(child.isMesh&&child.castShadow)casters.push(child);});
     lifts.push({...obj,meta:lift,distance,center,casters,radius:points[0].distanceTo(points.at(-1))*.5+200});
   }
-  const details=courseDetails(scene,data);
+  const navigation=createSkiNavigation(data);
+  const details=courseDetails(scene,data,navigation);
   const fx=makeSnowFX(scene,data);
+  const signRay=new THREE.Raycaster(),screenPoint=new THREE.Vector2();
   let rider=createRider(opts);scene.add(rider.group);
   const sim=new Descent(data,opts);
   const yawQ=new THREE.Quaternion(),tiltQ=new THREE.Quaternion(),surfNorm=new THREE.Vector3(),want=new THREE.Vector3(),look=new THREE.Vector3(),target=new THREE.Vector3();
   let active=false,paused=false,photo=false,orbitYaw=0,orbitPitch=.10,orbitZoom=5.9,ride=null,clock=0,prev=0,lastUI=0,simLag=0,treesLag=1,camHeading=0,snap=true,frame=0,graphicsScale=1;
-  let photoSite=null,station=null,stationYaw=0,stationPitch=0;
+  let photoSite=null,station=null;
   const photoPan=new THREE.Vector3(),right=new THREE.Vector3(),forward=new THREE.Vector3();
   const climate=createMountainClimate();
   let conditions,climateAge=1;
-  let freeYaw=0,freePitch=0,holdingOrbit=false;
-  const input={steer:0,trim:0,brake:false,boost:false};
+  const bodyOrigin=new THREE.Vector3(),lastOrigin=new THREE.Vector3(),bodyStep=new THREE.Vector3();
+  const eyeOffset=new THREE.Vector3(),tipWorld=new THREE.Vector3(),sight=new THREE.Vector3(),orbitPivot=new THREE.Vector3();
+  const reducedMotion=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const pitchLimit=THREE.MathUtils.degToRad(85);
+  let lookYaw=0,lookPitch=0,headPitch=0,roll=0,baseBearing=0;
+  const input={steer:0,trim:0,brake:false,boost:false,lookX:0,lookY:0};
+  const wrap=angle=>Math.atan2(Math.sin(angle),Math.cos(angle));
+  function resetLook(){lookYaw=lookPitch=0;input.lookX=input.lookY=0;}
+  function panLook(yaw,pitch){
+    lookYaw=wrap(lookYaw+yaw);lookPitch=clamp(lookPitch+pitch,-2.57,2.57);
+    if(station)station.preset=false;
+  }
   const host=el.parentElement;
   function resize(){
     const width=host.clientWidth||innerWidth,height=host.clientHeight||innerHeight;
@@ -74,9 +87,9 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
   environment();
   function updateAvatar(dt){
     const p=sim;
-    rider.group.visible=!ride && (!!station||photo||opts.view!=='first');
-    const tipsOnly=opts.view==='tips'&&!photo&&!station;
-    for(const child of rider.group.children)child.visible=!tipsOnly||/^(Left ski|Right ski|Snowboard)$/.test(child.name);
+    rider.group.visible=!ride;
+    const embodied=!photo && (!station || station.view==='wide' || opts.view==='first');
+    rider.setVisibility(embodied&&opts.view==='first'?'first':embodied&&opts.view==='tips'?'tips':'body');
     rider.group.position.set(p.x,p.y+.004,p.z);
     surfNorm.set((data.height(p.x-2,p.z)-data.height(p.x+2,p.z))/4,1,(data.height(p.x,p.z-2)-data.height(p.x,p.z+2))/4).normalize();
     if(p.airHeight>.1)surfNorm.lerp(up,clamp(p.airHeight*.8,0,1)).normalize();
@@ -85,55 +98,109 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
     rider.update(p,dt,clock);
   }
   function moveCamera(dt){
-    const p=sim,mode=opts.view;
-    const smoothing=snap?1:1-Math.exp(-dt*6.5);
-    const travelHeading=p.travelHeading??p.heading;
-    camHeading=snap?travelHeading:mixAngle(camHeading,travelHeading,1-Math.exp(-dt*4.6));
-    if(!holdingOrbit){freeYaw*=Math.exp(-dt*4);freePitch*=Math.exp(-dt*4);}
-    const a=camHeading+(photo||ride?0:freeYaw),fx=Math.sin(a),fz=-Math.cos(a),rx=-fz,rz=fx;
-    const dx=(back,side)=>p.x-fx*back+rx*side,dz=(back,side)=>p.z-fz*back+rz*side;
-    let fov=61;
+    const p=sim,mode=opts.view,run=p.mode==='run';
+    const travel=p.travelHeading??p.heading,fast=clamp(p.speed/22,0,1);
+    const first=mode==='first'&&!photo&&!ride;
+    const tips=mode==='tips'&&!photo&&!ride&&(!station||station.view==='wide');
+    const cameraEase=snap?1:1-Math.exp(-dt*8);
+    const pitchEase=snap?1:1-Math.exp(-dt*7.5);
+    camHeading=snap?travel:mixAngle(camHeading,travel,1-Math.exp(-dt*(first?6:4.8)));
+    bodyOrigin.set(p.x,p.y,p.z);bodyStep.copy(bodyOrigin).sub(lastOrigin);lastOrigin.copy(bodyOrigin);
+    if(!paused&&!photo&&(input.lookX||input.lookY))panLook(input.lookX*dt*1.95,input.lookY*dt*1.38);
+    let fov=61,bank=0,addPitch=0,heading=camHeading,lockEye=false;
     if(photo){
-      const focus=photoSite?.focus;
-      const theta=photoSite ? -photoSite.yaw+orbitYaw : a+orbitYaw;
+      const focus=photoSite?.focus,theta=photoSite ? -photoSite.yaw+orbitYaw : travel+orbitYaw;
       const reach=orbitZoom*Math.cos(orbitPitch);
       look.set(focus?.x??p.x,focus?.y??(p.y+.96),focus?.z??p.z).add(photoPan);
       want.set(look.x-Math.sin(theta)*reach,look.y+.32+Math.sin(orbitPitch)*orbitZoom,look.z+Math.cos(theta)*reach);
-      want.y=Math.max(want.y,data.height(want.x,want.z)+.4);fov=52;
+      want.y=Math.max(want.y,data.height(want.x,want.z)+.30);fov=52;
     }else if(ride){
       const {position:eye,direction}=ride.lift.getRide(ride.t,ride.dir);
-      const h=ride.look+Math.atan2(direction.x,-direction.z);want.copy(eye).addScaledVector(up,.28);
-      look.set(eye.x+Math.sin(h)*17,eye.y+1+ride.pitch*12,eye.z-Math.cos(h)*17);fov=73;
+      want.copy(eye);want.y+=.28;heading=Math.atan2(direction.x,-direction.z)+ride.look;
+      baseBearing=heading;heading+=lookYaw;
+      look.set(want.x+Math.sin(heading)*18,want.y+.6,want.z-Math.cos(heading)*18);
+      addPitch=lookPitch;fov=73;lockEye=true;
+    }else if(first||tips){
+      // The horizon follows the line of travel. The eye itself follows the rider's
+      // changing stance, so a tuck brings the snow closer without delaying road motion.
+      if(first){
+        rider.group.localToWorld(rider.eyePosition(want));want.sub(bodyOrigin);
+        if(snap)eyeOffset.copy(want);else eyeOffset.lerp(want,1-Math.exp(-dt*(reducedMotion?7:17)));
+        want.copy(bodyOrigin).add(eyeOffset);
+      }else{
+        want.set(p.x-.15*Math.sin(travel),p.y+.90,p.z+.15*Math.cos(travel));
+      }
+      fov=tips?76:station?71:72+(reducedMotion?2:15)*fast+Math.min(2,p.boost*fast*2);
+      const grade=THREE.MathUtils.degToRad(p.slope||0);
+      let neutral=station?-.055:-.16-.70*grade;
+      if(tips)neutral=-.57-.68*grade;
+      else if(run){
+        rider.group.localToWorld(rider.tipPosition(tipWorld));
+        const toTip=tipWorld.sub(want);
+        const tipDepth=toTip.x*Math.sin(camHeading)-toTip.z*Math.cos(camHeading);
+        const tipPitch=Math.atan2(toTip.y,tipDepth);
+        const tipAtBottom=tipPitch+Math.atan(.85*Math.tan(THREE.MathUtils.degToRad(fov*.5)));
+        neutral=clamp(Math.min(neutral,tipAtBottom)-.030*(p.trim||0),-1.25,-.08);
+        if(!reducedMotion)neutral+=.023*(p.launch||0)-.045*(p.landing||0);
+      }
+      headPitch+= (neutral-headPitch)*pitchEase;
+      baseBearing=camHeading+(run?.11*(p.slipAngle||0):0);
+      heading=baseBearing+lookYaw;
+      look.set(want.x+Math.sin(heading)*20,want.y+Math.tan(headPitch)*20,want.z-Math.cos(heading)*20);
+      bank=run&&!reducedMotion?clamp((p.edge||0)*.080+(p.curve||0)*fast*.033,-.115,.115):0;
+      addPitch=lookPitch;lockEye=true;
     }else if(station){
-      const home=station.eye,aim=station.target;
-      const co=Math.cos(stationYaw),si=Math.sin(stationYaw);
-      const pivot=station.view==='wide'?p:station.view==='valley'?home:aim;
+      const eye=station.eye,aim=station.target;
+      const pivot=station.view==='wide'?bodyOrigin:station.view==='valley'?eye:aim;
+      const co=Math.cos(lookYaw),si=Math.sin(lookYaw);
       function rotate(v,out){
         const ex=v.x-pivot.x,ez=v.z-pivot.z;
-        out.set(pivot.x+ex*co+ez*si,v.y,pivot.z-ex*si+ez*co);
+        out.set(pivot.x+ex*co-ez*si,v.y,pivot.z+ex*si+ez*co);
       }
-      rotate(home,want);rotate(aim,look);
-      want.y=Math.max(want.y,data.height(want.x,want.z)+.7);
-      look.y+=Math.tan(stationPitch)*Math.hypot(look.x-want.x,look.z-want.z);
-      fov=station.fov;
-    }else if(mode==='first'||mode==='tips'){
-      const tip=mode==='tips';const x=dx(tip?.15:-.24,0),z=dz(tip?.15:-.24,0);want.set(x,p.y+(tip?.93:1.59),z);
-      const reach=tip?2.1:19;look.set(x+fx*reach,p.y+(tip?-.59:1.42)-Math.tan(p.slope*Math.PI/180)*reach*.69,z+fz*reach);fov=tip?76:75;
-    }else if(mode==='top'){
-      want.set(dx(1.6,0),p.y+26,dz(1.6,0));look.set(dx(-.45,0),p.y,dz(-.45,0));fov=54;
+      rotate(eye,want);rotate(aim,look);
+      want.y=Math.max(want.y,data.height(want.x,want.z)+.60);
+      baseBearing=Math.atan2(aim.x-eye.x,eye.z-aim.z);
+      addPitch=lookPitch;fov=station.fov;
     }else{
-      let back=5,side=0,lift=1.92,lead=5.6,eye=1.42;
-      if(mode==='low'){back=3.3;lift=.37;lead=3.2;eye=1.07;fov=70;}
-      if(mode==='left'||mode==='right'){back=1.7;side=mode==='right'?5:-5;lift=1.45;lead=.65;eye=.96;}
-      if(mode==='front'){back=-4.4;side=.38;lift=1.45;lead=0;eye=1.03;}
+      // Rotate the rig around the skier. Keep the in-motion camera's smoothing
+      // local to the rider, including during a rapid carve or a landing.
+      heading=camHeading+lookYaw;
+      const fx=Math.sin(heading),fz=-Math.cos(heading),rx=-fz,rz=fx;
+      const dx=(back,side)=>p.x-fx*back+rx*side,dz=(back,side)=>p.z-fz*back+rz*side;
+      let back=4.6+fast*1.25,side=0,lift=1.82+fast*.22,lead=4.8+fast*.7,eye=1.35;
+      if(mode==='low'){back=3.25;lift=.38;lead=3;eye=1.02;fov=70;}
+      if(mode==='top'){back=1.65;lift=26;lead=.45;eye=0;fov=54;}
+      if(mode==='left'||mode==='right'){back=1.8;side=mode==='right'?4.8:-4.8;lift=1.44;lead=.59;eye=.95;}
+      if(mode==='front'){back=-4.3;side=.32;lift=1.48;lead=0;eye=1.01;}
       if(mode==='far'){back=15;side=4.4;lift=4.8;lead=3.4;eye=1.2;}
-      const x=dx(back,side),z=dz(back,side);const cy=Math.max(p.y+lift,data.height(x,z)+lift);
-      want.set(x,cy,z);look.set(dx(-lead,0),p.y+eye-Math.tan(p.slope*Math.PI/180)*lead*.78,dz(-lead,0));
-      if(mode==='follow')fov=60+clamp(p.speed*.20,0,5);
+      if(mode==='follow')fov=60+(reducedMotion?1:5)*fast;
+      const x=dx(back,side),z=dz(back,side),aheadX=dx(-lead,0),aheadZ=dz(-lead,0);
+      want.set(x,Math.max(p.y+lift,data.height(x,z)+lift),z);
+      look.set(aheadX,p.y+eye+(data.height(aheadX,aheadZ)-p.ground)*.75,aheadZ);
+      baseBearing=wrap(Math.atan2(look.x-want.x,want.z-look.z)-lookYaw);
+      addPitch=lookPitch;
+      if(!snap){camera.position.add(bodyStep);target.add(bodyStep);}
     }
-    if(snap){camera.position.copy(want);target.copy(look);}else{camera.position.lerp(want,smoothing);target.lerp(look,smoothing);}
-    if(!ride)camera.position.y=Math.max(camera.position.y,data.height(camera.position.x,camera.position.z)+.17);
-    camera.up.copy(up);camera.lookAt(target);if(!photo&&!ride&&!station&&Math.abs(freePitch)>.001)camera.rotateX(freePitch);if(Math.abs(camera.fov-fov)>.06){camera.fov=fov;camera.updateProjectionMatrix();}
+    if(snap||lockEye||photo){camera.position.copy(want);target.copy(look);}
+    else{camera.position.lerp(want,cameraEase);target.lerp(look,cameraEase);}
+    if(!ride)camera.position.y=Math.max(camera.position.y,data.height(camera.position.x,camera.position.z)+.15);
+    camera.up.copy(up);
+    if(photo)camera.lookAt(target);
+    else{
+      sight.copy(target).sub(camera.position);
+      const horizontal=Math.max(.001,Math.hypot(sight.x,sight.z));
+      const basePitch=Math.atan2(sight.y,horizontal);
+      const finalPitch=clamp(basePitch+addPitch,-pitchLimit,pitchLimit);
+      // Discard excess input at a pole so one small reverse drag moves the view.
+      lookPitch=finalPitch-basePitch;
+      const azimuth=Math.atan2(sight.x,-sight.z),cos=Math.cos(finalPitch);
+      sight.set(Math.sin(azimuth)*cos,Math.sin(finalPitch),-Math.cos(azimuth)*cos).add(camera.position);
+      camera.lookAt(sight);
+    }
+    roll+=(bank-roll)*(snap?1:1-Math.exp(-dt*5));
+    if(first&&Math.abs(roll)>.0001)camera.rotateZ(roll);
+    fov=snap?fov:camera.fov+(fov-camera.fov)*(1-Math.exp(-dt*7));
+    if(Math.abs(camera.fov-fov)>.008){camera.fov=fov;camera.updateProjectionMatrix();}
     sky.mesh.position.copy(camera.position);sun.target.position.set(p.x,p.y,p.z);
     sun.position.copy(sun.target.position).addScaledVector(source,32);
     snap=false;
@@ -157,8 +224,8 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
     orbitZoom=photoSite?.distance||5.9;orbitPitch=photoSite?.kind==='hall'?.13:.15;snap=true;treesLag=1;kick();
   }
   function resetScene(route){
-    sim.start(route);station=null;ride=null;photo=paused=false;active=true;holdingOrbit=false;
-    freeYaw=freePitch=simLag=0;snap=true;treesLag=1;lastUI=prev=0;
+    sim.start(route);station=null;ride=null;photo=paused=false;active=true;resetLook();
+    simLag=0;snap=true;treesLag=1;lastUI=prev=0;
     input.trim=input.steer=0;input.boost=input.brake=false;fx.reset();
   }
   function showScene(){updateAvatar(0);moveCamera(0);refreshLOD();kick();}
@@ -192,11 +259,23 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
     station={side,lift,end,summit,eye:point(place.camera.position,place.camera.height),
       target:point(place.camera.target,place.camera.targetHeight),fov:place.camera.fov||58};
     station.homeEye=station.eye.clone();station.homeTarget=station.target.clone();station.view='wide';
-    stationYaw=stationPitch=0;showScene();
+    resetLook();showScene();
   }
   function stage(route){
     const side=route.resort,place=data.summitPlaces[side];
     stopAt(route,place,side,lifts.find(l=>l.meta.id===place.liftId),place.stationEnd,true);
+  }
+  function pushOff(turn=0,preferred,signHeading){
+    if(!station)return null;
+    const poseHeading=wrap(baseBearing+lookYaw),requested=Number.isFinite(signHeading)?signHeading:wrap(poseHeading+turn);
+    const route=station.trailhead&&!turn?sim.route:navigation.departure(station.side,sim.x,sim.z,requested,preferred);
+    if(!route)return null;
+    const wasHead=opts.view==='first',oldPitch=headPitch,oldLookPitch=lookPitch;
+    resetScene(route);
+    sim.speed=sim.maxSpeed=2.15;sim.push=.75;
+    details.setRoute(route);camHeading=poseHeading;headPitch=oldPitch;
+    if(wasHead){snap=false;lookPitch=oldLookPitch;lastOrigin.set(sim.x,sim.y,sim.z);}
+    showScene();return route;
   }
   function trailhead(route){
     const f=route.frame(0),eye=[f.x-f.dx*6.4,f.z-f.dz*6.4],aim=[f.x+f.dx*10,f.z+f.dz*10];
@@ -239,7 +318,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
       const near=end==='top'?lift.meta.points.at(-2):lift.meta.points[1];
       const len=Math.hypot(near[0]-at[0],near[1]-at[1])||1;
       const ax=(near[0]-at[0])/len,az=(near[1]-at[1])/len;
-      const stand=[at[0]+az*14+ax*6,at[1]-ax*14+az*6];
+      const stand=navigation.stationExit(lift.meta,end);
       const eye=[stand[0]+az*5+ax*3,stand[1]-ax*5+az*3];
       const aim=[at[0]+ax*5,at[1]+az*5];
       stopAt(route,{position:stand,heading:Math.atan2(aim[0]-stand[0],stand[1]-aim[1]),
@@ -279,7 +358,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
   function kick(){if(!frame&&active)frame=requestAnimationFrame(loop);}
   el.addEventListener('webglcontextlost',e=>{e.preventDefault();active=false;onEvent('lost');});
   return {
-    sim,input,start,stage,trailhead,beginRide,leaveRide,
+    sim,input,start,stage,trailhead,pushOff,beginRide,leaveRide,
     lookAroundStation(view){
       if(!station)return;
       station.view=view;const side=station.side;
@@ -297,20 +376,51 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
         const shot=stationPortrait(station.lift,station.end);
         station.eye.copy(shot.eye);station.target.copy(shot.target);
       }
-      stationYaw=stationPitch=0;snap=true;treesLag=1;kick();
+      resetLook();station.preset=view!=='wide';
+      if(opts.view==='first'&&view!=='wide'){
+        // Look towards the landmark from the standing rider's eyes.
+        const at=view==='valley'?data.landmarks.find(l=>l.id===side+'-hall'):null;
+        if(at)orbitPivot.set(at.x,data.height(at.x,at.z)+10,at.z);
+        else orbitPivot.copy(station.target);
+        const dx=orbitPivot.x-sim.x,dz=orbitPivot.z-sim.z;
+        lookYaw=wrap(Math.atan2(dx,-dz)-sim.heading);
+        lookPitch=clamp(Math.atan2(orbitPivot.y-(sim.y+1.55),Math.hypot(dx,dz))+.055,-pitchLimit,pitchLimit);
+      }
+      snap=true;treesLag=1;kick();
     },
     get nextFlag(){return details.nextFlag(sim.along);},
     get conditions(){return conditions;},
     get station(){return station;},
     get nearbyStation(){const n=nearestStation();return n?{name:n.lift.meta.name,end:n.end}:null;},
-    pause(b){paused=b;input.trim=input.steer=0;input.brake=input.boost=false;prev=0;kick();},
+    pause(b){paused=b;input.lookX=input.lookY=input.trim=input.steer=0;input.brake=input.boost=false;prev=0;kick();},
     stop(){active=false;paused=false;photo=false;ride=station=null;if(frame)cancelAnimationFrame(frame);frame=0;sim.mode='idle';},
     environment(){environment();kick();},graphics(){graphicsScale=1;sun.castShadow=opts.quality!=='lite';resize();treesLag=1;kick();},
     changeRider(){scene.remove(rider.group);rider.dispose();rider=createRider(opts);scene.add(rider.group);sim.gear=opts.gear;updateAvatar(0);kick();},
-    cameraChanged(){snap=true;updateAvatar(0);kick();},
+    cameraChanged(){
+      if(station){station.view='wide';station.preset=false;station.eye.copy(station.homeEye);station.target.copy(station.homeTarget);}
+      resetLook();snap=true;updateAvatar(0);kick();
+    },
+    centerLook(){
+      if(station&&station.view!=='wide'){this.lookAroundStation('wide');return;}
+      resetLook();kick();
+    },
+    get looking(){return Math.abs(lookYaw)>.035 || Math.abs(lookPitch)>.035 || !!station?.preset;},
+    get facing(){return wrap(baseBearing+lookYaw);},
+    summitHeading(routeId){return station?.summit?navigation.summitHeading(station.side,routeId):undefined;},
+    pickSign(x,y){
+      if(!details.pickSign||ride||photo)return null;
+      const rect=el.getBoundingClientRect();
+      screenPoint.set((x-rect.left)/rect.width*2-1,1-(y-rect.top)/rect.height*2);
+      signRay.setFromCamera(screenPoint,camera);return details.pickSign(signRay.ray);
+    },
     photo(b,kind='rider'){photo=b;if(b)setPhotoPlace(kind);snap=true;prev=0;kick();},
     photoPlace:setPhotoPlace,
-    orbit(dx,dy){if(photo){orbitYaw-=dx*.006;orbitPitch=clamp(orbitPitch+dy*.006,-.22,1.35);snap=true;kick();}else if(ride){ride.look-=dx*.007;ride.pitch=clamp(ride.pitch+dy*.005,-.7,.6);}else if(station){stationYaw+=dx*.006;stationPitch=clamp(stationPitch+dy*.005,-.65,.72);kick();}else{holdingOrbit=true;freeYaw-=dx*.007;freePitch=clamp(freePitch+dy*.005,-.55,.78);}},
+    orbit(dx,dy){
+      const yawPerPixel=Math.PI/Math.max(170,Math.min(host.clientWidth*.46,390));
+      if(photo){orbitYaw=wrap(orbitYaw-dx*yawPerPixel);orbitPitch=clamp(orbitPitch+dy*yawPerPixel,-1.46,1.49);snap=true;}
+      else panLook(-dx*yawPerPixel,dy*yawPerPixel*.87);
+      kick();
+    },
     panPhoto(dx,dy,elevation=0){
       if(!photo)return;
       const scale=orbitZoom*.0026;
@@ -319,7 +429,6 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
       photoPan.addScaledVector(right,-dx*scale).addScaledVector(forward,dy*scale);
       photoPan.y=clamp(photoPan.y+elevation,-100,220);snap=true;treesLag=1;kick();
     },
-    releaseOrbit(){holdingOrbit=false;},
     zoom(d){orbitZoom=clamp(orbitZoom*d,photoSite?9:2.4,photoSite?360:180);snap=true;kick();},
     capture(){renderer.render(scene,camera);return new Promise(resolve=>el.toBlob(resolve,'image/png'));},
     get liftInfo(){return ride?{name:ride.lift.meta.name,resort:ride.lift.meta.resort,progress:ride.dir>0?ride.t:1-ride.t,dir:ride.dir,speed:ride.lift.speed}:null;}

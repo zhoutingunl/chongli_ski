@@ -1,5 +1,7 @@
 import * as THREE from 'three';
-import {clamp,mixAngle,randomGenerator,resortName} from './mountain.js';
+import {clamp,mixAngle,randomGenerator} from './mountain.js';
+import {getSkiSigns} from './navigation.js';
+import {createWayfinding} from './wayfinding.js';
 
 function localInstances(scene,geometry,material,items) {
   const mesh=new THREE.InstancedMesh(geometry,material,items.length),object=new THREE.Object3D();
@@ -18,27 +20,14 @@ function localInstances(scene,geometry,material,items) {
     mesh.count=count;mesh.visible=count>0;mesh.instanceMatrix.needsUpdate=true;
   };
 }
-function sign(scene,data,x,z,angle,title,small,color='#22556a') {
-  const c=document.createElement('canvas');c.width=768;c.height=244;
-  const ct=c.getContext('2d');ct.fillStyle=color;ct.fillRect(0,0,c.width,c.height);ct.strokeStyle='#e6eadd';ct.lineWidth=6;ct.strokeRect(9,9,750,226);
-  ct.fillStyle='#f9f8ef';ct.font='600 72px "PingFang SC","Microsoft YaHei",sans-serif';ct.textBaseline='middle';ct.fillText(title,40,98,680);
-  ct.font='36px "PingFang SC",sans-serif';ct.fillStyle='#d3e1dd';ct.fillText(small,44,183,660);
-  const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;tex.anisotropy=4;
-  const group=new THREE.Group();group.position.set(x,data.height(x,z),z);group.rotation.y=-angle;
-  const board=new THREE.Mesh(new THREE.BoxGeometry(3.7,1.18,.13),new THREE.MeshLambertMaterial({color:0x364649}));
-  board.position.y=2.45;group.add(board);
-  const front=new THREE.Mesh(new THREE.PlaneGeometry(3.67,1.16),new THREE.MeshBasicMaterial({map:tex}));front.position.set(0,2.45,.069);group.add(front);
-  const steel=new THREE.MeshLambertMaterial({color:0x586363});
-  for(const xx of [-1.28,1.28]){const post=new THREE.Mesh(new THREE.CylinderGeometry(.064,.077,2.65,7),steel);post.position.set(xx,1.28,0);group.add(post);}
-  scene.add(group);
-}
 function distAlong(points,s) {
   for(let i=1;i<points.length;i++){
     const [x,z]=points[i-1],[bx,bz]=points[i],dx=bx-x,dz=bz-z,d=Math.hypot(dx,dz);
     if(d>s){const t=s/d;return {x:x+t*dx,z:z+t*dz,rx:-dz/d,rz:dx/d};}s-=d;
   }
 }
-export function courseDetails(scene,data) {
+export function courseDetails(scene,data,navigation) {
+  const directions=createWayfinding(scene,data,navigation?.signs||getSkiSigns(data));
   const poles=[],caps=[],netPos=[],rand=randomGenerator(18359);
   for(const trail of data.trails){
     for(let s=22;s<8000;s+=63){
@@ -60,13 +49,6 @@ export function courseDetails(scene,data) {
   const nt=new THREE.CanvasTexture(netCanvas);nt.wrapS=THREE.RepeatWrapping;nt.colorSpace=THREE.SRGBColorSpace;nt.anisotropy=4;
   const uv=[],netPoles=[];
   for(const r of data.routes.filter(r=>r.id.endsWith('classic'))){
-    const start=r.frame(18);
-    sign(scene,data,start.x-start.dz*8.5,start.z+start.dx*8.5,start.angle,r.resort==='wanlong'?'长龙道':'芍药花',resortName(r.resort)+'滑雪场   ·   山顶出发');
-    const count=r.resort==='wanlong'?800:356;
-    const fork=r.frame(count-23);
-    sign(scene,data,fork.x+fork.dz*12,fork.z-fork.dx*12,fork.angle,r.resort==='wanlong'?'山丹丹联络道':'翠菊花联络道','联滑    '+(r.resort==='wanlong'?'前往云顶':'前往万龙'),'#315853');
-    const last=r.frame(r.length-38);
-    sign(scene,data,last.x+last.dz*10,last.z-last.dx*10,last.angle,'雪具大厅',r.resort==='wanlong'?'龙宫酒店    ·    索道下站':'云顶大酒店    ·    索道下站');
     for(const offset of [26,r.length*.48,r.length-90]){
       const side=rand()<.5?-1:1, vs=[];
       for(let s=0;s<60;s+=4.4){
@@ -82,13 +64,6 @@ export function courseDetails(scene,data) {
   batches.push(localInstances(scene,plank,new THREE.MeshLambertMaterial({color:0xc94b31}),netPoles));
   const ng=new THREE.BufferGeometry();ng.setAttribute('position',new THREE.Float32BufferAttribute(netPos,3));ng.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));
   scene.add(new THREE.Mesh(ng,new THREE.MeshBasicMaterial({map:nt,side:THREE.DoubleSide,alphaTest:.43,transparent:false})));
-  for(const id of ['wanlong-gold','wanlong-silver']){
-    const r=data.routes.find(route=>route.id===id);
-    if(!r)continue;
-    const f=r.frame(16);
-    sign(scene,data,f.x-f.dz*8.5,f.z+f.dx*8.5,f.angle,id==='wanlong-gold'?'金龙道':'银龙道',
-      id==='wanlong-gold'?'GOLDEN DRAGON   ·   万龙':'SILVER DRAGON   ·   大奔头','#294b56');
-  }
   const gateCloth=new THREE.BufferGeometry();
   gateCloth.setAttribute('position',new THREE.Float32BufferAttribute([
     0,1.8,0, .74,1.67,-.10, 0,1.03,0, .74,1.67,-.10, .78,1.0,-.08, 0,1.03,0,
@@ -146,7 +121,7 @@ export function courseDetails(scene,data) {
   for(const [vertices,col] of [[walls,0xf4eeeb],[roofs,0xd7dbdb]]){
     const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));if(vertices===walls)g.setAttribute('uv',new THREE.Float32BufferAttribute(wallUv,2));g.computeVertexNormals();scene.add(new THREE.Mesh(g,new THREE.MeshLambertMaterial({color:col,map:vertices===walls?facadeTex:null,side:THREE.DoubleSide})));
   }
-  return {setRoute,nextFlag,locate(x,z){for(const update of batches)update(x,z);}};
+  return {setRoute,nextFlag,pickSign:directions.pickSign,locate(x,z){directions.locate(x,z);for(const update of batches)update(x,z);}};
 }
 
 function powderStamp() {
