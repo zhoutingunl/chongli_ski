@@ -38,6 +38,7 @@ export class Descent {
     this.route = route; this.mode = 'run'; this.gear = this.opts.gear;
     this.junctions=this.navigation?.stationsOn(route)||[];
     this.passedJunctions=new Set();this.requestedTurn=null;this.steeringIntent=0;this.steeringAge=0;
+    if(route.departedJunction)this.passedJunctions.add(route.departedJunction);
     this.branchShiftX=this.branchShiftZ=0;
     this.departureTrack=route.approach?.kind==='summit'?[route.points[0]]:null;this.entryCheck=0;
     this.along = this.offset = this.edgeSpeed = this.speed = this.maxSpeed = 0;
@@ -51,6 +52,7 @@ export class Descent {
     this.guideLean = this.bankSwap = this.bump = this.lastGrade = this.force = 0;
     this.cutSide = 1; this.contactTime = 5; this.takeoffSpeed = this.verticalAlong = 0; this.flightCos = 1;
     const f = trackFrame(route, 0);
+    this.departureHeading=f.angle;
     this.x = f.x; this.z = f.z; this.heading = this.travelHeading = f.angle;
     this.y = this.ground = this.startY = this.data.height(this.x, this.z);
     this.surface();
@@ -182,15 +184,18 @@ export class Descent {
       this.junctionSteer=clamp(steer,-limit,limit);
     }
     let next=this.requestedTurn?.id===key?this.requestedTurn.routeId:null;
-    if(!next && lead>=2 && this.steeringAge>=.16){
-      const aim=m.sign.approach+steer*1.35;
+    const startingHere=m.index===0 && lead>=-3 && this.travel<4;
+    if(!next && (lead>=2||startingHere) && this.steeringAge>=.16){
+      // At a mapped trailhead a normal left/right key means a quarter turn
+      // from the standing view, exactly as it does when pushing off an apron.
+      const aim=startingHere?this.departureHeading+Math.PI*.5*clamp(steer/.68,-1,1):m.sign.approach+steer*1.35;
       next=m.sign.options.reduce((best,o)=>Math.abs(angleBetween(aim,o.heading))<Math.abs(angleBetween(aim,best.heading))?o:best).routeId;
     }
     if(!next && !this.opts.assist && lead<5 && lead>=-5 && this.speed>2){
       const best=m.sign.options.reduce((a,b)=>Math.abs(angleBetween(this.travelHeading,a.heading))<Math.abs(angleBetween(this.travelHeading,b.heading))?a:b);
       if(Math.abs(angleBetween(this.travelHeading,best.heading))<.3 && best.routeId!==m.current.routeId)next=best.routeId;
     }
-    if(lead<-1){
+    if(lead<-1&&!startingHere){
       this.passedJunctions.add(key);if(this.requestedTurn?.id===key)this.requestedTurn=null;this.steeringAge=0;
     }
     if(!next||lead>30||next===m.current.routeId)return;

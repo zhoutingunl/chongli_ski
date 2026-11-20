@@ -14,7 +14,8 @@ const mouths = {
   gold:   {routeId:'wanlong-gold',   name:'金龙道', en:'Golden Dragon', difficulty:'advanced'},
   silver: {routeId:'wanlong-silver', name:'银龙道', en:'Silver Dragon', difficulty:'advanced'},
   peony:  {routeId:'genting-classic',name:'芍药花', en:'Peony', difficulty:'intermediate'},
-  datura: {routeId:'genting-valley', name:'曼陀罗', en:'Datura', difficulty:'intermediate'}
+  datura: {routeId:'genting-valley', name:'曼陀罗', en:'Datura', difficulty:'intermediate'},
+  felwort:{routeId:'via-w771168509',name:'花锚',en:'Felwort',difficulty:'intermediate',canonicalId:'genting-valley'}
 };
 const forks = [
   {id:'wanlong-jade-fork', resort:'wanlong', reference:'wanlong-classic', afterLeg:0, options:[
@@ -29,7 +30,7 @@ const forks = [
 ];
 const entryOf = id => ({'wanlong-classic':'long','wanlong-long':'long','wanlong-to-genting':'long',
   'wanlong-gold':'gold','wanlong-silver':'silver','genting-classic':'peony',
-  'genting-to-wanlong':'peony','genting-valley':'datura'})[id];
+  'genting-to-wanlong':'peony','genting-valley':'datura','via-w771168509':'felwort'})[id];
 
 // Directed OSM way slices, in their original node order. Each adjoining pair
 // shares the same survey node. A side run ends on the named itinerary below.
@@ -67,7 +68,10 @@ function summitLinks(data) {
     peony:{via:[[593,337],[576.8,322.2],[557,280.3],[511,285.8],[502.3,281.1],[491.3,207.4]],join:0},
     // The 1-lift unloading apron lies east of Datura's first surveyed node.
     // Join its forward reach instead of doubling back through the terminal.
-    datura:{via:[],join:2}
+    datura:{via:[],join:2},
+    // The south side of lift 1 is open snow in the winter orthophoto and tree
+    // cover grid. Pass outside the lower face of its platform onto OSM Felwort.
+    felwort:{via:[[600,376.1],[583,376.5],[570.5,382.5]],join:1}
   };
 }
 
@@ -245,6 +249,14 @@ function optionOnRoute(option,route,anchor,along,reach=35) {
 
 function signPosition(f,width,side) {return [f.x-f.dz*side*width,f.z+f.dx*side*width];}
 
+function entrySign(data,key,r,link){
+  const opt=mouths[key],s=r.distances[link.join]+75,f=r.frame(s),p=[f.x,f.z];
+  const width=data.trails.find(t=>t.id===r.legs[0].trailId).width;
+  const [x,z]=signPosition(f,width*.42,1);
+  return {id:key+'-entry',type:'confirmation',resort:r.resort,x,z,approach:f.angle,
+    junctionPosition:p,sourceRouteId:r.id,along:s,options:[optionOnRoute(opt,r,p,s)]};
+}
+
 function makeSigns(data,byId,links,structures) {
   const signs=[];
   for(const side of ['wanlong','genting']) {
@@ -265,11 +277,7 @@ function makeSigns(data,byId,links,structures) {
       junctionPosition:p,upstreamPosition:pair(r.at(s-48)),sourceRouteId:r.id,along:s,options});
   }
   for(const [key,opt] of Object.entries(mouths)){
-    const r=byId.get(opt.routeId),s=r.distances[links[key].join]+75,f=r.frame(s),p=[f.x,f.z];
-    const width=data.trails.find(t=>t.id===r.legs[0].trailId).width;
-    const [x,z]=signPosition(f,width*.42,1);
-    signs.push({id:key+'-entry',type:'confirmation',resort:r.resort,x,z,approach:f.angle,
-      junctionPosition:p,sourceRouteId:r.id,along:s,options:[optionOnRoute(opt,r,p,s)]});
+    const r=byId.get(opt.routeId);if(r)signs.push(entrySign(data,key,r,links[key]));
   }
   return signs;
 }
@@ -560,9 +568,16 @@ export function createSkiNavigation(data) {
   const structures=[...data.buildings.map(b=>structure(b.footprint)),...data.lifts.flatMap(l=>[0,1].map(end=>structure(terminalRing(l,end))))];
   const links=summitLinks(data),signs=makeSigns(data,byId,links,structures);
   const network=pisteNetwork(data,byId,signs,structures);
+  const entries=new Map(byId),flower=network.routeFor(mouths.felwort.routeId);
+  if(flower){
+    entries.set(flower.id,flower);
+    const summit=signs.find(s=>s.type==='summit'&&s.resort==='genting'),foot=summit.junctionPosition;
+    const line=summitRoute(data,flower,links,foot,structures);
+    if(line){summit.options.push(optionOnRoute(mouths.felwort,line,foot,0,13));signs.push(entrySign(data,'felwort',flower,links.felwort));}
+  }
   const summitGuides=new Map(signs.filter(s=>s.type==='summit').map(s=>{
-    const options=s.options.map(o=>({...o,trailId:byId.get(o.routeId).legs[0].trailId,choiceId:o.routeId,
-      canonicalId:o.routeId,flowHeading:o.heading,role:'entry',selectable:true}));
+    const options=s.options.map(o=>({...o,trailId:entries.get(o.routeId).legs[0].trailId,choiceId:o.routeId,
+      canonicalId:o.canonicalId||o.routeId,flowHeading:o.heading,role:'entry',selectable:true}));
     return [s.resort,{id:s.id,siteId:s.id,type:'summit',resort:s.resort,position:s.junctionPosition,
       junctionPosition:s.junctionPosition,approach:s.approach,along:0,distance:0,from:null,current:null,options,actionable:true}];
   }));
@@ -575,11 +590,11 @@ export function createSkiNavigation(data) {
   const junctionCache=new WeakMap();
   const gates=new Map();
   for(const [key,opt] of Object.entries(mouths)){
-    const route=byId.get(opt.routeId);gates.set(route.legs[0].trailId,{key,route,opt});
+    const route=entries.get(opt.routeId);if(route)gates.set(route.legs[0].trailId,{key,route,opt});
   }
   function captureGate(planned,history,foot,travelHeading){
     const near=data.index.near(...foot),gate=gates.get(near.trail?.id);
-    if(!gate||gate.route.resort!==planned.resort||entryOf(planned.id)===gate.key||near.distance>near.trail.width*.35)return null;
+    if(!gate||gate.route.resort!==planned.resort||planned.approach?.target===gate.opt.name||near.distance>near.trail.width*.35)return null;
     const raw=gate.route,q=raw.closest(...foot),f=raw.frame(q.along);
     // A free skier can traverse the top apron after pushing off. Recognize the
     // new mouth only inside its mapped corridor and travelling down the piste.
@@ -612,11 +627,33 @@ export function createSkiNavigation(data) {
     const out=makeRoute({...canonical,resort:route.resort},points,legs,data,route.approach);
     return stopOutsideTerminal(out,structures,data);
   }
+  // On the map, some actual trailheads are precisely the point where two ways
+  // split. Their outlet must be chosen at the standing foot before any distance
+  // has accumulated, instead of searching again for a nearby parallel piste.
+  const sharedStarts=[];
+  for(const raw of byId.values()){
+    const first=network.guidanceOn(raw)[0];
+    if(first?.index===0&&first.actionable)sharedStarts.push({raw,first});
+  }
+  function directTrailhead(raw,first,foot,heading,preferred){
+    const choices=first.options.filter(o=>o.selectable);
+    const next=choices.reduce((best,o)=>Math.abs(angleDiff(heading,o.heading))<Math.abs(angleDiff(heading,best.heading))?o:best);
+    const chosen=choices.find(o=>o.choiceId===preferred&&Math.abs(angleDiff(heading,o.heading))<=Math.abs(angleDiff(heading,next.heading))+.10)||next;
+    const source=network.routeFor(chosen.choiceId,raw.id),base=byId.get(chosen.canonicalId);
+    const at=source.points.findIndex(p=>samePoint(p,first.position));
+    if(at<0)return null;
+    const points=[],legs=[];appendSlice(points,legs,source,at);points[0]=foot;
+    const route=stopOutsideTerminal(pushInDirection(makeRoute(base,points,legs,data),heading,data,structures),structures,data);
+    route.departedJunction=first.id;
+    return route;
+  }
   function departure(side,x,z,heading,preferred){
     const foot=[x,z],place=data.summitPlaces[side];
     if(!place||!Number.isFinite(x)||!Number.isFinite(z))return null;
     if(!Number.isFinite(heading))heading=place.heading;
     if(distance(foot,place.position)>6){
+      const origin=sharedStarts.find(({raw,first})=>raw.resort===side&&distance(foot,first.position)<1.6);
+      if(origin)return directTrailhead(origin.raw,origin.first,foot,heading,preferred);
       const local=selectLocalRoute(data,byId,graph,goals,structures,side,foot,heading,preferred);
       return stopOutsideTerminal(pushInDirection(local,heading,data,structures),structures,data);
     }
@@ -627,11 +664,12 @@ export function createSkiNavigation(data) {
     // A paper-map intention only breaks ties there or within a small sight cone.
     const favored=preferredMouth&&ranked.find(c=>c.o.routeId===preferredMouth.routeId&&c.error<=ranked[0].error+.10);
     const id=favored?preferred:ranked[0].o.routeId;
-    const route=pushInDirection(summitRoute(data,byId.get(id),links,foot,structures),heading,data,structures);
+    const raw=entries.get(id),route=pushInDirection(summitRoute(data,raw,links,foot,structures),heading,data,structures);
+    if(route&&raw.originalId&&byId.has(raw.originalId))route.name=byId.get(raw.originalId).name;
     return stopOutsideTerminal(route,structures,data);
   }
   function summitHeading(side,routeId){
-    const route=byId.get(routeId),entry=mouths[entryOf(routeId)];
+    const route=entries.get(routeId),entry=mouths[entryOf(routeId)];
     if(!entry||route?.resort!==side)return null;
     return signs.find(s=>s.type==='summit'&&s.resort===side).options.find(o=>o.routeId===entry.routeId)?.heading??null;
   }

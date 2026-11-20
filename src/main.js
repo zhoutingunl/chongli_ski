@@ -8,7 +8,6 @@ import {TiltSteering} from './tilt.js';
 import {timeOptions,weatherOptions} from './environment.js';
 import {setLanguage,t,label} from './language.js';
 import {heading,button,choice,seg,row,settingsPanel,environmentPanel,controlsPanel} from './settings.js';
-import {createTrailGuide} from './trail-guide.js';
 
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const prefKey='ridgeline.preferences.v1',recordKey='ridgeline.descents.v1';
@@ -45,7 +44,6 @@ const meters=n=>Math.round(n).toLocaleString('en-US'),km=n=>(n/1000).toFixed(2)+
 const resort=id=>label(resortName(id));
 const tick='<span class="tick">'+glyph('check',14)+'</span>';
 const tilt=new TiltSteering(updateInputs,reason=>announce(reason==='denied'?t('体感权限未开启，可拖动雪面转弯。','Motion access was declined. Drag the snow to steer.'):t('当前未收到倾斜信号，可拖动雪面转弯。','No tilt signal yet. Drag the snow to steer.')));
-const guide=createTrailGuide($('#trail-guide'), selectSign);
 function announce(message){const el=$('#toast');el.textContent=message;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),2700);}
 function refreshMusic(){
   const mode=screen==='photo'?photoOrigin:screen;
@@ -110,7 +108,7 @@ function setupText(){
   $('#look-reset-text').textContent=t('回正视线','Face forward');showCameraMode();
   $('#station-card [data-act="launch-trail"]').textContent=t('从这里出发','Start here');
   $('#base-actions').setAttribute('aria-label',t('山脚停留','Base area'));
-  $('#base-hint').textContent=t('拖动环顾山脚','Drag to look around');
+  $('#base-hint').textContent=t('拖动转身环顾','Drag to turn and look around');
   $('#base-result').textContent=t('本趟成绩','Run stats');
   $('#base-hall-text').textContent=t('看大厅与酒店','Look at the hall & hotel');
   $('#base-restart-text').textContent=t('重滑本线','Ski this run again');
@@ -136,7 +134,8 @@ function updateInputs(){
   const lateral=clamp(keyboard*(keys.has('ShiftLeft')||keys.has('ShiftRight')?1:.68)+(hasTouchSteer?drag:keyboard?0:tilt.value),-1,1);
   if(!physical.has('down'))backDepart=false;
   if(world){
-    world.input.lookX=viewActive?Number(keys.has('KeyL'))-Number(keys.has('KeyJ')):0;
+    const look=Number(keys.has('KeyL'))-Number(keys.has('KeyJ'))+(screen==='base'?keyboard:0);
+    world.input.lookX=viewActive?clamp(look,-1,1):0;
     world.input.lookY=viewActive?Number(keys.has('KeyU'))-Number(keys.has('KeyO')):0;
     world.input.steer=active?lateral:0;
     world.input.trim=active?clamp(trim+Number(keys.has('KeyI'))-Number(keys.has('KeyK')),-1,1):0;
@@ -155,7 +154,6 @@ function hudVisible(show){
   if(screen!=='home')showCameraMode();
   $('#hud').classList.toggle('watching',watching()||screen==='base');$('#lift-strip').hidden=screen!=='lift';$('#station-card').hidden=!watching();
   $('#base-actions').hidden=screen!=='base';
-  if(!show||page||(screen!=='summit'&&screen!=='run'))guide.hide();
   $('#tray-tools').hidden=!tray;$('#tray-toggle').setAttribute('aria-expanded',String(tray));$('#near-lift').hidden=true;
   if(watching()){
     const side=world.station.side,lodge=label(side==='wanlong'?'山顶木屋':'金花阁');
@@ -184,9 +182,9 @@ function launch(route){
   discardMap();page='';$('#overlay').hidden=true;routeId=route.id;prefs.resort=route.resort;save();
   recorded=false;screen='run';tray=false;clearInputs();tilt.calibrate();world.start(route);hudVisible(true);paintHUD();refreshMusic();
 }
-function pushOff(direction,sign){
+function pushOff(direction,preferred=screen==='summit'?summitChoice||undefined:undefined,heading){
   if(!watching()||page||busy||!world)return false;
-  const route=world.pushOff(departureTurn[direction]??0,sign?.routeId||summitChoice||undefined,sign?.heading);
+  const route=world.pushOff(departureTurn[direction]??0,preferred,heading);
   if(!route)return false;
   recorded=false;screen='run';tray=false;routeId=route.id;prefs.resort=route.resort;save();
   tilt.calibrate();hudVisible(true);paintHUD();refreshMusic();return true;
@@ -202,23 +200,11 @@ function beginDirection(direction){
     world.sim.speed=1.35;
   return true;
 }
-function selectSign(sign){
-  if(!sign||(sign.selectable===false)||!(sign.choiceId||sign.routeId))return;
-  if(watching()){pushOff('up',sign);return;}
-  if(screen==='run'&&world.sim.chooseDirection(sign.choiceId||sign.routeId,sign.signId)){
-    announce(t('岔口转入','At the junction · ')+t(sign.name,sign.en||label(sign.name)));
-  }
-}
 function home(){
   clearInputs();world?.stop();screen='home';page='';discardMap();$('#overlay').hidden=true;
   homeChoices();hudVisible(false);sound.update(0,0);refreshMusic();
 }
 function worldEvent(type,arg){
-  if(type==='guide'){
-    if(arg&&!page&&(screen==='run'||screen==='summit'))guide.update({...arg,language:prefs.language});
-    else guide.hide();
-    return;
-  }
   if(type==='hud'&&inWorld()&&!page){
     if(screen==='run'&&arg.route?.id!==routeId){routeId=arg.route.id;announce(t('转入','Joined ')+label(arg.route.name));}
     paintHUD();sound.update(screen==='lift'?3:arg.speed,(arg.skid||0)*.65+(arg.brake||0)*.6,document.hidden);refreshMusic();}
@@ -282,7 +268,7 @@ function openPanel(k){
   if(k==='map'&&previousPage!=='map')mapId=(screen==='summit'&&summitChoice)||world?.sim.route?.id||routeId;
   if(k==='map'&&screen==='home')mapId=routeId;
   $('#overlay').hidden=false;$('#overlay').setAttribute('role','dialog');$('#overlay').setAttribute('aria-modal','true');
-  $('#hud').hidden=true;guide.hide();$('#pause-nav').innerHTML=navMarkup();renderPanel();
+  $('#hud').hidden=true;$('#pause-nav').innerHTML=navMarkup();renderPanel();
   if(!previousPage)$('#panel button')?.focus({preventScroll:true});
 }
 function closePanel(){
@@ -412,7 +398,7 @@ function action(a){
   if(a==='apply-route'){
     const r=panelRoute();
     if(screen==='summit'&&summitChoice&&r.resort===world.station.side){
-      const heading=world.summitHeading(r.id);closePanel();pushOff('up',{routeId:r.id,heading});
+      const heading=world.summitHeading(r.id);closePanel();pushOff('up',r.id,heading);
     }
     else if(screen==='run'&&(r.id===world.sim.route.id||world.sim.switchRoute(r))){closePanel();paintHUD();}
     else begin(r.id);return;
@@ -471,6 +457,7 @@ document.addEventListener('keydown',e=>{
   if(['KeyJ','KeyL','KeyU','KeyO'].includes(e.code)){e.preventDefault();keys.add(e.code);updateInputs();return;}
   const way=keyDirection[e.code];
   if(way&&screen!=='lift'){
+    if(screen==='base'&&e.repeat&&!keys.has(e.code))return;
     e.preventDefault();if(!e.repeat&&!keys.has(e.code))beginDirection(way);
     keys.add(e.code);updateInputs();return;
   }
@@ -516,10 +503,9 @@ function touchStart(e){
   const steer=screen==='run'&&(pad||(!mouse&&e.clientX<innerWidth*.44));
   e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);
   touches.set(e.pointerId,{x:e.clientX,y:e.clientY,startX:e.clientX,startY:e.clientY,
-    role:steer?'steer':'look',tap:!pad&&e.button===0,originTime:performance.now()});
+    role:steer?'steer':'look'});
   if(touches.size>=2){
     const fingers=[...touches.values()];
-    for(const pt of fingers)pt.tap=false;
     if(screen==='run'&&fingers.length===2&&fingers[0].role!==fingers[1].role)return;
     for(const pt of fingers)pt.role='look';
     multi=touchPair();drag=trim=0;updateInputs();
@@ -528,7 +514,6 @@ function touchStart(e){
 function touchMove(e){
   const pt=touches.get(e.pointerId);if(!pt||!world)return;
   const dx=e.clientX-pt.x,dy=e.clientY-pt.y;pt.x=e.clientX;pt.y=e.clientY;
-  if(Math.hypot(pt.x-pt.startX,pt.y-pt.startY)>6)pt.tap=false;
   if(multi&&touches.size>=2){
     const pair=touchPair();
     const mx=pair.x-multi.x,my=pair.y-multi.y;
@@ -546,8 +531,6 @@ function touchEnd(e){
   touches.delete(e.pointerId);multi=multi?touchPair():null;
   if(pt.role==='steer')drag=trim=0;
   updateInputs();
-  if(pt.tap&&e.type==='pointerup'&&performance.now()-pt.originTime<650&&screen!=='photo'&&screen!=='lift')
-    selectSign(world?.pickSign(e.clientX,e.clientY));
 }
 for(const el of [$('#gl'),$('#steering')]){
   el.addEventListener('pointerdown',touchStart);el.addEventListener('pointermove',touchMove);

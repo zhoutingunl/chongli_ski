@@ -189,7 +189,7 @@ function graphicArrow(face,at,rect,angle,size,x,y,z,reverse) {
   shape([[-.105,-.41],[.105,-.41],[.105,.10],[-.105,.10]]);
   shape([[-.42,.06],[.42,.06],[0,.48]]);
 }
-function signModel(data,site,batches,atlas,hits) {
+function signModel(data,site,batches,atlas) {
   const {rows,type,pos,heading}=site,big=type==='summit',repeater=type==='repeater';
   const width=big?5.03:repeater?3.02:4.26,rowH=big?1.06:repeater?.80:.93,gap=big?.072:.065;
   const base=big?.60:repeater?1.18:.65;
@@ -222,7 +222,6 @@ function signModel(data,site,batches,atlas,hits) {
       if(!header){const delta=wrap(row.heading-heading-(reverse?Math.PI:0));graphicArrow(fac,at,atlas.white,delta,Math.min(h*.94,width*.15),hw*.79,cy,sign*(deep+.031),reverse);}
     }
     if(header||repeater||rows.length===1)box(shell,at,0,cy+hh+.010,0,width-cut*2,.041,.34,'#ecf0ee');
-    if(!header&&row.routeId)hits.push({site,row,cx:pos[0],cz:pos[1],y:g+cy,width:hw,height:hh,right:r,normal:n});
   }
   rows.forEach((row,i)=>slat(row,topOfRows-rowH*.5-i*(rowH+gap),rowH));
   if(site.top)slat(site.top,topOfRows+gap+headerH*.5,headerH,true);
@@ -243,33 +242,17 @@ function signModel(data,site,batches,atlas,hits) {
 }
 
 export function createWayfinding(scene,data,plans) {
-  const sites=signSites(data,plans),atlas=labelAtlas(sites),sectors=new Map(),hits=[];
+  const sites=signSites(data,plans),atlas=labelAtlas(sites),sectors=new Map();
   for(const s of sites){
     const sx=Math.floor(s.pos[0]/245),sz=Math.floor(s.pos[1]/245),key=sx+','+sz;
     if(!sectors.has(key))sectors.set(key,{hardware:new GeometryBatch(),lettering:new GeometryBatch(),spots:[],x:(sx+.5)*245,z:(sz+.5)*245});
-    const cell=sectors.get(key);cell.spots.push(s.pos);signModel(data,s,cell,atlas,hits);
+    const cell=sectors.get(key);cell.spots.push(s.pos);signModel(data,s,cell,atlas);
   }
   const groups=[];
   for(const cell of sectors.values()){
     const group=new THREE.Group();group.name='Ski trail directions';
     group.add(cell.hardware.finish(atlas.shell),cell.lettering.finish(atlas.enamel));
     scene.add(group);groups.push({group,x:cell.x,z:cell.z,spots:cell.spots});
-  }
-  function pickSign(input){
-    const ray=input?.ray||input;if(!ray?.direction)return null;
-    let closest=42,hit=null;
-    for(const node of hits){
-      const den=ray.direction.dot(node.normal);if(Math.abs(den)<.11)continue;
-      const faceDepth=den<0?.145:-.145;
-      const d=((node.cx-ray.origin.x)*node.normal.x+(node.cz-ray.origin.z)*node.normal.z+faceDepth)/den;
-      if(d<=0||d>=closest)continue;
-      const y=ray.origin.y+ray.direction.y*d;
-      if(Math.abs(y-node.y)>node.height+.026)continue;
-      const x=ray.origin.x+ray.direction.x*d-node.cx,z=ray.origin.z+ray.direction.z*d-node.cz;
-      if(Math.abs(x*node.right.x+z*node.right.z)>node.width)continue;
-      closest=d;hit={routeId:node.row.routeId,name:node.row.name,heading:node.row.heading,type:node.site.type,id:node.site.id,signId:node.site.signId||node.site.id};
-    }
-    return hit;
   }
   function locate(x,z){
     for(const cell of groups){
@@ -278,5 +261,5 @@ export function createWayfinding(scene,data,plans) {
       for(const mesh of cell.group.children)mesh.castShadow=near;
     }
   }
-  return {pickSign,locate};
+  return {locate};
 }

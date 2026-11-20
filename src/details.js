@@ -121,7 +121,7 @@ export function courseDetails(scene,data,navigation) {
   for(const [vertices,col] of [[walls,0xf4eeeb],[roofs,0xd7dbdb]]){
     const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));if(vertices===walls)g.setAttribute('uv',new THREE.Float32BufferAttribute(wallUv,2));g.computeVertexNormals();scene.add(new THREE.Mesh(g,new THREE.MeshLambertMaterial({color:col,map:vertices===walls?facadeTex:null,side:THREE.DoubleSide})));
   }
-  return {setRoute,nextFlag,pickSign:directions.pickSign,locate(x,z){directions.locate(x,z);for(const update of batches)update(x,z);}};
+  return {setRoute,nextFlag,locate(x,z){directions.locate(x,z);for(const update of batches)update(x,z);}};
 }
 
 function powderStamp() {

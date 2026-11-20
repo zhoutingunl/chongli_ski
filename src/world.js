@@ -6,6 +6,7 @@ import {createSkiNavigation} from './navigation.js';
 import {createSky,buildSurface,plantForest} from './landscape.js';
 import {createMountainClimate} from './environment.js';
 import {courseDetails,makeSnowFX} from './details.js';
+import {createTrailGuide} from './trail-guide.js';
 import {clamp,mixAngle} from './mountain.js';
 
 const up=new THREE.Vector3(0,1,0);
@@ -46,19 +47,18 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
   }
   const navigation=createSkiNavigation(data);
   const details=courseDetails(scene,data,navigation);
+  const trailGuide=createTrailGuide(scene,data,renderer);
   const fx=makeSnowFX(scene,data);
-  const signRay=new THREE.Raycaster(),screenPoint=new THREE.Vector2();
   let rider=createRider(opts);scene.add(rider.group);
   const sim=new Descent(data,opts);
   const yawQ=new THREE.Quaternion(),tiltQ=new THREE.Quaternion(),surfNorm=new THREE.Vector3(),want=new THREE.Vector3(),look=new THREE.Vector3(),target=new THREE.Vector3();
   let active=false,paused=false,photo=false,orbitYaw=0,orbitPitch=.10,orbitZoom=5.9,ride=null,clock=0,prev=0,lastUI=0,simLag=0,treesLag=1,camHeading=0,snap=true,frame=0,graphicsScale=1;
-  let photoSite=null,station=null;
+  let photoSite=null,station=null,baseTurn=null;
   const photoPan=new THREE.Vector3(),right=new THREE.Vector3(),forward=new THREE.Vector3();
   const climate=createMountainClimate();
   let conditions,climateAge=1;
   const bodyOrigin=new THREE.Vector3(),lastOrigin=new THREE.Vector3(),bodyStep=new THREE.Vector3();
   const eyeOffset=new THREE.Vector3(),tipWorld=new THREE.Vector3(),sight=new THREE.Vector3(),orbitPivot=new THREE.Vector3();
-  const guidePoint=new THREE.Vector3(),guideForward=new THREE.Vector3();
   const reducedMotion=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const pitchLimit=THREE.MathUtils.degToRad(85);
   let lookYaw=0,lookPitch=0,headPitch=0,roll=0,baseBearing=0;
@@ -66,8 +66,32 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
   const wrap=angle=>Math.atan2(Math.sin(angle),Math.cos(angle));
   function resetLook(){lookYaw=lookPitch=0;input.lookX=input.lookY=0;}
   function panLook(yaw,pitch){
-    lookYaw=wrap(lookYaw+yaw);lookPitch=clamp(lookPitch+pitch,-2.57,2.57);
+    if(baseTurn){baseTurn.target+=yaw;baseTurn.focus=null;}
+    else lookYaw=wrap(lookYaw+yaw);
+    lookPitch=clamp(lookPitch+pitch,-2.57,2.57);
     if(station)station.preset=false;
+  }
+  function parkFacing(facing,home=facing){
+    const {x,z}=sim;
+    baseTurn={yaw:facing,target:facing,home,focus:null,entryOffset:wrap(sim.heading-facing),
+      gradeX:(data.height(x+2,z)-data.height(x-2,z))/4,gradeZ:(data.height(x,z+2)-data.height(x,z-2))/4};
+    lookYaw=0;
+    sim.travelHeading=camHeading=wrap(facing);
+    sim.pivotRate=0;
+  }
+  function turnInPlace(dt){
+    if(input.lookX||input.lookY)panLook(input.lookX*dt*1.95,input.lookY*dt*1.38);
+    const error=baseTurn.target-baseTurn.yaw;
+    const ease=-Math.expm1(-dt*12),step=clamp(error*ease,-6*dt,6*dt);
+    const align=clamp(-baseTurn.entryOffset*ease,-6*dt,6*dt);
+    baseTurn.yaw+=step;
+    baseTurn.entryOffset+=align;
+    sim.travelHeading=camHeading=wrap(baseTurn.yaw);
+    sim.heading=wrap(baseTurn.yaw+baseTurn.entryOffset);
+    sim.pivotRate=dt>0?(step+align)/dt:0;
+    const fx=Math.sin(sim.heading),fz=-Math.cos(sim.heading);
+    sim.slope=THREE.MathUtils.radToDeg(Math.atan(-baseTurn.gradeX*fx-baseTurn.gradeZ*fz));
+    sim.roll=Math.atan(-baseTurn.gradeX*fz+baseTurn.gradeZ*fx);
   }
   const host=el.parentElement;
   function resize(){
@@ -95,7 +119,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
     surfNorm.set((data.height(p.x-2,p.z)-data.height(p.x+2,p.z))/4,1,(data.height(p.x,p.z-2)-data.height(p.x,p.z+2))/4).normalize();
     if(p.airHeight>.1)surfNorm.lerp(up,clamp(p.airHeight*.8,0,1)).normalize();
     tiltQ.setFromUnitVectors(up,surfNorm);yawQ.setFromAxisAngle(up,-p.heading);tiltQ.multiply(yawQ);
-    if(snap)rider.group.quaternion.copy(tiltQ);else rider.group.quaternion.slerp(tiltQ,1-Math.exp(-dt*32));
+    if(snap||baseTurn)rider.group.quaternion.copy(tiltQ);else rider.group.quaternion.slerp(tiltQ,1-Math.exp(-dt*32));
     rider.update(p,dt,clock);
   }
   function moveCamera(dt){
@@ -107,7 +131,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
     const pitchEase=snap?1:1-Math.exp(-dt*7.5);
     camHeading=snap?travel:mixAngle(camHeading,travel,1-Math.exp(-dt*(first?6:4.8)));
     bodyOrigin.set(p.x,p.y,p.z);bodyStep.copy(bodyOrigin).sub(lastOrigin);lastOrigin.copy(bodyOrigin);
-    if(!paused&&!photo&&(input.lookX||input.lookY))panLook(input.lookX*dt*1.95,input.lookY*dt*1.38);
+    if(!baseTurn&&!paused&&!photo&&(input.lookX||input.lookY))panLook(input.lookX*dt*1.95,input.lookY*dt*1.38);
     let fov=61,bank=0,addPitch=0,heading=camHeading,lockEye=false;
     if(photo){
       const focus=photoSite?.focus,theta=photoSite ? -photoSite.yaw+orbitYaw : travel+orbitYaw;
@@ -150,7 +174,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
       look.set(want.x+Math.sin(heading)*20,want.y+Math.tan(headPitch)*20,want.z-Math.cos(heading)*20);
       bank=run&&!reducedMotion?clamp((p.edge||0)*.080+(p.curve||0)*fast*.033,-.115,.115):0;
       addPitch=lookPitch;lockEye=true;
-    }else if(station){
+    }else if(station&&!baseTurn){
       const eye=station.eye,aim=station.target;
       const pivot=station.view==='wide'?bodyOrigin:station.view==='valley'?eye:aim;
       const co=Math.cos(lookYaw),si=Math.sin(lookYaw);
@@ -185,7 +209,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
       addPitch=lookPitch;
       if(!snap){camera.position.add(bodyStep);target.add(bodyStep);}
     }
-    if(snap||lockEye||photo){camera.position.copy(want);target.copy(look);}
+    if(snap||lockEye||photo||baseTurn){camera.position.copy(want);target.copy(look);}
     else{camera.position.lerp(want,cameraEase);target.lerp(look,cameraEase);}
     if(!ride)camera.position.y=Math.max(camera.position.y,data.height(camera.position.x,camera.position.z)+.15);
     camera.up.copy(up);
@@ -194,6 +218,10 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
       sight.copy(target).sub(camera.position);
       const horizontal=Math.max(.001,Math.hypot(sight.x,sight.z));
       const basePitch=Math.atan2(sight.y,horizontal);
+      if(baseTurn?.focus){
+        orbitPivot.copy(baseTurn.focus).sub(camera.position);
+        addPitch=Math.atan2(orbitPivot.y,Math.hypot(orbitPivot.x,orbitPivot.z))-basePitch;
+      }
       const finalPitch=clamp(basePitch+addPitch,-pitchLimit,pitchLimit);
       // Discard excess input at a pole so one small reverse drag moves the view.
       lookPitch=finalPitch-basePitch;
@@ -229,6 +257,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
   }
   function resetScene(route){
     sim.start(route);station=null;ride=null;photo=paused=false;active=true;resetLook();
+    baseTurn=null;sim.pivotRate=0;
     simLag=0;snap=true;treesLag=1;lastUI=prev=0;
     input.trim=input.steer=0;input.boost=input.brake=false;fx.reset();
   }
@@ -263,16 +292,18 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
     station={side,lift,end,summit,eye:point(place.camera.position,place.camera.height),
       target:point(place.camera.target,place.camera.targetHeight),fov:place.camera.fov||58};
     station.homeEye=station.eye.clone();station.homeTarget=station.target.clone();station.view='wide';
+    if(lift&&end==='bottom'&&!summit)parkFacing(place.heading);
     resetLook();showScene();
   }
   function stage(route){
     const side=route.resort,place=data.summitPlaces[side];
     stopAt(route,place,side,lifts.find(l=>l.meta.id===place.liftId),place.stationEnd,true);
   }
-  function pushOff(turn=0,preferred,signHeading){
+  function pushOff(turn=0,preferred,routeHeading){
     if(!station)return null;
-    const poseHeading=wrap(baseBearing+lookYaw),requested=Number.isFinite(signHeading)?signHeading:wrap(poseHeading+turn);
-    const route=station.trailhead&&!turn?sim.route:navigation.departure(station.side,sim.x,sim.z,requested,preferred);
+    const poseHeading=baseTurn?sim.heading:wrap(baseBearing+lookYaw),requested=Number.isFinite(routeHeading)?routeHeading:wrap(poseHeading+turn);
+    const facingFork=sim.junctions[0]?.index===0&&Math.abs(wrap(poseHeading-sim.heading))>.35;
+    const route=station.trailhead&&!turn&&!facingFork?sim.route:navigation.departure(station.side,sim.x,sim.z,requested,preferred);
     if(!route)return null;
     const wasHead=opts.view==='first',oldPitch=headPitch,oldLookPitch=lookPitch;
     resetScene(route);
@@ -312,7 +343,8 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
   function beginRide(){
     const here=nearestStation();if(!here)return false;
     const {lift,end}=here,dir=end==='top'?-1:1;
-    station=null;ride={lift,dir,t:dir>0?.004:.996,look:.09,pitch:0};sim.mode='lift';sim.speed=0;
+    station=baseTurn=null;sim.pivotRate=0;resetLook();
+    ride={lift,dir,t:dir>0?.004:.996,look:.09,pitch:0};sim.mode='lift';sim.speed=0;
     const eye=lift.seatAt(ride.t,dir);sim.x=eye.x;sim.z=eye.z;sim.y=eye.y;
     paused=photo=false;snap=true;treesLag=1;prev=0;kick();return true;
   }
@@ -335,21 +367,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
     }
     onEvent('disembark',{side,route,mode:sim.mode,end});
   }
-  function trailGuidance(){
-    const context=navigation.guidance(sim);
-    if(!context)return null;
-    camera.getWorldDirection(guideForward);
-    const eye=camera.position,viewHeading=Math.atan2(guideForward.x,-guideForward.z);
-    const options=context.options.map(option=>{
-      const [x,z]=option.position;
-      guidePoint.set(x,data.height(x,z)+.65,z).sub(eye);
-      const front=guidePoint.dot(guideForward)>0,bearing=Math.atan2(guidePoint.x,-guidePoint.z);
-      guidePoint.add(eye).project(camera);
-      return {...option,screen:{x:(guidePoint.x+1)*.5,y:(1-guidePoint.y)*.5,front,bearing}};
-    });
-    return {...context,options,viewHeading};
-  }
-  let adaptiveTime=0,adaptiveFrames=0,lastGuide=0;
+  let adaptiveTime=0,adaptiveFrames=0;
   function loop(now){
     frame=0;if(!active)return;
     const raw=prev?(now-prev)/1000:1/60;const dt=Math.min(Math.max(raw,0),.085);prev=now;
@@ -363,17 +381,19 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
       }else if(sim.mode==='run'){
         details.setRoute(sim.route);
         simLag+=dt;while(simLag>=1/90){sim.tick(1/90,input);simLag-=1/90;}
-        if(sim.mode==='finished'){details.setRoute(null);onEvent('finish',sim);}
+        if(sim.mode==='finished'){
+          parkFacing(camHeading+lookYaw,sim.travelHeading);
+          details.setRoute(null);onEvent('finish',sim);
+        }
       }
+      if(baseTurn)turnInPlace(dt);
       for(const l of lifts)if(l.group.visible)l.update(clock,camera,ride?.lift===l ? ride.t : null,ride?.dir);
       updateAvatar(dt);fx.update(sim,dt,conditions,camera.position);
     }else if(photo)updateAvatar(0);
     moveCamera(dt);
     treesLag+=dt;if(treesLag>.40){refreshLOD();treesLag=0;}
+    trailGuide.update(sim,navigation,opts.language);
     renderer.render(scene,camera);
-    if(!paused&&!photo&&(sim.mode==='summit'||sim.mode==='run')&&now-lastGuide>=40){
-      onEvent('guide',trailGuidance());lastGuide=now;
-    }
     if(now-lastUI>95){onEvent('hud',sim);lastUI=now;}
     if(!paused&&!photo&&raw>0&&opts.quality==='auto'){
       adaptiveTime+=raw;adaptiveFrames++;
@@ -419,37 +439,37 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
     get station(){return station;},
     get nearbyStation(){const n=nearestStation();return n?{name:n.lift.meta.name,end:n.end}:null;},
     pause(b){paused=b;input.lookX=input.lookY=input.trim=input.steer=0;input.brake=input.boost=false;prev=0;kick();},
-    stop(){active=false;paused=false;photo=false;ride=station=null;if(frame)cancelAnimationFrame(frame);frame=0;sim.mode='idle';},
+    stop(){active=false;paused=false;photo=false;ride=station=baseTurn=null;sim.pivotRate=0;if(frame)cancelAnimationFrame(frame);frame=0;sim.mode='idle';},
     environment(){environment();kick();},graphics(){graphicsScale=1;sun.castShadow=opts.quality!=='lite';resize();treesLag=1;kick();},
     changeRider(){scene.remove(rider.group);rider.dispose();rider=createRider(opts);scene.add(rider.group);sim.gear=opts.gear;updateAvatar(0);kick();},
     cameraChanged(){
       if(station){station.view='wide';station.preset=false;station.eye.copy(station.homeEye);station.target.copy(station.homeTarget);}
+      if(baseTurn)baseTurn.focus=null;
       resetLook();snap=true;updateAvatar(0);kick();
     },
     lookAtBaseHall(){
-      if(sim.mode!=='finished')return;
+      if(!baseTurn||sim.mode!=='finished')return;
       const hall=photoPlaces.get(sim.route.destination+'-hall');
       if(!hall)return;
+      // Rotate the current camera rig with the skier. Its optical axis may
+      // be off the centre of the skis, especially in a left or right view.
       camera.getWorldDirection(sight);
-      orbitPivot.copy(hall.focus).sub(camera.position);
-      lookYaw=wrap(lookYaw+Math.atan2(orbitPivot.x,-orbitPivot.z)-Math.atan2(sight.x,-sight.z));
-      const pitch=Math.atan2(orbitPivot.y,Math.hypot(orbitPivot.x,orbitPivot.z));
-      lookPitch=clamp(lookPitch+pitch-Math.asin(clamp(sight.y,-1,1)),-pitchLimit,pitchLimit);
+      const horizontal=Math.max(.001,Math.hypot(sight.x,sight.z)),fx=sight.x/horizontal,fz=sight.z/horizontal;
+      const cx=camera.position.x-sim.x,cz=camera.position.z-sim.z;
+      const tx=hall.focus.x-sim.x,tz=hall.focus.z-sim.z,along=cx*fx+cz*fz;
+      const ray=-along+Math.sqrt(Math.max(0,along*along+tx*tx+tz*tz-cx*cx-cz*cz));
+      const delta=wrap(Math.atan2(tx,-tz)-Math.atan2(cx+ray*fx,-cz-ray*fz));
+      baseTurn.target=baseTurn.yaw+delta;baseTurn.focus=hall.focus;
       kick();
     },
     centerLook(){
       if(station&&station.view!=='wide'){this.lookAroundStation('wide');return;}
+      if(baseTurn){baseTurn.target=baseTurn.yaw+wrap(baseTurn.home-baseTurn.yaw);baseTurn.focus=null;}
       resetLook();kick();
     },
-    get looking(){return Math.abs(lookYaw)>.035 || Math.abs(lookPitch)>.035 || !!station?.preset;},
+    get looking(){const yaw=baseTurn?wrap(baseTurn.yaw-baseTurn.home):lookYaw;return Math.abs(yaw)>.035 || Math.abs(lookPitch)>.035 || !!station?.preset;},
     get facing(){return wrap(baseBearing+lookYaw);},
     summitHeading(routeId){return station?.summit?navigation.summitHeading(station.side,routeId):undefined;},
-    pickSign(x,y){
-      if(!details.pickSign||ride||photo)return null;
-      const rect=el.getBoundingClientRect();
-      screenPoint.set((x-rect.left)/rect.width*2-1,1-(y-rect.top)/rect.height*2);
-      signRay.setFromCamera(screenPoint,camera);return details.pickSign(signRay.ray);
-    },
     photo(b,kind='rider'){photo=b;if(b)setPhotoPlace(kind);snap=true;prev=0;kick();},
     photoPlace:setPhotoPlace,
     orbit(dx,dy){

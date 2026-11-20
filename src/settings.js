@@ -34,13 +34,13 @@ export function settingsPanel(prefs,song,sources){
     '<details class="settings-detail"><summary>'+t('滑行设置','Riding options')+'</summary>'+row(t('循线辅助','Trail assist'),seg('assist',[['on','开启'],['off','关闭']],prefs.assist?'on':'off'),t('顺着所选线路滑行，关闭可自由选线。','Follow the selected line or steer freely with assist off.'))+
     row(t('屏幕按键','Touch controls'),seg('controls',[['on','显示'],['off','隐藏']],prefs.controls?'on':'off'))+'</details>'+
     '<div class="tilt-setting">'+pill('tilt',t('倾斜转弯 '+(prefs.tilt?'开':'关'),'Tilt steering '+(prefs.tilt?'on':'off')),prefs.tilt)+(prefs.tilt?button('calibrate',t('校准','Calibrate'),'setting-pill'):'')+'</div>'+
-    '<details class="source-detail"><summary>'+t('数据来源','Data sources')+'</summary>'+sources+'</details><small class="version">'+t('版本','Version')+' 1.3.0</small>';
+    '<details class="source-detail"><summary>'+t('数据来源','Data sources')+'</summary>'+sources+'</details><small class="version">'+t('版本','Version')+' 1.4.0</small>';
 }
 export function controlsPanel(){
   const controls=[
-    [t('原地起滑','Push off'),t('按方向键或点屏幕箭头，顺着路牌从脚下起滑。也可直接点路牌上的雪道名。','Press a direction, tap an on-screen arrow, or tap a trail name on a sign to set off from where you stand.'),'↑ ← ↓ →'],
-    [t('雪道指向','Trail directions'),t('山顶和交汇处的箭头指向雪道。点可选道名，或在岔口按方向转入。','Follow the named arrows at the summit and junctions. Tap a selectable trail name or steer into the turn.'),''],
-    [t('山脚停留','At the base'),t('滑到山脚会逐渐停下。拖动环顾，点「看大厅与酒店」转向建筑，也可乘缆车、重滑或查看本趟成绩。','Glide to a stop and drag to look around. Look toward the lodge and hotel, board the lift, repeat the run or open your stats.'),''],
+    [t('原地起滑','Push off'),t('朝想去的方向按方向键或点左下箭头，从脚下起滑。','Press a direction or tap the direction pad to push off from where you stand.'),'↑ ← ↓ →'],
+    [t('雪道指向','Trail directions'),t('山顶和岔口的雪面上印有道名和箭头，沿箭头转入雪道。地图可手选路线。','Follow the names and arrows painted on the snow at the summit and trail junctions. You can also choose a route on the map.'),''],
+    [t('山脚停留','At the base'),t('滑到山脚后，左右拖动可原地转身，上下拖动可抬头或低头。也可看大厅与酒店、乘缆车、重滑或查看成绩。','At the base, drag sideways to turn in place and vertically to look up or down. View the hall and hotel, ride the lift, repeat the run or open your stats.'),''],
     [t('环顾四周','Look around'),t('右手拖动环顾时，左手仍可转弯。同侧双指或鼠标也可环顾。松手保留视线，点指南针回正。','Drag on the right to look while steering on the left. Two fingers on one side or a mouse drag also work. Tap the compass to face forward.'),'J / L · U / O · R'],
     [t('倾斜手机','Tilt phone'),t('在设置里打开倾斜转弯。出发或继续滑行时的握姿为正中。','Enable tilt steering in Settings. Your grip at departure or resume sets the centre.'),''],
     [t('按住拖动','Drag sideways'),t('在左侧雪面左右拖动转弯，越过刻度以板刃切雪。','Drag the left side to steer. Cross the mark to set the edge.'),'A / D · ← →'],
