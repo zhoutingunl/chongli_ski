@@ -45,13 +45,21 @@
       <div class="piste"><small id="elevation"></small><h2 id="trail-name"></h2><div id="gradient"></div><div id="progress"></div><div id="next-flag" hidden></div></div>
     </div>
     <div class="game-top"><div class="hud-tools"><button data-act="pov" class="pov-switch" aria-label="切换第一人称与跟随视角"><span id="pov-icon"></span><span id="pov-label">第一人称</span></button><button data-act="map" aria-label="雪场地图" title="雪场地图"></button><button data-act="sound" aria-label="环境音" title="环境音"></button><button data-act="pause" aria-label="暂停菜单" title="暂停菜单"></button></div><div class="weather"><div><span id="weather-icon"></span><b id="world-clock"></b></div><span id="weather-name"></span></div></div>
-    <div id="fork-prompt" hidden><span id="fork-text"></span><button data-act="junction" id="fork-button"></button></div>
+    <div id="trail-guide" hidden></div>
     <div id="station-card" hidden>
       <div class="station-place"><span data-glyph="pin"></span><span id="station-title"></span></div>
       <p id="station-note">拖动雪景，环顾山顶</p>
       <div id="look-choices" class="look-choices"></div>
       <div class="station-actions"><button class="launch" data-act="launch-trail" hidden>从这里出发</button><button class="launch" data-act="map">选择雪道</button><button class="glass-button" data-act="lift"><span data-glyph="lift"></span><span id="station-ride">乘索道</span></button></div>
     </div>
+    <section id="base-actions" hidden aria-label="山脚停留">
+      <div class="base-caption"><span id="base-hint">拖动环顾山脚</span><button data-act="finish" id="base-result">本趟成绩</button></div>
+      <div class="base-buttons">
+        <button class="glass-button" data-act="lift"><span data-glyph="lift"></span><span id="base-lift-text">乘缆车上山</span></button>
+        <button class="glass-button" data-act="look-hall"><span data-glyph="eye"></span><span id="base-hall-text">看大厅与酒店</span></button>
+        <button class="glass-button" data-act="restart"><span data-glyph="auto"></span><span id="base-restart-text">重滑本线</span></button>
+      </div>
+    </section>
     <button id="near-lift" class="glass-button" data-act="lift" hidden><span data-glyph="lift"></span><span id="near-lift-label">上车</span></button>
     <div id="direction-pad" role="group" aria-label="滑行方向">
       <button class="dir-key dir-up" data-drive="up" aria-label="向前滑行"><span></span></button>

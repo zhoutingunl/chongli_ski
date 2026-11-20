@@ -58,6 +58,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
   let conditions,climateAge=1;
   const bodyOrigin=new THREE.Vector3(),lastOrigin=new THREE.Vector3(),bodyStep=new THREE.Vector3();
   const eyeOffset=new THREE.Vector3(),tipWorld=new THREE.Vector3(),sight=new THREE.Vector3(),orbitPivot=new THREE.Vector3();
+  const guidePoint=new THREE.Vector3(),guideForward=new THREE.Vector3();
   const reducedMotion=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const pitchLimit=THREE.MathUtils.degToRad(85);
   let lookYaw=0,lookPitch=0,headPitch=0,roll=0,baseBearing=0;
@@ -173,7 +174,10 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
       if(mode==='left'||mode==='right'){back=1.8;side=mode==='right'?4.8:-4.8;lift=1.44;lead=.59;eye=.95;}
       if(mode==='front'){back=-4.3;side=.32;lift=1.48;lead=0;eye=1.01;}
       if(mode==='far'){back=15;side=4.4;lift=4.8;lead=3.4;eye=1.2;}
-      if(mode==='follow')fov=60+(reducedMotion?1:5)*fast;
+      if(mode==='follow'){
+        back=3.55+fast*.62;lift=1.55+fast*.18;lead=3.8;eye=1.03;
+        fov=57+(reducedMotion?1:4)*fast;
+      }
       const x=dx(back,side),z=dz(back,side),aheadX=dx(-lead,0),aheadZ=dz(-lead,0);
       want.set(x,Math.max(p.y+lift,data.height(x,z)+lift),z);
       look.set(aheadX,p.y+eye+(data.height(aheadX,aheadZ)-p.ground)*.75,aheadZ);
@@ -229,7 +233,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
     input.trim=input.steer=0;input.boost=input.brake=false;fx.reset();
   }
   function showScene(){updateAvatar(0);moveCamera(0);refreshLOD();kick();}
-  function start(route){resetScene(route);details.setRoute(route);showScene();}
+  function start(route){route=navigation.safeRun(route);resetScene(route);details.setRoute(route);showScene();}
   function point(xz,height){return new THREE.Vector3(xz[0],data.height(...xz)+height,xz[1]);}
   function stationPortrait(lift,end){
     const at=end==='top'?lift.meta.points.at(-1):lift.meta.points[0];
@@ -278,6 +282,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
     showScene();return route;
   }
   function trailhead(route){
+    route=navigation.safeRun(route);
     const f=route.frame(0),eye=[f.x-f.dx*6.4,f.z-f.dz*6.4],aim=[f.x+f.dx*10,f.z+f.dz*10];
     stopAt(route,{position:[f.x,f.z],heading:f.angle,camera:{position:eye,height:2.4,target:aim,targetHeight:1.4}},
       route.resort,null,null,false);
@@ -288,7 +293,11 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
     if(ride||!sim.route)return null;
     if(sim.mode==='finished'){
       const side=sim.route.destination;
-      return {lift:lifts.find(l=>l.meta.id===(side==='genting'?'w469393391':'w1368988315')),end:'bottom'};
+      const summitLift=lifts.find(l=>l.meta.id===(side==='genting'?'w469393391':'w1368988315'));
+      const baseDistance=l=>Math.hypot(l.meta.points[0][0]-sim.x,l.meta.points[0][1]-sim.z);
+      if(baseDistance(summitLift)<140)return {lift:summitLift,end:'bottom'};
+      const sameResort=lifts.filter(l=>l.meta.resort===side);
+      return {lift:sameResort.reduce((a,b)=>baseDistance(a)<baseDistance(b)?a:b),end:'bottom'};
     }
     let nearest=null,min=48;
     for(const lift of lifts){
@@ -326,7 +335,21 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
     }
     onEvent('disembark',{side,route,mode:sim.mode,end});
   }
-  let adaptiveTime=0,adaptiveFrames=0;
+  function trailGuidance(){
+    const context=navigation.guidance(sim);
+    if(!context)return null;
+    camera.getWorldDirection(guideForward);
+    const eye=camera.position,viewHeading=Math.atan2(guideForward.x,-guideForward.z);
+    const options=context.options.map(option=>{
+      const [x,z]=option.position;
+      guidePoint.set(x,data.height(x,z)+.65,z).sub(eye);
+      const front=guidePoint.dot(guideForward)>0,bearing=Math.atan2(guidePoint.x,-guidePoint.z);
+      guidePoint.add(eye).project(camera);
+      return {...option,screen:{x:(guidePoint.x+1)*.5,y:(1-guidePoint.y)*.5,front,bearing}};
+    });
+    return {...context,options,viewHeading};
+  }
+  let adaptiveTime=0,adaptiveFrames=0,lastGuide=0;
   function loop(now){
     frame=0;if(!active)return;
     const raw=prev?(now-prev)/1000:1/60;const dt=Math.min(Math.max(raw,0),.085);prev=now;
@@ -340,7 +363,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
       }else if(sim.mode==='run'){
         details.setRoute(sim.route);
         simLag+=dt;while(simLag>=1/90){sim.tick(1/90,input);simLag-=1/90;}
-        if(sim.mode==='finished')onEvent('finish',sim);
+        if(sim.mode==='finished'){details.setRoute(null);onEvent('finish',sim);}
       }
       for(const l of lifts)if(l.group.visible)l.update(clock,camera,ride?.lift===l ? ride.t : null,ride?.dir);
       updateAvatar(dt);fx.update(sim,dt,conditions,camera.position);
@@ -348,6 +371,9 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
     moveCamera(dt);
     treesLag+=dt;if(treesLag>.40){refreshLOD();treesLag=0;}
     renderer.render(scene,camera);
+    if(!paused&&!photo&&(sim.mode==='summit'||sim.mode==='run')&&now-lastGuide>=40){
+      onEvent('guide',trailGuidance());lastGuide=now;
+    }
     if(now-lastUI>95){onEvent('hud',sim);lastUI=now;}
     if(!paused&&!photo&&raw>0&&opts.quality==='auto'){
       adaptiveTime+=raw;adaptiveFrames++;
@@ -399,6 +425,17 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
     cameraChanged(){
       if(station){station.view='wide';station.preset=false;station.eye.copy(station.homeEye);station.target.copy(station.homeTarget);}
       resetLook();snap=true;updateAvatar(0);kick();
+    },
+    lookAtBaseHall(){
+      if(sim.mode!=='finished')return;
+      const hall=photoPlaces.get(sim.route.destination+'-hall');
+      if(!hall)return;
+      camera.getWorldDirection(sight);
+      orbitPivot.copy(hall.focus).sub(camera.position);
+      lookYaw=wrap(lookYaw+Math.atan2(orbitPivot.x,-orbitPivot.z)-Math.atan2(sight.x,-sight.z));
+      const pitch=Math.atan2(orbitPivot.y,Math.hypot(orbitPivot.x,orbitPivot.z));
+      lookPitch=clamp(lookPitch+pitch-Math.asin(clamp(sight.y,-1,1)),-pitchLimit,pitchLimit);
+      kick();
     },
     centerLook(){
       if(station&&station.view!=='wide'){this.lookAroundStation('wide');return;}

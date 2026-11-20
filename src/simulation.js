@@ -118,7 +118,7 @@ export class Descent {
 
   switchRoute(route) {
     const upcoming=this.junctionFor(route.id);
-    if(upcoming){this.requestedTurn={id:upcoming.sign.id,routeId:route.id};return true;}
+    if(upcoming){this.rememberTurn(upcoming,route.id);return true;}
     const nearest = route.closest(this.x, this.z);
     if (nearest.distance > 64) return false;
     const f = trackFrame(route, nearest.along);
@@ -140,7 +140,12 @@ export class Descent {
     if(this.mode!=='run')return false;
     const m=this.activeJunction();
     if(!m||(signId&&signId!==m.sign.id)||!m.sign.options.some(o=>o.routeId===routeId))return false;
-    this.requestedTurn={id:m.sign.id,routeId};return true;
+    this.rememberTurn(m,routeId);return true;
+  }
+
+  rememberTurn(mark,routeId) {
+    const option=mark.sign.options.find(o=>o.routeId===routeId);
+    this.requestedTurn={id:mark.sign.id,routeId,name:option.name,en:option.en,canonicalId:option.canonicalId||routeId};
   }
 
   checkPisteMouth(dt) {
@@ -161,6 +166,7 @@ export class Descent {
   }
 
   followJunction(input,dt) {
+    this.junctionSteer=null;
     if(!this.junctions?.length)return;
     const m=this.activeJunction(37,6);
     if(!m){this.steeringAge=0;this.steeringIntent=0;return;}
@@ -168,6 +174,13 @@ export class Descent {
     const steer=clamp(input.steer||0,-1,1),intent=Math.abs(steer)>=.48?Math.sign(steer):0;
     if(intent!==this.steeringIntent)this.steeringAge=0;
     this.steeringIntent=intent;this.steeringAge=intent?this.steeringAge+dt:0;
+    if(this.opts.assist && !this.airborne && !input.brake && !this.requestedTurn &&
+      this.steeringAge>=.16 && lead>=-1 && lead<=35){
+      // A held direction at a flat signed fork chooses its exit. Keep enough
+      // edge for the turn without turning the same key into a stationary skid.
+      const limit=.67+.33*smooth(this.speed,3.5,9);
+      this.junctionSteer=clamp(steer,-limit,limit);
+    }
     let next=this.requestedTurn?.id===key?this.requestedTurn.routeId:null;
     if(!next && lead>=2 && this.steeringAge>=.16){
       const aim=m.sign.approach+steer*1.35;
@@ -229,7 +242,7 @@ export class Descent {
     this.launch *= Math.exp(-dt*11);
     this.impact *= Math.exp(-dt*6.8);
     this.landing = approach(this.landing, this.impact, 18, dt);
-    this.steer = approach(this.steer, clamp(input.steer || 0,-1,1), 12, dt);
+    this.steer = approach(this.steer, this.junctionSteer??clamp(input.steer || 0,-1,1), 12, dt);
     this.trim = approach(this.trim, clamp(input.trim || 0,-1,1), 8, dt);
     this.brake = approach(this.brake, +!!input.brake, 10, dt);
     this.boost = approach(this.boost, +!!input.boost, 8, dt);
@@ -262,6 +275,10 @@ export class Descent {
     const assistance = assisted && !airborne ? 1 - Math.max(this.brake, cut) : 0;
     const tuck = this.boost * smooth(oldSpeed,3,11);
     const gravity = G * Math.sin(theta);
+    const end = this.route.points.at(-1);
+    const remaining = Math.max(0,this.route.length-this.along);
+    const baseRange = Math.hypot(this.x-end[0],this.z-end[1]);
+    const runout = assisted ? remaining : Math.max(0,baseRange-18);
     if (!airborne) {
       const resistance = (this.onTrail ? .21 : .68) + (board ? .0054 : .0048) * (1-.37*tuck) * oldSpeed*oldSpeed;
       const edgeLoss = load*load*(.12+.038*oldSpeed);
@@ -275,6 +292,12 @@ export class Descent {
         acceleration += Math.max(0,glide-acceleration) * assistance;
       }
       this.speed = clamp(oldSpeed + acceleration*dt,0,34.5);
+      // Ease out on the snow front before coming to rest. Free skiers can pass
+      // beside this area and continue across the hill.
+      if(remaining<220 && (assisted || baseRange<80)){
+        const stopLimit=Math.min(Math.sqrt(6.6*runout),1.45*runout);
+        this.speed=Math.min(this.speed,stopLimit);
+      }
     } else {
       this.speed = Math.max(0,oldSpeed - .0008*oldSpeed*oldSpeed*dt);
     }
@@ -366,9 +389,12 @@ export class Descent {
     this.travel += Math.hypot(this.x-oldX,this.z-oldZ,this.ground-oldGround);
     this.checkPisteMouth(dt);
     this.surface();
-    const end = this.route.points.at(-1);
-    if(this.along>=this.route.length-1.6 && Math.hypot(this.x-end[0],this.z-end[1])<56){
+    const atBase=assisted?this.route.length-this.along<=.32&&baseRange<56:remaining<45&&baseRange<=18.4;
+    if(atBase&&!this.airborne){
       this.mode='finished';this.speed=0;this.airborne=false;this.air=this.airHeight=0;this.y=this.ground;this.cancelJump();
+      this.edge=this.edgeRate=this.edgeSpeed=this.steer=this.brake=this.boost=this.trim=0;
+      this.pressure=this.skid=this.curve=this.spray=this.push=this.bankSwap=this.press=0;
+      this.launch=this.landing=this.impact=this.bump=this.terrainFlex=this.slipAngle=0;
     }
   }
 }

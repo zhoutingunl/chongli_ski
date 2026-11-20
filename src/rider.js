@@ -916,7 +916,170 @@ export function createRider(options = {}) {
   const posed = {edge:0, chest:0, speed:0, steer:0, grade:0, pressure:0, trim:0,
     skid:0, slip:0, air:0, t:0, turnSign:0, lastSwap:-2, ready:false};
   const leanAxis = v3(0,0,-1);
-  let disposed = false;
+  const outsidePose = {arc:0, chest:0, entry:0, exit:0, ready:false, spring:{ready:false}};
+  const hipOffset = v3(), jointOrigin = v3(), jointEnd = v3(), jointMid = v3(), jointPlane = v3();
+  const oldTip = v3(), handOffset = v3(), wristGoal = v3(), support = v3();
+  let disposed = false, redraw = false, lastState;
+
+  // A turn filmed from behind reads through the path of the boots underneath
+  // the hips. The lower body establishes an edge before the shoulders follow.
+  // Work from the base joints each frame; the goggles camera uses that base pose.
+  function outsideMotion(state, dt, reset, moving, steep, push, attack, release, impactSoon) {
+    const smooth = THREE.MathUtils.smoothstep;
+    const {edge, speed, trim, skid, air, slip} = posed;
+    const fast = clamp(speed/21,0,1), flight = !!(state.airborne ?? air>.025);
+    const boost = state.boost || 0, brake = state.brake || 0, charge = state.charge || 0;
+    const land = Math.min(1.15,state.landing || 0), launch = state.launch || 0;
+    const acceleration = clamp((state.curve ?? state.turn ?? 0)*speed/9.81,-1.55,1.55);
+    const bite = clamp(edge*(.85-.07*skid) + acceleration*(.43-.16*skid),-1,1);
+    const arcGoal = bite*moving*(1-.86*air)*(1-.46*push);
+    const snap = reset || !outsidePose.ready;
+    const follow = rate => snap ? 1 : 1-Math.exp(-rate*dt);
+    outsidePose.arc = mix(outsidePose.arc,arcGoal,follow(12));
+    outsidePose.chest = mix(outsidePose.chest,outsidePose.arc,follow(5.8));
+    outsidePose.entry = mix(outsidePose.entry,attack,follow(12));
+    outsidePose.exit = mix(outsidePose.exit,release,follow(12));
+    outsidePose.ready = true;
+    const arc = outsidePose.arc, torsoArc = outsidePose.chest, change = arc-torsoArc;
+    const entryDelta = outsidePose.entry-attack, exitDelta = outsidePose.exit-release;
+    const force = Math.abs(arc)*(.23+.77*smooth(speed,2,16));
+    const coast = (1-smooth(force,.035,.60))*(1-.83*steep)*(1-push)*
+      (1-clamp(Math.max(skid,brake,charge,boost*fast,land,air),0,1));
+    const heel = board ? Math.max(0,-arc) : 0, toe = board ? Math.max(0,arc) : 0;
+    const neutral = (board ? .093 : .052)*coast;
+    const crossing = (1-Math.min(1,Math.abs(arc)*1.22))*Math.min(1,Math.abs(change)*3.4 + outsidePose.exit*.54)*moving;
+    const tuck = fast*boost*(1-.69*force);
+    // Pop up through the flat ski, progressively lower the hips as the new
+    // outside ski loads, then give at the knees when the slope bends or lands.
+    const drop = (board ? .050+.053*heel : .146)*force + .040*skid + .041*tuck +
+      .058*charge + .059*land + .032*air*(1-impactSoon) + .020*Math.max(0,normalLoad);
+    const rise = neutral + .096*crossing + .060*launch + .035*impactSoon;
+    const heightDelta = springLegs(outsidePose.spring,rise-drop,land>.14 ? 23 : 16,dt,snap);
+    const slideX = .43+.57*Math.cos(slip), slideZ = -.57*Math.sin(slip);
+    const inward = (arc*(board ? .190 : .300) + change*.057)*(.28+.72*fast)*(1-.22*skid);
+    const anticipation = clamp(change*2.2,-1,1);
+    const forward = board ? -.043*Math.abs(anticipation) + .052*heel + .041*skid :
+      -.034*crossing + .063*skid + .041*land;
+    pelvis.position.x += inward*slideX;
+    pelvis.position.z += inward*slideZ + forward - trim*.036;
+    pelvis.position.y = Math.max(board ? .414 : .421,pelvis.position.y+heightDelta);
+
+    if (board) {
+      // Carry the fore/aft shift continuously across the instant at which
+      // the loaded edge changes sign underneath the leading foot.
+      pelvis.position.z += -.084*entryDelta + .053*exitDelta;
+      pelvis.rotateZ(.087*entryDelta-.073*exitDelta);
+    }
+    pelvis.rotateY(board ? -.148*arc-.12*anticipation : -.090*arc);
+    pelvis.rotateX(board ? .076*coast-.079*toe+.043*heel : -.052*force-.078*tuck);
+    leanQ.setFromAxisAngle(leanAxis,arc*(board ? .155 : .235));pelvis.quaternion.premultiply(leanQ);
+    torso.rotateZ(-.012*Math.sin(posed.t*1.82));
+    torso.rotateY(board ? -.190*coast+.164*torsoArc+.16*anticipation : .175*torsoArc+.11*anticipation);
+    torso.rotateX(board ? .078*coast+.115*heel-.11*toe-.080*tuck : .050*coast-.105*force-.16*tuck);
+    // The upper-body roll trails the feet. The inside shoulder descends much
+    // less than the inside hip, and the neck keeps tracking down the run.
+    leanQ.setFromAxisAngle(leanAxis,torsoArc*(board ? .170 : .190)-change*.11);
+    torso.quaternion.premultiply(leanQ);
+    head.quaternion.copy(torso.quaternion).invert().multiply(gaze);
+
+    // Pull both decks up during flight with the original sole-to-binding
+    // relationship. Release the tuck before touching back down.
+    const draw = flight ? Math.min((state.airHeight ?? air)*.44,.088*air)*(1-impactSoon) : 0;
+    if (draw>0) for (const plank of decks) plank.position.y += draw;
+    const reach = leg1+leg2-.014, tuckedReach = (leg1+leg2)*.30;
+    let lowest = 0, highest = 2;
+    for (const limb of limbs) {
+      const {s,ankle} = limb;
+      hipOffset.set(s*hipWidth,-.007,.006).applyQuaternion(pelvis.quaternion);
+      hipOffset.y += board ? s*(.014*trim+.016*Math.abs(anticipation)) :
+        .017*Math.max(0,-s*arc)-.021*Math.max(0,s*arc);
+      const dx = pelvis.position.x+hipOffset.x-ankle.x, dz = pelvis.position.z+hipOffset.z-ankle.z;
+      const horizontal = dx*dx+dz*dz, ankleY = ankle.y+draw-hipOffset.y;
+      highest = Math.min(highest,ankleY+Math.sqrt(Math.max(.024,reach*reach-horizontal)));
+      lowest = Math.max(lowest,ankleY+Math.sqrt(Math.max(0,tuckedReach*tuckedReach-horizontal)));
+    }
+    pelvis.position.y = clamp(pelvis.position.y,lowest,Math.max(lowest,highest));
+    torso.position.copy(pelvis.position);
+
+    for (const limb of limbs) {
+      const {s,plank,foot,hip,knee,ankle,shoulder,elbow,wrist} = limb;
+      const inside = Math.max(0,s*arc), outside = Math.max(0,-s*arc), lead = s<0;
+      const yaw = board ? (lead ? -1.22 : -1.66)-edge*.024 + (lead ? 0 : Math.max(0,foot.rotation.y+1.66)) :
+        -edge*.024 + slip*.10 + s*brake*(1-skid)*.12;
+      jointOrigin.set(s*hipWidth,-.007,.006).applyQuaternion(pelvis.quaternion).add(pelvis.position);
+      if (board) jointOrigin.y -= (lead ? 1 : -1)*(.014*trim+.016*Math.abs(anticipation));
+      else jointOrigin.y += .017*outside-.021*inside;
+      // Preserve the original anatomical bend plane, then guide each knee
+      // independently: the long outside leg supports the body; the inside
+      // thigh pulls up. On one board the leading knee opens into the new arc.
+      jointPlane.subVectors(knee,hip);
+      support.subVectors(ankle,hip).normalize();
+      jointPlane.addScaledVector(support,-support.dot(jointPlane)).normalize();
+      if (board) {
+        jointPlane.x += arc*(lead ? .24 : .115) + .068*(lead ? entryDelta : -exitDelta);
+        jointPlane.z += (lead ? -.17 : .14)*force - (lead ? .22 : -.11)*Math.abs(anticipation) +
+          (lead ? -.20*entryDelta : .13*exitDelta);
+      } else {
+        jointPlane.x += arc*(.21+.24*inside);
+        jointPlane.z -= inside*.25;
+      }
+      bootRotation.multiplyQuaternions(plank.quaternion,foot.quaternion);bootInverse.copy(bootRotation).invert();
+      jointEnd.copy(ankle);jointEnd.y+=draw;
+      solveJoint(jointOrigin,jointEnd,jointPlane,leg1,leg2,jointMid);
+      legInBoot.subVectors(jointMid,jointEnd).applyQuaternion(bootInverse);
+      const pitch = clamp(limb.anklePitch*.55 + Math.atan2(-legInBoot.z,legInBoot.y)*(board ? .34 : .27),
+        board ? -.15 : -.065,board ? .63 : .51);
+      const cant = clamp(limb.ankleCant*.50 + Math.atan2(legInBoot.x,legInBoot.y)*.50,
+        board ? -.34 : -.118,board ? .34 : .118);
+      limb.bendCuff(pitch,cant,jointEnd);
+      jointEnd.applyQuaternion(foot.quaternion).add(foot.position).applyQuaternion(plank.quaternion).add(plank.position);
+      solveJoint(jointOrigin,jointEnd,jointPlane,leg1,leg2,jointMid);
+      aimBone(limb.thigh,jointOrigin,jointMid,leg1,yaw);aimBone(limb.shin,jointMid,jointEnd,leg2,yaw);
+
+      jointOrigin.set(s*width,.396,.009).applyQuaternion(torso.quaternion).add(torso.position);
+      wristGoal.subVectors(wrist,shoulder).add(jointOrigin);
+      if (board) {
+        handOffset.set(s*(.149*force+.142*crossing-.124*coast),
+          -.132*coast+.066*crossing+(lead ? .033 : -.023)*anticipation-s*arc*.078+(lead ? .041 : -.024)*entryDelta,
+          .085*coast+(lead ? -.13 : .085)*Math.abs(anticipation)+s*(.096*entryDelta-.055*exitDelta));
+      } else {
+        handOffset.set(s*(.104*force+.099*crossing+.057*land-.072*tuck),
+          -.29*inside+.055*outside+.045*crossing+.045*tuck,
+          -.119*outside+.065*inside-.065*tuck+.028*land);
+      }
+      handOffset.applyAxisAngle(axisY,posed.chest);wristGoal.add(handOffset);
+      if (limb.pole) {
+        oldTip.copy(limb.poleDirection).multiplyScalar(1.135*limb.pole.scale.y).add(limb.pole.position);
+        if (limb.plant) {
+          contact.copy(limb.plant.point);group.worldToLocal(contact);
+          handOffset.set(-s*.008,-.065,-.013).applyQuaternion(limb.hand.quaternion);
+          support.copy(wristGoal).add(handOffset).sub(contact).setLength(1.135).add(contact).sub(handOffset);
+          if (support.distanceTo(jointOrigin)<arm1+arm2+.012) wristGoal.copy(support);
+        }
+      }
+      wristGoal.sub(jointOrigin).clampLength(.14,arm1+arm2-.002).add(jointOrigin);
+      jointPlane.subVectors(elbow,shoulder);
+      support.subVectors(wrist,shoulder).normalize();
+      jointPlane.addScaledVector(support,-support.dot(jointPlane)).normalize();
+      solveJoint(jointOrigin,wristGoal,jointPlane,arm1,arm2,jointMid);
+      aimBone(limb.arm,jointOrigin,jointMid,arm1,posed.chest);aimBone(limb.forearm,jointMid,wristGoal,arm2,posed.chest);
+      limb.hand.position.copy(wristGoal);
+      if (limb.pole) {
+        const pole = limb.pole;
+        pole.position.set(-s*.008,-.065,-.013).applyQuaternion(limb.hand.quaternion).add(wristGoal);
+        if (limb.plant) {
+          support.subVectors(contact,pole.position);
+          pole.scale.y=clamp(support.length()/1.135,.97,1.03);support.normalize();
+        } else {
+          const targetY=mix(oldTip.y,snowUnder(snow,oldTip.x,oldTip.z)+.02,inside*(1-air));
+          const drop=clamp(pole.position.y-targetY,.15,1.119);
+          support.set(limb.poleDirection.x + s*(.14*force+.10*crossing),0,limb.poleDirection.z);
+          support.setLength(Math.sqrt(1.135**2-drop**2));support.y=-drop;support.normalize();pole.scale.y=1;
+        }
+        pole.quaternion.setFromUnitVectors(axisDown,support);
+      }
+    }
+  }
 
   function update(state = {}, frameDt, clock) {
     if (disposed) return;
@@ -930,7 +1093,8 @@ export function createRider(options = {}) {
     const speed = drive ? Math.max(0,state.speed || 0) : 0;
     const modeChanged = previousMode !== state.mode;
     const snapPose = rewound || modeChanged || !posed.ready || (!dt && !sameInstant);
-    if (!dt && !snapPose) return;
+    if (!dt && !snapPose && !redraw) return;
+    lastState=state;redraw=false;
     previousMode = state.mode; lastElapsed = state.elapsed; posed.ready = true;
     const ease = rate => snapPose ? 1 : 1-Math.exp(-dt*rate);
     posed.edge = mix(posed.edge,targetEdge,ease(15));
@@ -1233,6 +1397,7 @@ export function createRider(options = {}) {
         limb.pole.quaternion.setFromUnitVectors(axisDown,limb.poleDirection);
       }
     }
+    if (visibility==='body' && drive) outsideMotion(state,dt,snapPose,moving,steep,push,attack,release,impactSoon);
   }
 
   const decks = [...new Set(limbs.map(limb => limb.plank))];
@@ -1248,6 +1413,8 @@ export function createRider(options = {}) {
       part.visible = next === 'body' || decks.includes(part) ||
         (next === 'first' && part !== torso && part !== pelvis);
     }
+    outsidePose.ready=false;
+    if (lastState) {redraw=true;update(lastState,0,posed.t);}
   }
 
   // Optical centre between the lenses, with all neck and torso articulation applied.

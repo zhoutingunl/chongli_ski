@@ -13,8 +13,8 @@ const labels={
   '读取红花梁地形':'Loading Honghualiang terrain','铺展雪道与远山':'Drawing trails and distant ridges','装配雪具与索道':'Fitting equipment and lifts'
 };
 const numbers={'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9};
-export function label(str){
-  if(!str||language!=='en')return str||'';
+export function label(str, lang=language){
+  if(!str||lang!=='en')return str||'';
   if(labels[str])return labels[str];
   const match=str.match(/^([一二三四五六七八九]|\d+)索/);
   if(match)return 'Lift '+(numbers[match[1]]??match[1]);

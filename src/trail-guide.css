@@ -1,0 +1,118 @@
+.trail-guide {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  padding: max(12px, env(safe-area-inset-top)) max(15px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(15px, env(safe-area-inset-left));
+  pointer-events: none;
+  --guide-gold: #eac78a;
+  --guide-ice: #f4f5ee;
+  --guide-dark: #192a33;
+}
+
+.trail-guide-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+  fill: none;
+}
+
+.trail-leader-under { stroke: #172932a8; stroke-width: 2.8; }
+.trail-leader-line { stroke: #f0d69c; stroke-width: 1.15; }
+.trail-leader-anchor { stroke: #243841; stroke-width: 1.1; fill: #fff1cb; }
+
+.trail-guide .trail-marker {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: max-content;
+  min-height: 44px;
+  max-width: min(39vw, 226px);
+  margin: 0;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  border-radius: 5px;
+  font-family: var(--sans, "PingFang SC", sans-serif);
+  color: var(--guide-ice);
+  text-align: left;
+  text-shadow: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.trail-guide .trail-marker[data-pick="no"] { pointer-events: none; }
+.trail-guide .trail-marker[data-pick="yes"] { pointer-events: auto; cursor: pointer; }
+.trail-marker-face {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 10px 5px 6px;
+  border: 1px solid #f1ce8fab;
+  border-left: 2px solid var(--guide-gold);
+  border-radius: 4px 12px 12px 4px;
+  background: linear-gradient(100deg, #192731f2, #263a43ed);
+  box-shadow: 0 1px 3px #10252e50;
+}
+
+.trail-marker-icon { display: grid; flex: none; place-items: center; width: 23px; height: 23px; color: var(--guide-gold); }
+.trail-marker-icon svg { width: 100%; height: 100%; transform: rotate(var(--trail-turn, 0deg)) scaleX(var(--trail-mirror, 1)); }
+.trail-marker-words { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.trail-marker-name {
+  overflow: hidden;
+  font: 600 clamp(14px, 1.45vw, 19px)/1.18 var(--serif, "Songti SC", serif);
+  letter-spacing: .05em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trail-marker-note {
+  overflow: hidden;
+  font-size: clamp(10px, .95vw, 12px);
+  line-height: 1.13;
+  letter-spacing: .025em;
+  color: #e6cf9a;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trail-guide:lang(en) .trail-marker-name { font-family: var(--sans, sans-serif); letter-spacing: .005em; white-space: normal; text-wrap: balance; }
+
+.trail-marker-grade { box-sizing: border-box; position: relative; display: inline-flex; flex: none; align-items: center; justify-content: center; width: 15px; height: 15px; margin-left: 2px; border-radius: 2px; background: #e6ede5; }
+.trail-marker-grade::before, .trail-marker-grade[data-grade="expert"]::after { content: ""; display: block; width: 8px; height: 8px; flex: none; }
+.trail-marker-grade[data-grade="easy"]::before { border-radius: 50%; background: #23744c; }
+.trail-marker-grade[data-grade="intermediate"]::before { background: #1a6093; }
+.trail-marker-grade[data-grade="advanced"]::before, .trail-marker-grade[data-grade="expert"]::before, .trail-marker-grade[data-grade="expert"]::after { width: 7px; height: 7px; background: #263038; transform: rotate(45deg); }
+.trail-marker-grade[data-grade="expert"]::before, .trail-marker-grade[data-grade="expert"]::after { width: 4.5px; height: 4.5px; margin: .65px; }
+
+.trail-marker[data-mode="edge"] .trail-marker-face { border-color: #e3cf9a80; background: #23343be8; }
+.trail-marker[data-selected="true"] .trail-marker-face { border-color: #f4d596; box-shadow: inset 2px 0 #f4d596, 0 1px 3px #10252e50; }
+.trail-marker[data-pick="no"] .trail-marker-face { border-color: #e0e8e571; border-left: 1px dashed #ceddda; border-radius: 2px 6px 6px 2px; background: #2a3b439e; }
+.trail-marker[data-pick="no"] .trail-marker-icon, .trail-marker[data-pick="no"] .trail-marker-note { color: #e1ebe8; }
+.trail-marker[data-pick="no"] .trail-marker-grade { opacity: .88; }
+.trail-marker[data-pick="yes"]:active .trail-marker-face, .trail-marker[data-pick="yes"]:focus-visible .trail-marker-face { border-color: #ffe4a4; background: #4c483ade; }
+.trail-marker:focus-visible { outline: 2px solid #fff1bb; outline-offset: 2px; }
+@media (hover: hover) {
+  .trail-marker[data-pick="yes"]:hover .trail-marker-face { border-color: #ffe2a3; background: #3c4139f2; }
+}
+
+@media (max-height: 500px), (max-width: 600px) {
+  .trail-guide { padding: max(7px, env(safe-area-inset-top)) max(9px, env(safe-area-inset-right)) max(7px, env(safe-area-inset-bottom)) max(9px, env(safe-area-inset-left)); }
+  .trail-guide .trail-marker { max-width: min(39vw, 172px); }
+  .trail-marker-face { gap: 5px; padding: 4px 8px 4px 5px; }
+  .trail-marker-name { font-size: 15px; }
+  .trail-marker-icon { width: 21px; height: 21px; }
+  .trail-marker-grade { width: 14px; height: 14px; margin-left: 1px; }
+}
+@media (orientation: portrait) and (max-width: 430px) {
+  .trail-guide .trail-marker { max-width: 43vw; }
+  .trail-marker-name { letter-spacing: .025em; }
+}
