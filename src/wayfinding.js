@@ -33,22 +33,23 @@ function legAt(route,index,trails) {
 }
 function signSites(data,plans) {
   const sites=[];
-  // Fork directions are painted on the snow. Keep route identification posts clear of those approaches.
+  // A decision point carries its names on the snow. Surveyed common vertices
+  // also cover forks reached from a free run outside the eight itineraries.
   const forks=plans.filter(p=>p.type==='junction').map(p=>p.junctionPosition||[p.x,p.z]);
-  for(const p of plans) {
-    if(!p.options?.length)continue;
-    const src=[p.x,p.z],side=p.resort,approach=p.approach;
+  const outgoing=new Map();
+  for(const trail of data.trails)for(let i=0;i<trail.points.length-1;i++){
+    const p=trail.points[i],key=p.join(','),next=trail.points[i+1].join(',');
+    if(!outgoing.has(key))outgoing.set(key,next);
+    else if(outgoing.get(key)!==next&&outgoing.get(key)!==null){outgoing.set(key,null);forks.push(p);}
+  }
+  const summits=Object.values(data.summitPlaces).map(p=>p.position);
+  const near=(p,others,radius)=>others.some(q=>Math.hypot(q[0]-p[0],q[1]-p[1])<radius);
+  const inChoiceArea=pos=>near(pos,forks,110)||near(pos,summits,125);
+  for(const p of plans){
+    if(p.type!=='confirmation'||!p.options?.length)continue;
+    const pos=[p.x,p.z];if(inChoiceArea(pos)||near(pos,sites.map(s=>s.pos),145))continue;
     const rows=p.options.map(o=>({...o,name:o.name||o.zh,en:o.en||localNames[simpleName(o.name)]||'',difficulty:o.difficulty||'intermediate'}));
-    if(p.type==='summit') {
-      const start=data.summitPlaces[side],h=start.heading;
-      // The Wanlong unloading apron is directly under the return lane of lift 7.
-      // Its board stands on the right shoulder, clear of the passing cabins.
-      const pos=side==='wanlong'?alongShoulder(start.position,h,6.75,9.85):alongShoulder(start.position,h,-3.05,8.65);
-      const heading=bearing(start.position,pos);
-      sites.push({id:p.id,signId:p.id,type:'summit',pos,side,heading,approach:h,rows,header:side==='wanlong'?'红花梁 · 雪道入口':'云顶 · 雪道入口',en:'TRAILHEAD'});
-    } else if(p.type==='confirmation') {
-      sites.push({id:p.id,type:'repeater',side,pos:src,heading:approach,approach,rows});
-    }
+    sites.push({id:p.id,type:'repeater',pos,side:p.resort,heading:p.approach,approach:p.approach,rows});
   }
   const trails=new Map(data.trails.map(t=>[t.id,t]));
   // Shared initial and lower pistes get one confirmation marker, regardless of how many
@@ -60,7 +61,7 @@ function signSites(data,plans) {
       const name=simpleName(trail.name),en=localNames[name];
       if(!en)continue;
       const side=trail.resort==='genting'?-1:1,pos=alongShoulder([f.x,f.z],f.angle,side*clamp(trail.width*.47,7.5,20));
-      if(forks.some(([x,z])=>Math.hypot(pos[0]-x,pos[1]-z)<115))continue;
+      if(inChoiceArea(pos))continue;
       if(sites.some(o=>Math.hypot(pos[0]-o.pos[0],pos[1]-o.pos[1])<Math.min(170,o.type==='repeater'?170:125)))continue;
       const lower=trail.name.includes('大奔头');
       sites.push({id:'follow-'+trail.id+'-'+Math.round(s),type:'repeater',side:trail.resort,pos,heading:f.angle+side*.16,approach:f.angle,
@@ -145,8 +146,7 @@ function labelAtlas(sites) {
   return {uv,white:uv.get(keyFor(white)),enamel,shell};
 }
 
-// All plates within one sector use the same atlas; hardware and readable faces each
-// need one draw. Individual rows still participate independently in a ray selection.
+// Plates within a sector share one textured draw and one draw for their hardware.
 class GeometryBatch {
   constructor(){this.vertices=[];this.normal=[];this.colors=[];this.st=[];this.ix=[];}
   polygon(points,tint,uv) {
@@ -182,11 +182,10 @@ function graphicArrow(face,at,rect,angle,size,x,y,z,reverse) {
   shape([[-.42,.06],[.42,.06],[0,.48]]);
 }
 function signModel(data,site,batches,atlas) {
-  const {rows,type,pos,heading}=site,big=type==='summit',repeater=type==='repeater';
-  const width=big?5.03:repeater?3.02:4.26,rowH=big?1.06:repeater?.80:.93,gap=big?.072:.065;
-  const base=big?.60:repeater?1.18:.65;
+  const {rows,type,pos,heading}=site,repeater=type==='repeater';
+  const width=repeater?3.02:4.26,rowH=repeater?.80:.93,gap=.065,base=repeater?1.18:.65;
   const topOfRows=base+rows.length*(rowH+gap)-gap;
-  const headerH=big?.48:.39,high=topOfRows+(site.top?gap+headerH:0);
+  const headerH=.39,high=topOfRows+(site.top?gap+headerH:0);
   const r=V(Math.cos(heading),0,Math.sin(heading)),n=V(-Math.sin(heading),0,Math.cos(heading));
   const g=data.height(...pos),at=(x,y,z)=>V(pos[0]+r.x*x+n.x*z,g+y,pos[1]+r.z*x+n.z*z);
   const shell=batches.hardware,fac=batches.lettering,deep=.14;
@@ -217,20 +216,7 @@ function signModel(data,site,batches,atlas) {
   }
   rows.forEach((row,i)=>slat(row,topOfRows-rowH*.5-i*(rowH+gap),rowH));
   if(site.top)slat(site.top,topOfRows+gap+headerH*.5,headerH,true);
-  if(big){
-    // At a side-on angle the pointed metal vanes indicate the actual trail bearings
-    // even when the wide bilingual boards are edge-on.
-    const x=pos[0]+r.x*width*.363-n.x*.15,z=pos[1]+r.z*width*.363-n.z*.15;
-    box(shell,at,width*.363,high+.31,-.15,.089,.63,.089,'#65716f');
-    rows.slice(0,3).forEach((row,i)=>{
-      const h=row.heading,dx=Math.sin(h),dz=-Math.cos(h),rx=Math.cos(h),rz=Math.sin(h),y=g+high+.51-i*.16;
-      const tip=(l,w,dy)=>V(x+dx*l+rx*w,y+dy,z+dz*l+rz*w);
-      const verts=[[.02,-.052,-.049],[.96,-.052,-.049],[.96,-.12,-.049],[1.24,0,-.049],[.96,.12,-.049],[.96,.052,-.049],[.02,.052,-.049]];
-      const plate=[tip(.025,-.052,.040),tip(.96,-.052,.040),tip(.96,.052,.040),tip(.025,.052,.040)];
-      shell.polygon(plate.reverse(),'#d8c7a3');shell.polygon([tip(.90,.13,.04),tip(1.24,0,.04),tip(.90,-.13,.04)],'#d8c7a3');
-      for(let k=0;k<verts.length;k++){const a=verts[k],b=verts[(k+1)%verts.length];shell.polygon([tip(a[0],a[1],-.049),tip(b[0],b[1],-.049),tip(b[0],b[1],.04),tip(a[0],a[1],.04)],'#887457');}
-    });
-  }
+
 }
 
 export function createWayfinding(scene,data,plans) {

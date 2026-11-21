@@ -69,7 +69,7 @@ export function courseDetails(scene,data,navigation) {
     0,1.8,0, .74,1.67,-.10, 0,1.03,0, .74,1.67,-.10, .78,1.0,-.08, 0,1.03,0,
     .74,1.67,-.10, 1.32,1.71,.04, .78,1.0,-.08, 1.32,1.71,.04, 1.29,1.06,.02, .78,1.0,-.08
   ],3));gateCloth.computeVertexNormals();
-  const gateCount=Math.max(...data.routes.map(r=>Math.ceil(r.length/190)+1));
+  const gateCount=Math.max(40,...(data.allRoutes||data.routes).map(r=>Math.ceil(r.length/190)+2));
   const flags=new THREE.InstancedMesh(gateCloth,new THREE.MeshLambertMaterial({side:THREE.DoubleSide}),gateCount);
   const staffs=new THREE.InstancedMesh(plank,new THREE.MeshLambertMaterial({color:0x334856}),gateCount);
   const gatePose=new THREE.Object3D(),flagColor=new THREE.Color();
@@ -78,7 +78,7 @@ export function courseDetails(scene,data,navigation) {
   function setRoute(route){
     if(route===activeRoute)return;
     activeRoute=route;let i=0;
-    if(route)for(let at=32;at<route.length-16;at+=190){
+    if(route)for(let at=32;at<route.length-16&&i<gateCount;at+=190){
       const f=route.frame(at),side=i%2?1:-1;
       const x=f.x-f.dz*6.5*side,z=f.z+f.dx*6.5*side,y=data.height(x,z);
       gatePose.position.set(x,y,z);gatePose.scale.set(1,1,1);gatePose.rotation.y=-f.angle;

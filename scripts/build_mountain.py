@@ -16,6 +16,10 @@ from datetime import date
 from pathlib import Path
 
 from PIL import Image
+if __package__:
+    from .piste_catalog import add_piste_catalog
+else:
+    from piste_catalog import add_piste_catalog
 
 ORIGIN_LON, ORIGIN_LAT = 115.400, 40.954
 RADIANS = math.pi / 180
@@ -263,10 +267,10 @@ def mapped_features(xml, terrain):
     # above their respective snow surfaces. Heading zero faces north (-z).
     summit_places = {
         'wanlong': {
-            'position': [-308.0, -53.5], 'heading': 2.5926,
+            'position': [-308.0, -53.5], 'heading': 1.77,
             'lodgeId': 'wanlong-lodge', 'liftId': 'w1564657050', 'stationEnd': 'top',
-            'camera': {'position': [-312.0, -60.0], 'height': 3.05,
-                       'target': [-304.7, -48.1], 'targetHeight': 1.36},
+            'camera': {'position': [-315.5, -55.0], 'height': 3.05,
+                       'target': [-297.5, -51.7], 'targetHeight': 1.36},
         },
         'genting': {
             'position': [623.3, 359.5], 'heading': 5.1960,
@@ -275,8 +279,10 @@ def mapped_features(xml, terrain):
                        'target': [617.6, 356.5], 'targetHeight': 0.98},
         },
     }
-    return {'trails': trails, 'lifts': lifts, 'routes': routes, 'landmarks': landmarks,
-            'buildings': buildings, 'water': water, 'summitPlaces': summit_places}
+    features = {'trails': trails, 'lifts': lifts, 'routes': routes, 'landmarks': landmarks,
+                'buildings': buildings, 'water': water, 'summitPlaces': summit_places}
+    add_piste_catalog(features, terrain.source_height)
+    return features
 
 
 def main():
@@ -313,6 +319,7 @@ def main():
     for name, contents in [('mountain', data), ('horizon', far)]:
         (DEST / f'{name}.json').write_text(json.dumps(contents, separators=(',', ':'), ensure_ascii=False) + '\n', encoding='utf-8')
     print(f"{len(data['trails'])} trail sections, {len(data['lifts'])} lifts, {len(data['buildings'])} building footprints")
+    print(f"{len(data['trailCatalog'])} named public pistes; {len(data['venues'])} venue records")
     for route in data['routes']:
         print(route['id'], route['distance'], route['drop'])
 

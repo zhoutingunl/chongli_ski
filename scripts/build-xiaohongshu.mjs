@@ -130,7 +130,17 @@ try{
         if(!/\.(png|jpg|webp|json)$/.test(name))continue;
         if(name.endsWith('.json')){
           const data=JSON.parse(await readFile(path.join(from,name),'utf8')),key=path.basename(name,'.json');
-          await writeFile(path.join(to,key+'-data.js'), 'window.ridgelineTerrain=window.ridgelineTerrain||{};\nwindow.ridgelineTerrain['+JSON.stringify(key)+']='+JSON.stringify(data).replace(/\u2028/g,'\\u2028').replace(/\u2029/g,'\\u2029')+';\n');
+          const heights=data.dem?.heights;
+          let decode='';
+          if(heights?.every(Number.isSafeInteger)){
+            // Store adjacent integer elevation differences. Restore exactly
+            // once when the offline data script loads, before handing it to the game.
+            for(let i=heights.length-1;i>0;i--)heights[i]-=heights[i-1];
+            decode='var h=data.dem.heights;for(var i=1;i<h.length;i++){h[i]+=h[i-1];}\n';
+          }
+          const json=JSON.stringify(data).replace(/\u2028/g,'\\u2028').replace(/\u2029/g,'\\u2029');
+          await writeFile(path.join(to,key+'-data.js'),'(function(){var data='+json+';\n'+decode+
+            'window.ridgelineTerrain=window.ridgelineTerrain||{};window.ridgelineTerrain['+JSON.stringify(key)+']=data;})();\n');
         }else await copyFile(path.join(from,name),path.join(to,name));
       }
     })

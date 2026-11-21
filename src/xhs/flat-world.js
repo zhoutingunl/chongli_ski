@@ -4,6 +4,46 @@ import {createMountainClimate} from '../environment.js';
 import {clamp,difficultyColor} from '../mountain.js';
 import {label,t} from '../language.js';
 
+// A top-down marker preserves direction on the trail map while showing the
+// same equipment, leading foot and helmet identity as the mountain view.
+function drawRiderMarker(ctx,opts,sim,x,y,heading) {
+  const gear=opts.gear, child=opts.gender==='boy'||opts.gender==='girl', female=opts.gender==='female'||opts.gender==='girl';
+  const pace=Math.min(1,Math.max(0,sim.speed/22)), edge=sim.edge||0, brake=sim.brake||0;
+  const outline='#344850', deck=child?'#b5d4cb':'#dfc69b';
+  const helmet=opts.gender==='boy'?'#5492a4':opts.gender==='girl'?'#f2d5b2':female?'#bbc7bf':'#3d4648';
+  function line(x1,y1,x2,y2,ink,width) {
+    ctx.strokeStyle=ink;ctx.lineWidth=width;ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+  }
+  function oval(cx,cy,rx,ry,angle,ink){
+    ctx.save();ctx.translate(cx,cy);ctx.rotate(angle);ctx.scale(rx,ry);
+    ctx.beginPath();ctx.arc(0,0,1,0,Math.PI*2);ctx.fillStyle=ink;ctx.fill();ctx.restore();
+  }
+  ctx.save();ctx.translate(x,y-Math.min(12,(sim.airHeight||0)*12));ctx.rotate(heading);
+  if(child)ctx.scale(.83,.83);
+  if(gear==='board'){
+    oval(0,0,4.7,15,-edge*.065,outline);oval(0,0,3.5,13.8,-edge*.065,deck);
+    line(-2.5,-3,2,-5,outline,2.4);line(-2,4,2.7,5,outline,2.4);
+  }else for(const s of [-1,1]){
+    const toe=s*(3.4-(child?1.6:.7)*brake);
+    line(s*(3.4+brake),10,toe,-15,outline,3.3);line(s*(3.4+brake),10,toe,-15,deck,1.7);
+  }
+  const tilt=gear==='board'?.80-edge*.22:edge*.18;
+  ctx.save();ctx.translate(edge*1.35,0);ctx.rotate(tilt);
+  const width=child?5.2:5.6,arm=width+2+Math.abs(edge)*(child?3:1.8);
+  for(const s of [-1,1]){
+    const tip=s*arm,front=-2.8-2.8*pace+s*edge*2.5;
+    line(s*width,-1,tip,front,outline,2.8);
+    if(gear!=='board')line(tip,front,tip+s*(2-.8*pace),front+8+6*pace,'#607378',.95);
+  }
+  oval(0,0,width+1.0,4.9,0,outline);oval(0,0,width,4.2,0,opts.color||'#b96a47');
+  if(!child&&!female)oval(0,1.8,2.35,2.3,0,'#506263');
+  ctx.restore();
+  const headY=-3.6-2.6*pace,hr=child?4.5:4.0;
+  oval(edge*.65,headY,hr+.6,hr+.8,0,outline);oval(edge*.65,headY,hr,hr+.22,0,helmet);
+  line(-hr*.55+edge*.65,headY-2.1,hr*.55+edge*.65,headY-2.1,'#4e8392',1.3);
+  ctx.restore();
+}
+
 export function createFlatWorld(canvas,data,opts,onEvent) {
   const ctx=canvas.getContext('2d');
   if(!ctx)throw new Error('Canvas 2D is unavailable');
@@ -41,13 +81,15 @@ export function createFlatWorld(canvas,data,opts,onEvent) {
     const angle=Number.isFinite(heading)?heading:sim.heading+yaw+turn;
     const route=station.trailhead&&!turn?sim.route:navigation.departure(station.side,sim.x,sim.z,angle,preferred);
     if(!route)return null;
-    start(route);sim.speed=2.15;
+    start(route);if(!Number.isFinite(heading))sim.freeHeading(angle);sim.speed=2.15;
     return sim.route;
   }
   function nearestStation(){
     if(station?.lift)return {lift:station.lift,end:station.end};
     if(ride||!sim.route)return null;
     const finished=sim.mode==='finished';
+    const mapped=finished&&data.lifts.find(l=>l.id===sim.route.finishLiftId);
+    if(mapped)return {lift:mapped,end:'bottom'};
     let best=null,min=finished?Infinity:48;
     for(const lift of data.lifts){
       if(finished&&lift.resort!==sim.route.destination)continue;
@@ -142,13 +184,28 @@ export function createFlatWorld(canvas,data,opts,onEvent) {
     }
     if(snowMarks.length>1)trace(snowMarks,night?'#7b9cb4':'#7d9cae',1.4);
     const [px,py]=position(sim.x,sim.z), heading=sim.heading+bearing;
-    ctx.save();ctx.translate(px,py-Math.min(12,sim.airHeight*12));ctx.rotate(heading);
-    ctx.beginPath();ctx.moveTo(0,-13);ctx.lineTo(8,8);ctx.lineTo(0,5);ctx.lineTo(-8,8);ctx.closePath();
-    ctx.fillStyle=opts.color;ctx.fill();ctx.lineWidth=2;ctx.strokeStyle='#fff';ctx.stroke();ctx.restore();
-    const marker=sim.activeJunction(64);
-    if(marker){
-      ctx.font='bold 13px sans-serif';ctx.fillStyle=night?'#f9e5be':'#394d56';
-      marker.sign.options.forEach((option,index)=>ctx.fillText(label(option.name),15,h*.45+index*20));
+    drawRiderMarker(ctx,opts,sim,px,py,heading);
+    const marker=navigation.nearbyChoices(sim);
+    if(marker&&!photo){
+      ctx.save();ctx.font='bold 13px sans-serif';ctx.textAlign='center';ctx.lineWidth=3;
+      ctx.fillStyle=night?'#f9e5be':'#204857';ctx.strokeStyle=night?'#253044':'#f3f4e8';
+      const placed=[];
+      for(const opt of marker.options){
+        const anchor=opt.paintPosition||opt.position;
+        if(!anchor)continue;
+        const [ax,ay]=position(...anchor),forward=sim.heading+yaw;
+        const view=Math.atan2(anchor[0]-sim.x,sim.z-anchor[1]);
+        if(Math.cos(view-forward)<.28||ax<8||ax>w-8||ay<10||ay>h-16)continue;
+        const text=label(opt.name),width=ctx.measureText(text).width;
+        const tx=clamp(ax,width*.55+5,w-width*.55-5);
+        let ty=ay-4;
+        for(const old of placed)if(Math.abs(tx-old.x)<(width+old.width)*.5+5&&Math.abs(ty-old.y)<19)ty=old.y+18;
+        placed.push({x:tx,y:ty,width});
+        ctx.strokeText(text,tx,ty);ctx.fillText(text,tx,ty);
+        ctx.save();ctx.translate(ax,ay+6);ctx.rotate(opt.heading+bearing);
+        ctx.beginPath();ctx.moveTo(0,-4);ctx.lineTo(3.6,3);ctx.lineTo(-3.6,3);ctx.closePath();ctx.fill();ctx.restore();
+      }
+      ctx.restore();
     }
     ctx.fillStyle=night?'#cbdce5':'#4e6572';ctx.font='13px sans-serif';
     ctx.fillText(t('轻量雪道视图','Lightweight trail view'),12,h*.34);
@@ -187,6 +244,7 @@ export function createFlatWorld(canvas,data,opts,onEvent) {
     get nextFlag(){return null;},
     get looking(){return Math.abs(yaw)>.03||Math.abs(zoom-1)>.03||station?.view!=='wide'&&!!station;},
     get facing(){return sim.heading+yaw;},
+    pushTowardsView(){sim.freeHeading(this.facing);yaw=0;redraw();},
     summitHeading(route){return station?.summit?navigation.summitHeading(station.side,route):undefined;},
     pause(value){paused=value;last=0;redraw();},
     stop(){active=false;if(frame)cancelAnimationFrame(frame);frame=0;sim.mode='idle';canvas.hidden=true;},

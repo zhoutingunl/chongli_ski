@@ -174,3 +174,7 @@ html[lang=en] .start-content h1{font-family:var(--latin);font-size:clamp(42px,6.
   .start-choices{row-gap:8px}
   .start-actions{margin-top:15px}
 }
+
+.map-regions{margin:0 0 .55rem}.map-regions .segments{display:inline-flex}
+
+@media (orientation:landscape) and (max-width:760px) and (max-height:460px){#station-card.turned .station-place,#station-card.turned #station-note{display:none}}

@@ -84,7 +84,12 @@ export class TrailMap {
     }
     c.globalAlpha=1;
     if(this.route){
-      c.strokeStyle='#f3ce8a';c.lineWidth=mini?1.75:3;c.beginPath();line(this.route.points);c.stroke();
+      c.strokeStyle='#f3ce8a';c.lineWidth=mini?1.75:3;
+      const {points,primaryStartIndex,primaryEndIndex}=this.route;
+      if(!mini&&Number.isInteger(primaryEndIndex)){
+        c.save();c.globalAlpha=.65;c.lineWidth=1.75;c.setLineDash([4,4]);c.beginPath();line(points);c.stroke();c.restore();
+        c.beginPath();line(points.slice(primaryStartIndex||0,primaryEndIndex+1));c.stroke();
+      }else{c.beginPath();line(points);c.stroke();}
       for(const point of [this.route.points[0],this.route.points.at(-1)]){
         c.fillStyle='#eed29c';c.beginPath();c.arc(px(point[0]),pz(point[1]),mini?2.4:4,0,Math.PI*2);c.fill();
       }

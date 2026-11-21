@@ -320,6 +320,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
     if(!route)return null;
     const wasHead=opts.view==='first',oldPitch=headPitch,oldLookPitch=lookPitch;
     resetScene(route);
+    if(!Number.isFinite(routeHeading))sim.freeHeading(requested);
     sim.speed=sim.maxSpeed=2.15;sim.push=.75;
     details.setRoute(route);camHeading=poseHeading;headPitch=oldPitch;
     if(wasHead){snap=false;lookPitch=oldLookPitch;lastOrigin.set(sim.x,sim.y,sim.z);}
@@ -337,6 +338,8 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
     if(ride||!sim.route)return null;
     if(sim.mode==='finished'){
       const side=sim.route.destination;
+      const mapped=lifts.find(l=>l.meta.id===sim.route.finishLiftId);
+      if(mapped)return {lift:mapped,end:'bottom'};
       const summitLift=lifts.find(l=>l.meta.id===(side==='genting'?'w469393391':'w1368988315'));
       const baseDistance=l=>Math.hypot(l.meta.points[0][0]-sim.x,l.meta.points[0][1]-sim.z);
       if(baseDistance(summitLift)<140)return {lift:summitLift,end:'bottom'};
@@ -407,7 +410,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
     }else if(photo)updateAvatar(0);
     moveCamera(dt);
     treesLag+=dt;if(treesLag>.40){refreshLOD();treesLag=0;}
-    trailGuide.update(sim,navigation,opts.language);
+    trailGuide.update(sim,navigation,opts.language,camera);
     renderer.render(scene,camera);
     if(shaderFailure){active=false;onEvent('lost');return;}
     if(now-lastUI>95){onEvent('hud',sim);lastUI=now;}
@@ -497,6 +500,9 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
     },
     get looking(){const yaw=baseTurn?wrap(baseTurn.yaw-baseTurn.home):lookYaw;return Math.abs(yaw)>.035 || Math.abs(lookPitch)>.035 || !!station?.preset;},
     get facing(){return wrap(baseBearing+lookYaw);},
+    pushTowardsView(){
+      camHeading=this.facing;sim.freeHeading(camHeading);resetLook();kick();
+    },
     summitHeading(routeId){return station?.summit?navigation.summitHeading(station.side,routeId):undefined;},
     photo(b,kind='rider'){photo=b;if(b)setPhotoPlace(kind);snap=true;prev=0;kick();},
     photoPlace:setPhotoPlace,

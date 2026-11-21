@@ -33,7 +33,7 @@ class TrailIndex {
         const [x,z] = trail.points[i - 1], [x2,z2] = trail.points[i];
         const dx = x2-x, dz = z2-z, l2 = dx*dx+dz*dz;
         if (!l2) continue;
-        const seg = {x,z,dx,dz,l2,trail};
+        const seg = {x,z,dx,dz,l2,trail,index:i-1};
         const margin = Math.max(60, (trail.width || 38) * 0.75);
         for (let j=Math.floor((Math.min(z,z2)-margin)/this.size); j<=Math.floor((Math.max(z,z2)+margin)/this.size); j++) {
           for (let k=Math.floor((Math.min(x,x2)-margin)/this.size); k<=Math.floor((Math.max(x,x2)+margin)/this.size); k++) {
@@ -53,7 +53,18 @@ class TrailIndex {
       const ax=x-s.x-s.dx*t, az=z-s.z-s.dz*t, d=ax*ax+az*az;
       if (d<distance2) { distance2=d; best=s; }
     }
-    return {trail:best?.trail,distance:Math.sqrt(distance2)};
+    return {trail:best?.trail,index:best?.index,distance:Math.sqrt(distance2)};
+  }
+  corridors(x,z,radius=34) {
+    const hits=new Map();
+    const segments=this.cells.get(Math.floor(x/this.size)+','+Math.floor(z/this.size))||[];
+    for(const s of segments){
+      const t=clamp(((x-s.x)*s.dx+(z-s.z)*s.dz)/s.l2,0,1);
+      const px=s.x+t*s.dx,pz=s.z+t*s.dz,distance=Math.hypot(x-px,z-pz);
+      if(distance>radius || distance>=(hits.get(s.trail.id)?.distance??Infinity))continue;
+      hits.set(s.trail.id,{trail:s.trail,index:s.index,t,x:px,z:pz,distance});
+    }
+    return hits.values();
   }
 }
 
@@ -135,13 +146,34 @@ export class SkiRoute {
 }
 
 let pending;
+export function prepareMountain(raw){
+  const field=new HeightField(raw);
+  const data={...raw,field,height:field.height.bind(field),index:new TrailIndex(raw.trails),obstacles:new ObstacleIndex(raw.buildings)};
+  data.routes=raw.routes.map(r=>new SkiRoute(r,data));
+  const catalogue=new Map((raw.trailCatalog||[]).map(p=>[p.routeId,p]));
+  data.pisteRoutes=(raw.pisteRoutes||[]).map(r=>new SkiRoute({...r,catalogResort:catalogue.get(r.id)?.resort||r.resort},data));
+  data.allRoutes=[...data.routes,...data.pisteRoutes.filter(r=>!data.routes.some(a=>a.id===r.id))];
+  // The upper Peony section has its own public name. Race courses can also
+  // share a public piste. Keep one snow surface and its original edge IDs.
+  const sections=new Map();
+  for(const r of data.pisteRoutes){
+    if(r.kind==='venue')continue;
+    for(const id of r.primaryTrailIds){
+      const t=data.trails.find(v=>v.id===id);
+      if(!t||t.name.includes(r.name))continue;
+      const nameplate={...t,name:r.name,en:r.en,ref:r.ref,difficulty:r.difficulty};
+      const edges=new Set();
+      for(let i=r.primaryStartIndex;i<r.primaryEndIndex;i++)edges.add(r.points[i]+';'+r.points[i+1]);
+      if(!sections.has(id))sections.set(id,new Map());
+      const row=sections.get(id);
+      for(let i=0;i+1<t.points.length;i++)if(edges.has(t.points[i]+';'+t.points[i+1]))row.set(i,nameplate);
+    }
+  }
+  data.snowSection=(t,index)=>sections.get(t?.id)?.get(index)||t;
+  return data;
+}
 export function loadMountain() {
-  if (!pending) pending = loadData('mountain').then(raw=>{
-    const field=new HeightField(raw);
-    const data={...raw, field, height:field.height.bind(field), index:new TrailIndex(raw.trails),obstacles:new ObstacleIndex(raw.buildings)};
-    data.routes=raw.routes.map(r=>new SkiRoute(r,data));
-    return data;
-  }).catch(e=>{pending=null;throw e;});
+  if (!pending) pending = loadData('mountain').then(prepareMountain).catch(e=>{pending=null;throw e;});
   return pending;
 }
 
