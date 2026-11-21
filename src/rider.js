@@ -12,6 +12,24 @@ const basisX = v3(), basisY = v3(), basisZ = v3();
 const axisY = v3(0, 1, 0);
 const axisDown = v3(0, -1, 0);
 
+// Equipment is measured nose to tail. Stance is the distance between the
+// boot centres at rest, across a pair of skis or along a snowboard.
+export function getRiderDimensions({gear = 'ski', gender = 'male'} = {}) {
+  const board = gear === 'board', isChild = gender === 'boy' || gender === 'girl';
+  const scale = gender === 'boy' ? .684 : gender === 'girl' ? .674 : 1;
+  const lengthScale = scale * (isChild ? (board ? .885 : .820) : 1);
+  const widthScale = scale * (isChild ? (board ? 1.055 : 1.16) : 1);
+  const stanceScale = scale * (isChild ? (board ? .900 : .985) : 1);
+  return Object.freeze({
+    isChild, scale, lengthScale, widthScale, stanceScale,
+    deckLength: (board ? 1.585 : 1.753) * lengthScale,
+    deckWidth: (board ? .288 : .127) * widthScale,
+    waistWidth: (board ? .250 : .079) * widthScale,
+    stanceWidth: (board ? .550 : .282) * stanceScale,
+    poleLength: board ? 0 : (isChild ? 1.085 : 1.135) * scale
+  });
+}
+
 function child(parent, name) {
   const node = new THREE.Group();
   node.name = name;
@@ -255,8 +273,8 @@ function materials() {
   };
 }
 
-function jacket(batch, m, palette, female) {
-  const shoulder = female ? .916 : 1, waist = female ? .91 : 1;
+function jacket(batch, m, palette, female, junior) {
+  const shoulder = junior ? .91 : female ? .916 : 1, waist = junior ? .97 : female ? .91 : 1;
   const cut = [
     [-.080, .158, .113, .016], [-.069, .178, .132, .017], [-.053, .181, .139, .019],
     [-.035, .174, .129, .018], [-.012, .177, .136, .016], [.012, .18, .137, .014],
@@ -335,6 +353,9 @@ function jacket(batch, m, palette, female) {
       false, palette.underarm, .0041);
     const pocketTab = onShell(w * .156, .188, false, .006);
     block(batch, m.hard, palette.dark, pocketTab, [.008, .021, .004], [0, 0, -s * .22]);
+    if (junior) {
+      seam([[w*.204,.388],[w*.182,.369],[w*.156,.353]],true,'#c5d9cd',.0045);
+    }
   }
   seam([[0, .016], [.002, .086], [.001, .190], [0, .297], [.001, .398], [0, .453]],
     false, palette.dark, .0039);
@@ -342,7 +363,10 @@ function jacket(batch, m, palette, female) {
   block(batch, m.alloy, '#929088', onShell(-.069, .33, false, .0055), [.007, .014, .004], [0, 0, -.2]);
   cord(batch, m.hard, palette.dark, [[0, .445, -.079], [0, .480, -.084], [0, .515, -.076]], .0032);
   block(batch, m.alloy, '#928b78', [.003, .494, -.085], [.008, .013, .004]);
-
+  if (junior) {
+    cord(batch,m.cloth,palette.yoke,[[.003,.490,-.087],[.011,.475,-.091],
+      [.003,.464,-.093],[-.005,.477,-.091],[.003,.490,-.087]],.0037);
+  }
 }
 
 function pelvisShape(batch, m, p, female) {
@@ -587,7 +611,7 @@ function glove(batch, m, p, side) {
   band(batch, m.hard, p.guard, -.011, .039, .039, .003, .011);
 }
 
-function buildHead(batch, m, p, female) {
+function buildHead(batch, m, p, female, junior) {
   const skin = colorOf('#bb8e73'), mask = colorOf('#353c3f');
   batch.add(loft([
     [-.015, .057, .056, .013], [.01, .066, .061, .009], [.053, .066, .065, .002],
@@ -609,7 +633,8 @@ function buildHead(batch, m, p, female) {
       [s * .093, .151, -.037], [s * .088, .103, -.029], [s * .062, .071, -.021], [s * .037, .063, -.050]
     ], .0039);
   }
-  const outer = colorOf('#383e40'), matte = colorOf('#474d4d');
+  const outer = junior ? wash(p.coat,'#747e7e',.61) : colorOf('#383e40');
+  const matte = junior ? wash(p.coat,female ? '#e8e1d3' : '#e0e8dc',.78) : colorOf('#474d4d');
   const helmetShape = pt => {
     const f = (-Math.sin(pt.a) + 1) / 2;
     pt.y += (1 - pt.t) ** 1.7 * (f * .043 - (1 - f) * .017);
@@ -645,6 +670,13 @@ function buildHead(batch, m, p, female) {
   block(batch, m.hard, '#171e20', [0, .134, .144], [.038, .028, .012], [-.09, 0, 0]);
   block(batch, m.hard, '#667070', [0, .136, .151], [.019, .006, .003], [-.09, 0, 0]);
   block(batch, m.hard, '#798281', [-.035, .170, .140], [.018, .004, .002], [-.12, -.24, .1]);
+  if (junior) {
+    // Rear reflectors on the size-adjustable shell are visible to a following parent.
+    for (const s of [-1,1]) {
+      cord(batch,m.hard,'#e5ebd2',[[s*.043,.212,.127],[s*.051,.226,.117],
+        [s*.057,.235,.109]],.0032);
+    }
+  }
   const shield = (u, v, frame) => {
     const a = 2 * u - 1, s = Math.abs(a);
     const taper = s ** 3.7;
@@ -663,7 +695,17 @@ function buildHead(batch, m, p, female) {
       [s * .096, .178, -.067], [s * .106, .172, -.047], [s * .110, .158, -.023]
     ], .007);
   }
-  if (female) {
+  if (female && junior) {
+    for (const s of [-1,1]) {
+      for (let i=0;i<5;i++) {
+        const d=i*.013;
+        ellipsoid(batch,m.cloth,i%2 ? '#655040' : '#523e30',
+          [s*(.068+d*.22)+.002*Math.sin(i*2.7),.093-d,.085+d*.33],
+          [.0128-i*.0008,.015,.0125-i*.0007],[-.20,s*.13,s*(i%2 ? .39 : -.33)]);
+      }
+      ellipsoid(batch,m.cloth,p.stitch,[s*.083,.039,.101],[.010,.004,.010]);
+    }
+  } else if (female) {
     const hair = ['#493c32', '#56463a', '#443a33'];
     for (let i = 0; i < 5; i++) {
       ellipsoid(batch, m.cloth, hair[i % 3],
@@ -674,7 +716,7 @@ function buildHead(batch, m, p, female) {
   }
 }
 
-function buildBoot(batch, m, p, side, snowboard) {
+function buildBoot(batch, m, p, side, snowboard, junior) {
   // Local origin is the centre of the binding, sole on its footbed.
   const boot = colorOf(snowboard ? '#3e4445' : '#414c51');
   const toe = colorOf('#363b3c'), shell = colorOf(snowboard ? '#292f32' : '#546169');
@@ -696,7 +738,8 @@ function buildBoot(batch, m, p, side, snowboard) {
   }), snowboard ? m.cloth : m.hard);
   band(batch, m.cloth, p.lining, .239, .058, .064, .034, .014);
   const latch = snowboard ? [ [ .098,-.086], [.121,-.042], [.147,-.023], [.169,-.020], [.186,-.020] ]
-    : [ [.097,-.090], [.121,-.055], [.159,-.022], [.197,-.025] ];
+    : junior ? [[.108,-.072],[.171,-.024]] : [[.097,-.090],[.121,-.055],[.159,-.022],[.197,-.025]];
+  if (junior && !snowboard) band(batch,m.cloth,p.yoke,.219,.061,.068,.034,.023);
   latch.forEach(([y, z], i) => {
     if (snowboard) {
       cord(batch, m.cloth, '#93918a', [[-.032, y, z + .011], [0, y + .006, z - .007], [.032, y + .014, z + .006]], .0025);
@@ -733,7 +776,7 @@ function buildBinding(batch,m,p,side,snowboard) {
   }
 }
 
-function makeDeck(batch, m, p, board, side) {
+function makeDeck(batch, m, p, board, side, junior) {
   // Full-width values taper through a cambered waist to rounded shovel and tail.
   const profile = board ? [
     [-.80, .008, .098], [-.790, .105, .086], [-.77, .174, .069], [-.738, .236, .050],
@@ -746,8 +789,8 @@ function makeDeck(batch, m, p, board, side) {
     [-.14, .084, .024], [.05, .079, .025], [.32, .090, .023], [.52, .103, .020],
     [.655, .107, .020], [.735, .101, .024], [.769, .081, .030], [.788, .040, .038], [.793, .005, .042]
   ];
-  const base = board ? colorOf('#384d59') : colorOf('#3c535c');
-  const paper = board ? colorOf('#d5c7a0') : colorOf('#d9cba9');
+  const base = junior ? wash(p.coat,'#38575d',.70) : colorOf(board ? '#384d59' : '#3c535c');
+  const paper = junior ? colorOf('#dce8d4') : colorOf(board ? '#d5c7a0' : '#d9cba9');
   const printed = wash(p.coat, '#d3a46e', .34);
   function panel(u, z) {
     const q = u * 2 - 1;
@@ -757,6 +800,7 @@ function makeDeck(batch, m, p, board, side) {
     if (cut < -.60) return paper;
     if (cut < -.49) return base;
     if (cut < -.454 || (cut > .488 && cut < .511)) return printed;
+    if (junior && ((cut>-.415 && cut<-.384) || (cut>-.359 && cut<-.344))) return paper;
     if (cut > .518) return paper;
     if (Math.abs(q) > .91) return tone(base, .71);
     return base;
@@ -788,6 +832,7 @@ function makeDeck(batch, m, p, board, side) {
     const ink = '#d3bf91';
     cord(batch, m.hard, ink, [[-.043, .025, .37], [-.015, .025, .335], [.024, .025, .367], [.043, .025, .347]], .0020, 4);
   }
+  return profile;
 }
 
 // The toe piece and sole stay on the deck. Only the shell above the ankle
@@ -866,19 +911,21 @@ function readPiste(snow, state, speed, active) {
 // relief under this edge changes its height and pitch relative to the rider.
 function snowUnder(snow, x, z) {
   if (!snow.available) return 0;
+  x *= snow.scale; z *= snow.scale;
   const y = snow.map.height(snow.x+snow.cos*x-snow.sin*z, snow.z+snow.sin*x+snow.cos*z);
-  return clamp((y-snow.ground-snow.across*x-snow.back*z)*snow.vertical, -.08, .08);
+  return clamp((y-snow.ground-snow.across*x-snow.back*z)*snow.vertical/snow.scale, -.08, .08);
 }
 
-function flexibleDeck(node, board) {
+function flexibleDeck(node, board, widthRatio = 1, stanceRatio = 1, lengthRatio = 1) {
   const skins = node.children.filter(m => m.isMesh);
+  const bindingZ = .275 * stanceRatio / lengthRatio;
   for (const skin of skins) {
     const geometry = skin.geometry, a = geometry.attributes.position;
     const nose = new Float32Array(a.count*3), tail = new Float32Array(a.count*3);
     const twist = board ? new Float32Array(a.count*3) : null;
     for (let i = 0; i < a.count; i++) {
       const z = a.getZ(i);
-      if (twist) twist[i*3+1] = a.getX(i) * (1 - 2*THREE.MathUtils.smoothstep(z,-.275,.275));
+      if (twist) twist[i*3+1] = a.getX(i)*widthRatio * (1 - 2*THREE.MathUtils.smoothstep(z,-bindingZ,bindingZ));
       const before = THREE.MathUtils.smoothstep(-z,.18,board ? .75:.90);
       const after = THREE.MathUtils.smoothstep(z,.18,.73);
       nose[i*3+1] = -.021*before + .008*after;
@@ -900,8 +947,7 @@ function flexibleDeck(node, board) {
   };
 }
 
-function skiPole(batch, m, p, side) {
-  const l = 1.135;
+function skiPole(batch, m, p, side, l) {
   batch.add(loft([
     [-l, .0014, .0014], [-l + .026, .0025, .0025], [-l + .054, .0038, .0038],
     [-.65, .0050, .0050], [-.19, .0064, .0064], [-.095, .0065, .0065]
@@ -962,6 +1008,9 @@ function makePart(parent, name, build) {
  */
 export function createRider(options = {}) {
   const board = options.gear === 'board', female = options.gender === 'female';
+  const dimensions = getRiderDimensions(options), junior = dimensions.isChild, size = dimensions.scale;
+  const deckLength = dimensions.lengthScale/size, deckWidth = dimensions.widthScale/size;
+  const stance = dimensions.stanceScale/size, poleLength = dimensions.poleLength/size;
   const m = materials();
   const coat = colorOf(options.color ?? '#bd643c');
   const palette = {
@@ -973,38 +1022,63 @@ export function createRider(options = {}) {
   };
   const group = new THREE.Group();
   group.name = board ? 'Snowboarder' : 'Alpine skier';
-  const pelvis = makePart(group, 'Snow pants', b => pelvisShape(b, m, palette, female));
-  const torso = makePart(group, 'Shell jacket', b => jacket(b, m, palette, female));
+  // The public group and camera anchors are in terrain metres. This inner
+  // uniform transform keeps joint solves, coupled ski boots and clothing in
+  // one bind space, including when the world rotates or repositions a child.
+  const rig = junior ? child(group,'Junior rig') : group;
+  const pelvis = makePart(rig, 'Snow pants', b => pelvisShape(b, m, palette, female));
+  const torso = makePart(rig, 'Shell jacket', b => jacket(b, m, palette, female, junior));
   const spine = fitJacket(torso);
-  const head = makePart(torso, 'Helmet and goggles', b => buildHead(b, m, palette, female));
-  head.position.set(0, .475, -.003);
+  const head = makePart(torso, 'Helmet and goggles', b => buildHead(b,m,palette,female || options.gender==='girl',junior));
+  const neckY = junior ? .461 : .475;
+  if (junior) head.scale.set(1.31,1.27,1.29);
+  head.position.set(0, neckY, -.003);
 
-  const leg1 = female ? .412 : .432, leg2 = female ? .387 : .403;
-  const arm1 = female ? .265 : .28, arm2 = female ? .244 : .254;
-  const width = female ? .178 : .192, hipWidth = female ? .098 : .104;
+  const leg1 = junior ? .386 : female ? .412 : .432, leg2 = junior ? .351 : female ? .387 : .403;
+  const arm1 = junior ? .251 : female ? .265 : .28, arm2 = junior ? .230 : female ? .244 : .254;
+  const width = junior ? .169 : female ? .178 : .192, hipWidth = junior ? .094 : female ? .098 : .104;
   const seatPose = fitSeat(pelvis,hipWidth);
-  const deck = board ? makePart(group, 'Snowboard', b => makeDeck(b, m, palette, true, 0)) : null;
+  const baseSections = junior ? new Map() : null;
+  function plankModel(name,side) {
+    let profile;
+    const node=makePart(rig,name,b=>{profile=makeDeck(b,m,palette,board,side,junior);});
+    // Only the board layers stretch. The separately sized boots and bindings
+    // sit on its footbeds and keep their own shape.
+    if (junior) {
+      for (const mesh of node.children) mesh.scale.set(deckWidth,1,deckLength);
+      const sections=profile.map(([z,width,top])=>{
+        const nose=THREE.MathUtils.smoothstep(-z,.18,board ? .75 : .90);
+        const tail=THREE.MathUtils.smoothstep(z,.18,.73),bindingZ=.275*stance/deckLength;
+        return {z:z*deckLength,half:width*.5*deckWidth,base:top-(board ? .0105 : .013),
+          frontFlex:-.021*nose+.008*tail,rearFlex:-.016*tail+.012*nose,
+          twist:board ? 1-2*THREE.MathUtils.smoothstep(z,-bindingZ,bindingZ) : 0};
+      });
+      baseSections.set(node,sections);
+    }
+    return node;
+  }
+  const deck = board ? plankModel('Snowboard',0) : null;
   const limbs = [];
   for (const s of [-1, 1]) {
     const prefix = s < 0 ? 'Left ' : 'Right ';
-    const plank = deck || makePart(group, prefix + 'ski', b => makeDeck(b, m, palette, false, s));
+    const plank = deck || plankModel(prefix + 'ski',s);
     let foot, binding;
     if (board) {
       binding = makePart(plank, prefix + 'binding', b => buildBinding(b,m,palette,s,true));
-      binding.position.set(0,0,s*.275); binding.rotation.y = s < 0 ? -1.22 : -1.66;
-      foot = makePart(plank, prefix + 'boot', b => buildBoot(b,m,palette,s,true));
+      binding.position.set(0,0,s*.275*stance); binding.rotation.y = s < 0 ? -1.22 : -1.66;
+      foot = makePart(plank, prefix + 'boot', b => buildBoot(b,m,palette,s,true,junior));
       foot.position.copy(binding.position); foot.rotation.copy(binding.rotation);
     } else {
       foot = makePart(plank, prefix + 'boot and binding', b => {
-        buildBoot(b,m,palette,s,false); buildBinding(b,m,palette,s,false);
+        buildBoot(b,m,palette,s,false,junior); buildBinding(b,m,palette,s,false);
       });
     }
-    const [thigh, shin] = tailoredLimb(group, prefix + 'trouser leg', leg1, .132,
+    const [thigh, shin] = tailoredLimb(rig, prefix + 'trouser leg', leg1, .132,
       b => legGarment(b, m, palette, s, leg1, leg2));
-    const [arm, forearm] = tailoredLimb(group, prefix + 'jacket sleeve', arm1, .102,
+    const [arm, forearm] = tailoredLimb(rig, prefix + 'jacket sleeve', arm1, .102,
       b => armGarment(b, m, palette, s, arm1, arm2));
-    const hand = makePart(group, prefix + 'glove', b => glove(b, m, palette, s));
-    const pole = board ? null : makePart(group, prefix + 'pole', b => skiPole(b, m, palette, s));
+    const hand = makePart(rig, prefix + 'glove', b => glove(b, m, palette, s));
+    const pole = board ? null : makePart(rig, prefix + 'pole', b => skiPole(b, m, palette, s,poleLength));
     limbs.push({
       s, plank, foot, binding, thigh, shin, arm, forearm, hand, pole,
       bendCuff: bootCuff(foot), anklePitch: .17, ankleCant: 0, relief: 0, pitchRelief: 0,
@@ -1014,12 +1088,12 @@ export function createRider(options = {}) {
     });
   }
   const bend = v3(), tmp = v3(), contact = v3(), grip = v3(), leanQ = new THREE.Quaternion();
-  const deckFlex = board ? flexibleDeck(deck,true) : null;
+  const deckFlex = board ? flexibleDeck(deck,true,deckWidth,stance,deckLength) : null;
   const bootRotation = new THREE.Quaternion(), bootInverse = new THREE.Quaternion();
   const gaze = new THREE.Quaternion(), zAxis = v3(0,0,1), legInBoot = v3(), sole = v3();
   const aimEuler = new THREE.Euler(0,0,0,'YXZ');
   const suspension = {height: 0, velocity: 0, ready: false};
-  const snow = {available: false, normalLoad: 0};
+  const snow = {available: false, normalLoad: 0, scale:size};
   let previousMode, frontEdge = 0, rearEdge = 0, normalLoad = 0, supportedEdge = 0;
   let centreRelief = 0, centrePitch = 0, stridePhase = 0, lastElapsed;
 
@@ -1031,6 +1105,32 @@ export function createRider(options = {}) {
   const oldTip = v3(), handOffset = v3(), wristGoal = v3(), support = v3();
   const gravityUp = new THREE.Quaternion(), groundCorrection = new THREE.Quaternion(), headAim=new THREE.Quaternion();
   let disposed = false, redraw = false, lastState;
+
+  // Junior decks have a different sidecut, running length and stance. Seat
+  // their flexed bases on the terrain, including when braking across a slope.
+  const basePoint=v3();
+  let groundMatrix=null, risePerUnit=size, snowSink=0;
+  function groundJuniorDeck(plank,front,rear,twist,lift) {
+    let closest=Infinity;
+    const torsion=Math.sin(twist);
+    for(const section of baseSections.get(plank)){
+      const y=section.base+front*section.frontFlex+rear*section.rearFlex;
+      for(let side=-1;side<=1;side+=2) {
+        const x=side*section.half;
+        basePoint.set(x,y+x*section.twist*torsion,section.z).applyQuaternion(plank.quaternion).add(plank.position);
+        let gap;
+        if (groundMatrix) {
+          basePoint.applyMatrix4(groundMatrix);
+          // The world has already lowered the rider by the compressed snow
+          // depth. The contact target uses that same surface in world metres.
+          const surface=snow.map.height(basePoint.x,basePoint.z)-snowSink;
+          gap=(basePoint.y-surface)/risePerUnit;
+        } else gap=basePoint.y-snowUnder(snow,basePoint.x,basePoint.z);
+        closest=Math.min(closest,gap);
+      }
+    }
+    plank.position.y+=.0015+lift-closest;
+  }
 
   // A turn filmed from behind reads through the path of the boots underneath
   // the hips. The lower body establishes an edge before the shoulders follow.
@@ -1117,7 +1217,7 @@ export function createRider(options = {}) {
       headAim.premultiply(groundCorrection.identity().slerp(gravityUp,.93*standing));
     }
     spine.pose(pelvis.quaternion,force,arc,push*Math.sin(stridePhase*TAU),tuck,chestFlex);
-    spine.socket(head.position.set(0,.475,-.003),3);
+    spine.socket(head.position.set(0,neckY,-.003),3);
     // A cervical counterrotation preserves the view down the line while some
     // upper-chest motion still reaches the helmet at the end of the chain.
     leanQ.copy(torso.quaternion).slerp(headAim,board ? .76 : .65);
@@ -1147,7 +1247,7 @@ export function createRider(options = {}) {
       const {s,plank,foot,hip,knee,ankle,shoulder,elbow,wrist} = limb;
       const inside = Math.max(0,s*arc), outside = Math.max(0,-s*arc), lead = s<0;
       const yaw = board ? (lead ? -1.22 : -1.66)-edge*.024 + (lead ? 0 : Math.max(0,foot.rotation.y+1.66)) :
-        -edge*.024 + slip*.10 + s*brake*(1-skid)*.12;
+        junior ? plank.rotation.y+slip*.10 : -edge*.024+slip*.10+s*brake*(1-skid)*.12;
       jointOrigin.set(s*hipWidth,-.007,.006).applyQuaternion(pelvis.quaternion).add(pelvis.position);
       if (board) jointOrigin.y -= (lead ? 1 : -1)*(.014*trim+.016*Math.abs(anticipation));
       else jointOrigin.y += .017*outside-.021*inside;
@@ -1193,7 +1293,9 @@ export function createRider(options = {}) {
       handOffset.applyAxisAngle(axisY,chestYaw);wristGoal.add(handOffset);
       const restingHands=(1-smooth(Math.abs(arc),.23,.80))*(1-tuck)*(1-push)*(1-air)*
         (1-clamp(Math.max(brake,land,charge),0,1))*(1-.50*steep);
-      handOffset.set(s*(board ? .079 : .044),board ? -.436 : -.467,board ? -.068 : -.095)
+      const relaxedDrop = junior ? (board ? -.376 : -.405) : (board ? -.436 : -.467);
+      const elbowRoom = junior ? (board ? .130 : .092) : (board ? .079 : .044);
+      handOffset.set(s*elbowRoom,relaxedDrop,board ? -.068 : -.095)
         .applyAxisAngle(axisY,chestYaw).add(jointOrigin);
       wristGoal.lerp(handOffset,restingHands*.89);
       if(!board && tuck>.001){
@@ -1201,11 +1303,11 @@ export function createRider(options = {}) {
         wristGoal.lerp(handOffset,tuck*.95);
       }
       if (limb.pole) {
-        oldTip.copy(limb.poleDirection).multiplyScalar(1.135*limb.pole.scale.y).add(limb.pole.position);
+        oldTip.copy(limb.poleDirection).multiplyScalar(poleLength*limb.pole.scale.y).add(limb.pole.position);
         if (limb.plant) {
-          contact.copy(limb.plant.point);group.worldToLocal(contact);
+          contact.copy(limb.plant.point);rig.worldToLocal(contact);
           handOffset.set(-s*.008,-.065,-.013).applyQuaternion(limb.hand.quaternion);
-          support.copy(wristGoal).add(handOffset).sub(contact).setLength(1.135).add(contact).sub(handOffset);
+          support.copy(wristGoal).add(handOffset).sub(contact).setLength(poleLength).add(contact).sub(handOffset);
           if (support.distanceTo(jointOrigin)<arm1+arm2+.012) wristGoal.copy(support);
         }
       }
@@ -1229,12 +1331,12 @@ export function createRider(options = {}) {
         pole.position.set(-s*.008,-.065,-.013).applyQuaternion(limb.hand.quaternion).add(wristGoal);
         if (limb.plant) {
           support.subVectors(contact,pole.position);
-          pole.scale.y=clamp(support.length()/1.135,.97,1.03);support.normalize();
+          pole.scale.y=clamp(support.length()/poleLength,.97,1.03);support.normalize();
         } else {
           const targetY=mix(oldTip.y,snowUnder(snow,oldTip.x,oldTip.z)+.02,inside*(1-air));
-          const drop=clamp(pole.position.y-targetY,.15,1.119);
+          const drop=clamp(pole.position.y-targetY,.15,poleLength-.016);
           support.set(limb.poleDirection.x + s*(.14*force+.10*crossing),0,limb.poleDirection.z);
-          support.setLength(Math.sqrt(1.135**2-drop**2));support.y=-drop;support.normalize();pole.scale.y=1;
+          support.setLength(Math.sqrt(poleLength**2-drop**2));support.y=-drop;support.normalize();pole.scale.y=1;
         }
         pole.quaternion.setFromUnitVectors(axisDown,support);
       }
@@ -1255,7 +1357,7 @@ export function createRider(options = {}) {
     const snapPose = rewound || modeChanged || !posed.ready || (!dt && !sameInstant);
     if (!dt && !snapPose && !redraw) return;
     lastState=state;redraw=false;
-    head.position.set(0,.475,-.003);
+    head.position.set(0,neckY,-.003);
     previousMode = state.mode; lastElapsed = state.elapsed; posed.ready = true;
     const ease = rate => snapPose ? 1 : 1-Math.exp(-dt*rate);
     posed.edge = mix(posed.edge,targetEdge,ease(15));
@@ -1276,7 +1378,20 @@ export function createRider(options = {}) {
     const {steer:turn, trim, skid, slip, air, pressure} = posed;
     const cutSide = state.cutSide || Math.sign(edge || turn) || 1;
     const swap = drive ? state.bankSwap || 0 : 0;
-    readPiste(snow,state,speed,drive && !inFlight);
+    readPiste(snow,state,speed,(drive || junior) && !inFlight);
+    groundMatrix=null;
+    if (junior && snow.available) {
+      snowSink=state.snowSink || 0;
+      rig.updateWorldMatrix(true,false);
+      const m=rig.matrixWorld.elements;
+      // Also allow standalone pose previews, whose model origin can differ
+      // from the location sampled by the simulation.
+      if (Math.hypot(m[12]-snow.x,m[14]-snow.z)<.20 && Math.abs(m[13]-(snow.ground-snowSink))<.40) {
+        groundMatrix=rig.matrixWorld;
+        const gx=snow.across*snow.cos-snow.back*snow.sin, gz=snow.across*snow.sin+snow.back*snow.cos;
+        risePerUnit=Math.max(size*.5,m[5]-gx*m[4]-gz*m[6]);
+      }
+    }
     normalLoad = mix(normalLoad,snow.normalLoad,ease(10.5));
     posed.grade = mix(posed.grade,clamp((state.slope || 0)*Math.PI/180,-.77,1.08),ease(9.7));
     const grade = posed.grade;
@@ -1327,10 +1442,10 @@ export function createRider(options = {}) {
       ? 1 - THREE.MathUtils.smoothstep((state.airHeight || 0)/closingSpeed,.045,.23) : 0;
     const action = .173*charge + .177*land + .068*air*(1-impactSoon) + .036*boost;
     const extension = .051*release + .034*swap*pressure + .038*impactSoon;
-    const compression = clamp(depth + springLoad + action - extension, -.325, .385);
+    const compression = clamp(depth + springLoad + action - extension, -.325, .385) * (junior ? .86 : 1);
     const idle = .0038*Math.sin(time*1.75+.48);
     const rhythm = push * (.017 * Math.sin(2*TAU*stride-.8) - .018*Math.max(0,Math.sin(TAU*stride)));
-    const restHeight = (female ? .898 : .939) - (board ? .055 : 0);
+    const restHeight = (junior ? .844 : female ? .898 : .939) - (board ? .055 : 0);
     const targetHeight = restHeight - compression + launch*.093 + rhythm + idle;
     const floorHeight = (board ? .475 : .493) + air * .063;
     const height = springLegs(suspension,clamp(targetHeight,floorHeight,restHeight+.058),
@@ -1372,19 +1487,20 @@ export function createRider(options = {}) {
 
     const press = drive ? (state.press ?? Math.sign(trim)*THREE.MathUtils.smoothstep(Math.abs(trim),.57,.98)) : 0;
     const pressPitch = -press*(board ? .150 : .064);
-    const contactLift = Math.abs(Math.sin(pressPitch))*(board ? .62 : .65);
+    const contactLift = Math.abs(Math.sin(pressPitch))*(board ? .62 : .65)*deckLength;
     const boardPitch = air*(-.13 + (state.upSpeed<0 ? .19:0)) - trim*.010 + pressPitch + launch*.083;
     const boardLift = inFlight ? air*(.112-.071*impactSoon) : 0;
     const noseLoad=clamp(Math.max(0,trim)*.88+pressure*.24+land*.18,0,1);
     const tailLoad=clamp(Math.max(0,-trim)*.85+charge*.28,0,1);
     if (deck) {
       const roll = -(edge*(.28+.65*moving) + cutSide*skid*.08)*(1-.69*air);
-      const foreSnow = snowUnder(snow,0,-.58), aftSnow = snowUnder(snow,0,.58);
+      const foreSnow = snowUnder(snow,0,-.58*deckLength), aftSnow = snowUnder(snow,0,.58*deckLength);
       centreRelief = mix(centreRelief, (foreSnow+aftSnow)*.5,ease(18));
-      centrePitch = mix(centrePitch,Math.atan2(foreSnow-aftSnow,1.16),ease(18));
+      centrePitch = mix(centrePitch,Math.atan2(foreSnow-aftSnow,1.16*deckLength),ease(18));
       deck.rotation.set(boardPitch+centrePitch,gearYaw,roll,'YXZ');
-      deck.position.set(0,.002+Math.abs(Math.sin(roll))*.116+boardLift+contactLift+centreRelief,0);
+      deck.position.set(0,.002+Math.abs(Math.sin(roll))*.116*deckWidth+boardLift+contactLift+centreRelief,0);
       deckFlex(noseLoad,tailLoad,twist);
+      if (junior && !inFlight) groundJuniorDeck(deck,noseLoad,tailLoad,twist,0);
     }
 
     for (const limb of limbs) {
@@ -1406,7 +1522,7 @@ export function createRider(options = {}) {
           const recover = stride>.60 ? Math.sin((stride-.60)/.4*Math.PI) : 0;
           foot.position.set(reach*(.243+.048*Math.sin(stride*Math.PI)),
             reach*recover*.136 + push*kick*(1-kick)*.30,
-            .275+reach*(-.260+.685*THREE.MathUtils.smoothstep(stride,.14,.72)));
+            .275*stance+reach*(-.260+.685*THREE.MathUtils.smoothstep(stride,.14,.72)));
           foot.rotation.set(-reach*.24*recover,turnInBoot+reach*.91,0,'YXZ');
           leanQ.setFromAxisAngle(zAxis,torsionHere*(1-reach));foot.quaternion.premultiply(leanQ);
           if (reach>.01) {
@@ -1427,16 +1543,24 @@ export function createRider(options = {}) {
       } else {
         const step = state.walking ? s*Math.sin(time*5.05) : push*stroke;
         const roll = -(edge*(.28+moving*(.47+.16*outside)) + cutSide*skid*.085) * (1-.76*air);
-        const lateral = s*(.141+.035*pressure+.029*skid+.034*air+.029*push);
+        // Children can open a shallow wedge to scrub speed. Keep a gap
+        // between the short shovels and blend back to parallel as pace builds.
+        const slowWedge = junior && !inFlight ? moving*(1-THREE.MathUtils.smoothstep(speed,5,10))*(1-push) : 0;
+        const wedge = brake*(1-skid)*.135 + slowWedge*(.037+.112*brake);
+        let halfTrack = (.141+.035*pressure+.029*skid+.034*air+.029*push)*stance;
+        if (slowWedge>0) halfTrack = Math.max(halfTrack,.060*deckWidth+.96*deckLength*Math.sin(wedge));
+        const lateral = s*halfTrack;
         const advance = -.128*insideLoad+.078*outside+air*s*.080-step*.145;
-        const foreSnow = snowUnder(snow,lateral,advance-.62), aftSnow = snowUnder(snow,lateral,advance+.55);
+        const foreSnow = snowUnder(snow,lateral,advance-.62*deckLength), aftSnow = snowUnder(snow,lateral,advance+.55*deckLength);
         limb.relief = mix(limb.relief,(foreSnow+aftSnow)*.5,ease(18));
-        limb.pitchRelief = mix(limb.pitchRelief,Math.atan2(foreSnow-aftSnow,1.17),ease(18));
+        limb.pitchRelief = mix(limb.pitchRelief,Math.atan2(foreSnow-aftSnow,1.17*deckLength),ease(18));
         plank.rotation.set(boardPitch+limb.pitchRelief+air*s*.058+step*.024,
-          gearYaw+s*brake*(1-skid)*.135+s*air*.074-s*push*.097,roll,'YXZ');
-        plank.position.set(lateral,.002+Math.abs(Math.sin(roll))*.047+boardLift+contactLift+
+          gearYaw+s*wedge+s*air*.074-s*push*.097,roll,'YXZ');
+        plank.position.set(lateral,.002+Math.abs(Math.sin(roll))*.047*deckWidth+boardLift+contactLift+
           limb.relief+insideLoad*.006+Math.max(0,step)*.026,advance);
-        limb.flex(clamp(noseLoad*(.85+outside*.34),0,1),tailLoad);
+        const frontLoad=clamp(noseLoad*(.85+outside*.34),0,1);
+        limb.flex(frontLoad,tailLoad);
+        if (junior && !inFlight) groundJuniorDeck(plank,frontLoad,tailLoad,0,Math.max(0,step)*.026);
       }
 
       bootRotation.multiplyQuaternions(plank.quaternion,foot.quaternion);
@@ -1451,7 +1575,7 @@ export function createRider(options = {}) {
         hip.y += outside*(.037+.023*steep)-insideLoad*(.033+.014*pressure);
       }
       const bootYaw = board ? (s<0 ? -1.22 : -1.66)+gearYaw+(s>0 ? kick*push*.91 : 0) :
-        gearYaw+slip*.10+s*brake*(1-skid)*.12;
+        junior ? plank.rotation.y+slip*.10 : gearYaw+slip*.10+s*brake*(1-skid)*.12;
       bend.set(s*.102,-.035,-1).applyAxisAngle(axisY,bootYaw);
       if (board) {
         bend.x += timing*(s<0 ? .31 : .20) + .068*(s<0 ? attack : -release);
@@ -1512,19 +1636,19 @@ export function createRider(options = {}) {
           (poleTap>.8 && limb.lastStroke<.79 && push<.35);
         if (!limb.plant && startPlant && drive && !inFlight && worldPose) {
           contact.set(wrist.x+s*(.24+.065*pressure),.013,wrist.z-.34);
-          group.localToWorld(contact);
-          if (state.data?.height) contact.y=state.data.height(contact.x,contact.z)+.016;
+          rig.localToWorld(contact);
+          if (state.data?.height) contact.y=state.data.height(contact.x,contact.z)+.016*size;
           limb.plant={point:contact.clone(),age:0,max:Math.min(.42,.98/Math.max(2.7,speed))};
         }
         limb.lastStroke = push>.25 ? phase : poleTap;limb.wasPushing=push>.25;
         if (limb.plant) {
           limb.plant.age+=dt;
-          contact.copy(limb.plant.point);group.worldToLocal(contact);
+          contact.copy(limb.plant.point);rig.worldToLocal(contact);
           grip.copy(wrist);grip.y-=.062;
           const d=grip.distanceTo(contact);
-          if (limb.plant.age>limb.plant.max || d>1.27 || d<.60) limb.plant=null;
+          if (limb.plant.age>limb.plant.max || d>poleLength+.135 || d<.60*(poleLength/1.135)) limb.plant=null;
           else {
-            grip.sub(contact).setLength(1.135).add(contact);grip.y+=.062;
+            grip.sub(contact).setLength(poleLength).add(contact);grip.y+=.062;
             tmp.subVectors(grip,shoulder);
             if(tmp.length()>arm1+arm2+.065)limb.plant=null;
             else wrist.copy(shoulder).add(tmp.clampLength(.14,arm1+arm2-.001));
@@ -1544,11 +1668,11 @@ export function createRider(options = {}) {
         if (limb.plant) {
           const length=limb.poleDirection.subVectors(contact,hold).length();
           limb.poleDirection.multiplyScalar(1/Math.max(.001,length));
-          limb.pole.scale.y=clamp(length/1.135,.97,1.03);
+          limb.pole.scale.y=clamp(length/poleLength,.97,1.03);
         } else {
-          const drop=clamp(hold.y-.11-.20*air-.16*recovered*push-.035*swap,.28,1.035);
+          const drop=clamp(hold.y-.11-.20*air-.16*recovered*push-.035*swap,.28,poleLength-.100);
           const spread=s*(.165+.12*pressure+.084*poleTap);
-          const trail=Math.sqrt(Math.max(.01,1.135**2-drop**2-spread**2));
+          const trail=Math.sqrt(Math.max(.01,poleLength**2-drop**2-spread**2));
           // Recover the shaft forward just before the next low-speed pole plant.
           const reach = push*THREE.MathUtils.smoothstep(phase,.69,.90) +
             (1-push)*poleTap*.65;
@@ -1558,7 +1682,7 @@ export function createRider(options = {}) {
         limb.pole.quaternion.setFromUnitVectors(axisDown,limb.poleDirection);
       }
     }
-    if (visibility==='body') {
+    if (visibility==='body' || junior) {
       outsideMotion(state,dt,snapPose,drive,moving,steep,push,attack,release,impactSoon,lean,angulation);
       seatPose(limbs);
     }
@@ -1573,7 +1697,7 @@ export function createRider(options = {}) {
     const next = mode === 'first' || mode === 'tips' ? mode : 'body';
     if (next === visibility) return;
     visibility = next;
-    for (const part of group.children) {
+    for (const part of rig.children) {
       part.visible = next === 'body' || decks.includes(part) ||
         (next === 'first' && part !== torso && part !== pelvis);
     }
@@ -1585,8 +1709,8 @@ export function createRider(options = {}) {
   // Optical centre between the lenses, with all neck and torso articulation applied.
   // Both camera anchors are returned in rider-group coordinates (metres).
   function eyePosition(out = v3()) {
-    return out.set(0, .153, -.113).applyQuaternion(head.quaternion).add(head.position)
-      .applyQuaternion(torso.quaternion).add(torso.position);
+    return out.set(0,.153,-.113).multiply(head.scale).applyQuaternion(head.quaternion).add(head.position)
+      .applyQuaternion(torso.quaternion).add(torso.position).multiplyScalar(size);
   }
 
   function tipPosition(out = v3()) {
@@ -1594,11 +1718,11 @@ export function createRider(options = {}) {
     for (let i = 0; i < decks.length; i++) {
       const plank = decks[i], weights = noseWeights[i];
       const height = (board ? .098 : .119) + .0017 - .021*weights[0] + .012*weights[1];
-      nosePoint.set(0, height, board ? -.80 : -.96);
+      nosePoint.set(0,height,(board ? -.80 : -.96)*deckLength);
       nosePoint.applyQuaternion(plank.quaternion).add(plank.position);
       out.add(nosePoint);
     }
-    return out.multiplyScalar(1 / decks.length);
+    return out.multiplyScalar(size / decks.length);
   }
 
   function dispose() {
@@ -1615,6 +1739,7 @@ export function createRider(options = {}) {
     for (const tex of m.textures) tex.dispose();
   }
 
+  if (junior) rig.scale.setScalar(size);
   update();
-  return { group, update, setVisibility, eyePosition, tipPosition, dispose };
+  return { group, dimensions, update, setVisibility, eyePosition, tipPosition, dispose };
 }

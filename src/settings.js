@@ -34,7 +34,7 @@ export function settingsPanel(prefs,song,sources){
     '<details class="settings-detail"><summary>'+t('滑行设置','Riding options')+'</summary>'+row(t('循线辅助','Trail assist'),seg('assist',[['on','开启'],['off','关闭']],prefs.assist?'on':'off'),t('顺着所选线路滑行，关闭可自由选线。','Follow the selected line or steer freely with assist off.'))+
     row(t('屏幕按键','Touch controls'),seg('controls',[['on','显示'],['off','隐藏']],prefs.controls?'on':'off'))+'</details>'+
     '<div class="tilt-setting">'+pill('tilt',t('倾斜转弯 '+(prefs.tilt?'开':'关'),'Tilt steering '+(prefs.tilt?'on':'off')),prefs.tilt)+(prefs.tilt?button('calibrate',t('校准','Calibrate'),'setting-pill'):'')+'</div>'+
-    '<details class="source-detail"><summary>'+t('数据来源','Data sources')+'</summary>'+sources+'</details><small class="version">'+t('版本','Version')+' 1.5.0</small>';
+    '<details class="source-detail"><summary>'+t('数据来源','Data sources')+'</summary>'+sources+'</details><small class="version">'+t('版本','Version')+' 1.6.0</small>';
 }
 export function controlsPanel(){
   const controls=[

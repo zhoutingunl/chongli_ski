@@ -26,12 +26,14 @@ function trackFrame(route, distance) {
 }
 
 export class Descent {
-  constructor(data, opts) {
+  constructor(data, opts, dimensions = null) {
     this.data = data; this.opts = opts; this.gear = opts.gear;
+    this.dimensions = dimensions;
     this.navigation = data.summitPlaces?.wanlong && data.summitPlaces?.genting ? createSkiNavigation(data) : null;
     this.mode = 'idle';
     this.x = this.z = this.y = this.heading = this.travelHeading = this.speed = 0;
     this.airHeight = this.steer = this.brake = this.trim = this.edge = 0;
+    this.snowSink = 0; this.snowSoftness = .14;
   }
 
   start(route) {
@@ -48,6 +50,7 @@ export class Descent {
     this.charge = this.jumpCooldown = this.launch = this.landing = this.impact = 0;
     this.slope = this.roll = this.steer = this.trim = this.press = this.brake = this.boost = 0;
     this.edge = this.edgeRate = this.pressure = this.skid = this.slipAngle = 0;
+    this.snowSink = 0;
     this.turn = this.curve = this.spray = this.terrainFlex = this.push = this.stride = 0;
     this.guideLean = this.bankSwap = this.bump = this.lastGrade = this.force = 0;
     this.cutSide = 1; this.contactTime = 5; this.takeoffSpeed = this.verticalAlong = 0; this.flightCos = 1;
@@ -60,14 +63,17 @@ export class Descent {
 
   surface() {
     const near = this.data.index.near(this.x, this.z);
-    this.onTrail = !!near.trail && near.distance < (near.trail.width || 36) * .58;
+    const halfWidth = (near.trail?.width || 36) * .5;
+    this.snowSoftness = near.trail ? .14 + .78 * smooth(near.distance / halfWidth, .63, 1.32) : .92;
+    this.onTrail = !!near.trail && near.distance < halfWidth * 1.16;
     this.trail = this.onTrail ? near.trail : null;
-    if(this.approach){this.onTrail=true;this.trail=null;return;}
+    if(this.approach){this.onTrail=true;this.trail=null;this.snowSoftness=.14;return;}
     if (this.opts.assist && Math.abs(this.offset) < 9) {
       const leg = this.route.legs?.find(l => l.startIndex<=this.planIndex && l.endIndex>this.planIndex);
       if (leg) {
         this.trail = this.data.trails.find(t => t.id === leg.trailId) || this.trail;
         this.onTrail = true;
+        this.snowSoftness = Math.min(this.snowSoftness,.32);
       }
     }
   }
@@ -284,10 +290,11 @@ export class Descent {
     const remaining = Math.max(0,this.route.length-this.along);
     const baseRange = Math.hypot(this.x-end[0],this.z-end[1]);
     const runout = assisted ? remaining : Math.max(0,baseRange-18);
+    const powder = smooth(this.snowSoftness, .14, .92);
     if (!airborne) {
-      const resistance = (this.onTrail ? .21 : .68) + (board ? .0054 : .0048) * (1-.37*tuck) * oldSpeed*oldSpeed;
-      const edgeLoss = load*load*(.12+.038*oldSpeed);
-      const cutting = this.skid*(2.8+.38*oldSpeed) + this.brake*(6.30+.11*oldSpeed);
+      const resistance = .21 + .47*powder + (board ? .0054 : .0048) * (1-.37*tuck) * oldSpeed*oldSpeed;
+      const edgeLoss = load*load*(.12+.038*oldSpeed)*(1+.22*powder);
+      const cutting = (this.skid*(2.8+.38*oldSpeed) + this.brake*(6.30+.11*oldSpeed))*(1+.12*powder);
       const drag = resistance*(1-Math.max(0,this.trim)*.075) + Math.max(0,-this.trim)*(.09+load*.22);
       let acceleration = gravity + this.push*(.68 + (board ? 4.5 : 3.45)*stroke) - drag - edgeLoss - cutting;
       // Surveyed traverses contain short uphill and flat patches. The guide skates through
@@ -308,7 +315,7 @@ export class Descent {
     }
     const planarSpeed = this.speed * (airborne ? this.flightCos : Math.cos(theta));
     const distance = planarSpeed * dt;
-    const grip = clamp(1 + this.trim*.19 - this.skid*.49 - (this.onTrail ? 0 : .09),.35,1.22);
+    const grip = clamp(1 + this.trim*.19 - this.skid*.49 - .09*powder,.35,1.22);
     const radius = (board ? 12.4 : 15.8) + oldSpeed*.16;
     const curvature = Math.sign(this.edge) * Math.pow(load,1.28) * grip / radius;
     if (assisted) {
@@ -394,6 +401,14 @@ export class Descent {
     this.travel += Math.hypot(this.x-oldX,this.z-oldZ,this.ground-oldGround);
     this.checkPisteMouth(dt);
     this.surface();
+    // Depth is measured vertically below the local snow surface. Leave rockered
+    // tips exposed on the groomer and let a loaded edge cut into the softer verge.
+    const softness = smooth(this.snowSoftness, .14, .92);
+    const loading = clamp(this.pressure*.65 + this.skid*.18 + this.impact*.40, 0, 1.2);
+    const depth = (.005 + .023*softness + (.012+.050*softness)*loading) *
+      (board ? .87 : 1) * (this.dimensions?.scale ?? 1);
+    const sinkTarget = this.airborne ? 0 : depth;
+    this.snowSink = approach(this.snowSink, sinkTarget, this.airborne ? 30 : sinkTarget>this.snowSink ? 16 : 8, dt);
     const atBase=assisted?this.route.length-this.along<=.32&&baseRange<56:remaining<45&&baseRange<=18.4;
     if(atBase&&!this.airborne){
       this.mode='finished';this.speed=0;this.airborne=false;this.air=this.airHeight=0;this.y=this.ground;this.cancelJump();

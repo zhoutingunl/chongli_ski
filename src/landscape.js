@@ -7,6 +7,35 @@ float hash21(vec2 p) { vec3 q=fract(vec3(p.xyx)*.1031);q+=dot(q,q.yzx+33.33);ret
 float noise21(vec2 p) {vec2 i=floor(p), f=fract(p); f=f*f*(3.-2.*f);return mix(mix(hash21(i),hash21(i+vec2(1.,0.)),f.x),mix(hash21(i+vec2(0.,1.)),hash21(i+1.),f.x),f.y);}
 `;
 
+// Each resolved patch contains a fixed ice facet. Its reflected sunlight follows
+// the half vector. Integrating the spot over the pixel keeps it quiet in motion.
+const iceFacets=`
+  float facetFootprint(vec2 grid) {
+    return max(length(dFdx(grid)),length(dFdy(grid)));
+  }
+  float iceReflection(vec2 grid,float footprint,vec3 surface,vec3 halfVector) {
+    if(footprint>.81)return 0.;
+    vec2 cell=floor(grid);
+    vec4 h=fract(cell.xyxy*vec4(.1031,.1030,.0973,.1099));
+    h+=dot(h,h.wzxy+33.33);
+    h=fract((h.xxyz+h.yzzw)*h.zywx);
+    vec2 delta=fract(grid)-(.19+.62*h.xy);
+    float radius=mix(.050,.089,h.x),r2=radius*radius;
+    float variance=r2+.26*footprint*footprint;
+    float spot=exp(-dot(delta,delta)/variance)*r2/variance;
+    float occurrence=smoothstep(.64,.85,fract(23.71*h.x+5.19*h.z));
+    vec3 tilt=vec3(h.z*2.-1.,0.,h.w*2.-1.)*1.65;
+    vec3 facet=normalize(surface+tilt-surface*dot(surface,tilt));
+    float alignment=max(dot(facet,halfVector),0.);
+    return spot*occurrence*pow(alignment,85.)*(1.-smoothstep(.34,.81,footprint));
+  }
+`;
+function setSnowSun(vector,env) {
+  const dir=env.dir,solar=env.sunAmount??1,snow=env.snowAmount||0;
+  const clear=1-THREE.MathUtils.smoothstep(snow,.012,.38);
+  vector.set(dir[0],dir[1],dir[2],solar*clear*THREE.MathUtils.smoothstep((env.sunDir||dir)[1],.008,.17));
+}
+
 function dataTexture(r,g,b) {
   const t=new THREE.DataTexture(new Uint8Array([r,g,b,255]),1,1);t.needsUpdate=true;return t;
 }
@@ -17,7 +46,7 @@ function loadTexture(url,space=THREE.NoColorSpace) {
 }
 function prepareTrailMask(data) {
   const size=2048,el=document.createElement('canvas');el.width=el.height=size;
-  const c=el.getContext('2d');c.fillStyle='#000';c.fillRect(0,0,size,size);
+  const c=el.getContext('2d');
   const b=data.bounds, sx=size/(b.maxX-b.minX),sz=size/(b.maxZ-b.minZ);
   const toPix=([x,z])=>[(x-b.minX)*sx,(z-b.minZ)*sz];
   c.lineCap='round';c.lineJoin='round';
@@ -25,7 +54,13 @@ function prepareTrailMask(data) {
     const points=trail.points;
     for(let i=1;i<points.length;i++){
       const a=toPix(points[i-1]),d=toPix(points[i]),dx=d[0]-a[0],dz=d[1]-a[1],l=Math.hypot(dx,dz)||1;
-      c.strokeStyle='rgb(255,'+Math.round(127.5+dx/l*127.5)+','+Math.round(127.5+dz/l*127.5)+')';
+      // Alpha is piste coverage. Red measures metres across this surveyed strip;
+      // its zero line and the grooming direction follow bends in the centreline.
+      const dirX=Math.round(127.5+dx/l*127.5),dirZ=Math.round(127.5+dz/l*127.5);
+      const crossX=-dz/l*32*sx,crossZ=dx/l*32*sz;
+      const lane=c.createLinearGradient(a[0]-crossX,a[1]-crossZ,a[0]+crossX,a[1]+crossZ);
+      lane.addColorStop(0,`rgb(0,${dirX},${dirZ})`);lane.addColorStop(1,`rgb(255,${dirX},${dirZ})`);
+      c.strokeStyle=lane;
       c.lineWidth=(trail.width||36)*sx;c.beginPath();c.moveTo(...a);c.lineTo(...d);c.stroke();
     }
   }
@@ -55,13 +90,13 @@ function addTerrainTiles(scene,field,material,innerBounds=null) {
 }
 function snowMaterial(uniforms,far) {
   const mat=new THREE.MeshLambertMaterial({color:0xffffff});
-  mat.customProgramCacheKey=()=>far?'distant-snow-v2':'near-snow-v2';
+  mat.customProgramCacheKey=()=>far?'distant-snow-v2':'near-snow-v3';
   mat.onBeforeCompile=s=>{
     Object.assign(s.uniforms,uniforms);
     s.vertexShader='varying vec3 vGround;\n'+s.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvGround=position;');
     s.fragmentShader=`varying vec3 vGround;
-      uniform sampler2D trailMask,ortho,crystals,lampMap; uniform float pisteLights; uniform vec3 lowSun; uniform float hasOrtho; uniform vec4 terrainBounds;
-      `+glNoise+s.fragmentShader.replace('#include <color_fragment>',far?`
+      uniform sampler2D trailMask,ortho,crystals,lampMap; uniform float pisteLights; uniform vec4 lowSun; uniform float hasOrtho; uniform vec4 terrainBounds;
+      `+glNoise+(far?'':iceFacets)+s.fragmentShader.replace('#include <color_fragment>',far?`
       vec2 p=vGround.xz;
       float n=noise21(p*.00081)*.56+noise21(p*.0034)*.27+noise21(p*.009)*.17;
       float snow=smoothstep(.21,.80,n+(vGround.y-1800.)*.00082);
@@ -71,10 +106,21 @@ function snowMaterial(uniforms,far) {
     `:`
       vec2 p=vGround.xz;
       vec2 uv=(p-terrainBounds.xy)/terrainBounds.zw;
-      vec4 m=texture2D(trailMask,uv); vec2 groove=normalize(m.gb*2.-1.+vec2(.0001));
       float dist=length(cameraPosition-vGround);
+      vec4 m=texture2D(trailMask,uv);
+      if(dist<76.){
+        // The metre field must interpolate more accurately than a four- or
+        // eight-bit filter weight to resolve comb teeth on a 4.9 m mask texel.
+        ivec2 size=textureSize(trailMask,0);
+        vec2 texel=clamp(uv*vec2(size)-.5,vec2(0.),vec2(size)-1.0001);
+        ivec2 k=ivec2(floor(texel));vec2 f=fract(texel);
+        m=mix(mix(texelFetch(trailMask,k,0),texelFetch(trailMask,k+ivec2(1,0),0),f.x),
+          mix(texelFetch(trailMask,k+ivec2(0,1),0),texelFetch(trailMask,k+ivec2(1,1),0),f.x),f.y);
+      }
+      vec3 strip=m.rgb/max(m.a,.05);
+      vec2 groove=normalize(strip.gb*2.-1.+vec2(.0001)),crossTrail=vec2(-groove.y,groove.x);
       float slow=noise21(p*.009)*.58+noise21(p*.033)*.29+noise21(p*.14)*.13;
-      float course=smoothstep(.13,.91,m.r+(slow-.5)*.20);
+      float course=smoothstep(.17,.94,m.a+(slow-.5)*.15);
       vec3 nativeColor=texture2D(ortho,uv).rgb;
       float luma=dot(nativeColor,vec3(.24,.58,.18));
       vec3 snowy=mix(vec3(.64,.72,.83),vec3(.86,.90,.93),slow);
@@ -85,21 +131,45 @@ function snowMaterial(uniforms,far) {
       float distanceBlend=smoothstep(110.,1050.,dist);
       float imageWeight=mix(mix(.22,.87,distanceBlend),mix(.065,.47,distanceBlend),course);
       local=mix(local,actual,hasOrtho*imageWeight);
-      float across=dot(p,vec2(-groove.y,groove.x));
-      float phase=across*87.; float aa=1.-smoothstep(.45,2.65,fwidth(phase));
-      float ridges=sin(phase+(slow-.5)*1.6)*aa;
-      float runner=cos(across*1.57+slow*.55); float seam=smoothstep(.975,1.,runner);
+      float across=(strip.r-.5)*64.;
+      float winds=noise21(p*.21+vec2(4.3,1.7));
+      float phase=across*78.+(winds-.5)*1.25;
+      float detail=1.-smoothstep(14.,72.,dist);
+      float teeth=course*detail*(1.-smoothstep(.80,2.85,fwidth(phase)));
+      float ridge=sin(phase),flute=cos(phase)*(.85-.23*ridge);
+      float trackPhase=across*1.49+slow*.52;
+      float seam=smoothstep(.955,.998,cos(trackPhase))*(1.-smoothstep(.07,.62,fwidth(trackPhase)));
       float grain=(noise21(p*7.6)-.5)*(1.-smoothstep(8.,30.,dist));
-      vec2 relief=texture2D(crystals,p*.47).rg*2.-1.;
-      vec2 broad=texture2D(crystals,p*.081+vec2(.12,.34)).rg*2.-1.;
+      vec2 relief=texture2D(crystals,p*.47).rg*2.-1.16;
+      vec2 broad=texture2D(crystals,p*.081+vec2(.12,.34)).rg*2.-1.16;
       float facets=dot(relief*.64+broad*.36,normalize(lowSun.xz));
-      local*=1.+facets*mix(.43,.19,course)*(1.-smoothstep(24.,130.,dist));
-      float winds=noise21(vec2(dot(p,groove)*.23,across*.63));
-      local+=course*(winds-.5)*vec3(.047,.040,.030)*(1.-smoothstep(12.,110.,dist));
-      local+=vec3(course*(ridges*.071-seam*.025)*(1.-smoothstep(12.,76.,dist))+grain*.043);
+      local*=1.+facets*mix(.26,.13,course)*(1.-smoothstep(24.,130.,dist));
+      local+=(winds-.5)*vec3(.052,.046,.035)*(1.-smoothstep(14.,110.,dist));
+      local+=teeth*(ridge*.039-.016*(1.-ridge))*vec3(1.,.89,.68);
+      local-=course*seam*detail*vec3(.037,.030,.019);
+      local+=grain*.037;
+      vec2 snowSlope=(relief*mix(.58,.35,course)+broad*mix(.50,.28,course))*(1.-smoothstep(28.,105.,dist))
+        -crossTrail*(teeth*flute*.24);
+      vec2 iceGrid=p*6.4+vec2(7.13,18.2);
+      float icePixel=facetFootprint(iceGrid);
       diffuseColor.rgb=max(vec3(.04),local);
     `);
-    if(!far) s.fragmentShader=s.fragmentShader.replace('#include <opaque_fragment>',`
+    if(!far) s.fragmentShader=s.fragmentShader.replace('#include <normal_fragment_maps>',`
+      #include <normal_fragment_maps>
+      vec3 slopeNormal=transformDirectionByInverseViewMatrix(normal,viewMatrix);
+      vec3 bump=vec3(snowSlope.x,0.,snowSlope.y);
+      vec3 snowNormal=normalize(slopeNormal+bump-slopeNormal*dot(slopeNormal,bump));
+      normal=normalize(mat3(viewMatrix)*snowNormal);
+    `).replace('#include <opaque_fragment>',`
+      if(lowSun.w>.001&&dist<45.&&icePixel<.81){
+        vec3 eye=normalize(cameraPosition-vGround),h=normalize(eye+lowSun.xyz);
+        float crystal=iceReflection(iceGrid,icePixel,snowNormal,h);
+        float snowCover=max(course,smoothstep(.46,.76,luma)*hasOrtho*.62);
+        // Direct diffuse already contains the directional light's colour, slope
+        // incidence and scene shadow, so shaded snow cannot sparkle in sunlight.
+        vec3 sunlight=reflectedLight.directDiffuse/max(diffuseColor.rgb,vec3(.15));
+        outgoingLight+=sunlight*(5.2*crystal*lowSun.w*snowCover*(1.-smoothstep(25.,45.,dist)));
+      }
       if(pisteLights>.005){
         float pool=texture2D(lampMap,(vGround.xz-terrainBounds.xy)/terrainBounds.zw).r;
         outgoingLight+=diffuseColor.rgb*vec3(.91,.76,.53)*pool*pisteLights*.91;
@@ -236,7 +306,7 @@ function makePisteLighting(scene,data) {
 
 export async function buildSurface(scene,data) {
   const b=data.bounds,fixtures=makePisteLighting(scene,data);
-  const uniforms={lampMap:{value:fixtures.texture},pisteLights:{value:0},crystals:{value:dataTexture(128,128,255)},lowSun:{value:new THREE.Vector3(-.5,.47,-.66)},trailMask:{value:prepareTrailMask(data)},terrainBounds:{value:new THREE.Vector4(b.minX,b.minZ,b.maxX-b.minX,b.maxZ-b.minZ)},ortho:{value:dataTexture(160,160,160)},hasOrtho:{value:0}};
+  const uniforms={lampMap:{value:fixtures.texture},pisteLights:{value:0},crystals:{value:dataTexture(128,128,255)},lowSun:{value:new THREE.Vector4(-.5,.47,-.66,0)},trailMask:{value:prepareTrailMask(data)},terrainBounds:{value:new THREE.Vector4(b.minX,b.minZ,b.maxX-b.minX,b.maxZ-b.minZ)},ortho:{value:dataTexture(160,160,160)},hasOrtho:{value:0}};
   addTerrainTiles(scene,data.field,snowMaterial(uniforms,false));
   await Promise.all([
     loadTexture(asset('art/snow-normal.webp')).then(t=>{t.wrapS=t.wrapT=THREE.RepeatWrapping;uniforms.crystals.value=t;}),
@@ -248,7 +318,7 @@ export async function buildSurface(scene,data) {
       return loadTexture(asset('geo/horizon.jpg'),THREE.SRGBColorSpace).then(t=>{far.ortho.value=t;far.hasOrtho.value=1;}).catch(()=>{});
     })
   ]);
-  return {setLight(env){uniforms.lowSun.value.fromArray(env.dir);uniforms.pisteLights.value=env.lampAmount||0;fixtures.setLight(env);}};
+  return {setLight(env){setSnowSun(uniforms.lowSun.value,env);uniforms.pisteLights.value=env.lampAmount||0;fixtures.setLight(env);}};
 }
 
 async function readForest() {
@@ -261,30 +331,63 @@ async function readForest() {
 }
 export async function plantForest(scene,data) {
   const [atlas,cover]=await Promise.all([loadTexture(asset('art/treeline.webp'),THREE.SRGBColorSpace),readForest()]);
-  const uniforms={...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),atlas:{value:atlas},tint:{value:new THREE.Color(1,1,1)}};
+  const uniforms={...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),atlas:{value:atlas},tint:{value:new THREE.Color(1,1,1)},lowSun:{value:new THREE.Vector4(0,1,0,0)}};
   const sm=new THREE.ShaderMaterial({uniforms,fog:true,side:THREE.DoubleSide,
     vertexShader:`#include <common>
       #include <fog_pars_vertex>
       attribute vec3 location;attribute vec4 form;varying vec2 vUv;varying float vTint;varying float vSpecies;
+      varying vec3 vTreeWorld;varying vec4 vBranch;
       void main(){
         vUv=vec2((uv.x+floor(form.z))/3.,1.-uv.y);
         vTint=form.w; vSpecies=form.z;
         vec2 face=normalize(cameraPosition.xz-location.xz+vec2(.001));
         vec3 world=location+vec3(face.y*position.x*form.x,(position.y+.5)*form.y,-face.x*position.x*form.x);
+        vTreeWorld=world;
+        // Surface coordinates stay attached to a photographed branch as its
+        // billboard turns. Each tree has its own fixed distribution of facets.
+        vBranch.xy=vec2(position.x*abs(form.x),uv.y*form.y)*9.5+mod(location.xz,113.);
+        vBranch.z=position.x*sign(form.x);vBranch.w=length(cameraPosition-location);
         vec4 mvPosition=viewMatrix*vec4(world,1.);
         gl_Position=projectionMatrix*mvPosition;
         #include <fog_vertex>
       }`,
-    fragmentShader:`uniform sampler2D atlas;uniform vec3 tint;varying vec2 vUv;varying float vTint;varying float vSpecies;
+    fragmentShader:`uniform sampler2D atlas;uniform vec3 tint;uniform vec4 lowSun;varying vec2 vUv;varying float vTint;varying float vSpecies;
+      varying vec3 vTreeWorld;varying vec4 vBranch;
       #include <fog_pars_fragment>
+      `+iceFacets+`
       void main(){
         vec4 c=texture2D(atlas,vUv);
         float lum=dot(c.rgb,vec3(.22,.68,.10));
         float bare=step(.45,abs(vSpecies-1.));
         float alpha=c.a*(1.-bare*smoothstep(.24,.74,lum));
+        float pixel=facetFootprint(vBranch.xy);
         if(alpha<.34)discard;
         vec3 needles=mix(c.rgb,c.rgb*vec3(.68,.69,.72),bare);
-        gl_FragColor=vec4(needles*tint*vTint*(.85+.15*(1.-vUv.y)),1.);
+        vec3 color=needles*tint*vTint*(.85+.15*(1.-vUv.y));
+        if(lowSun.w>.001&&vBranch.w<72.){
+          vec3 eye=normalize(cameraPosition-vTreeWorld);
+          float edge=clamp(vBranch.z*2.35,-.94,.94);
+          vec2 front=normalize(eye.xz+vec2(.0001));
+          vec2 radial=front*sqrt(1.-edge*edge)+vec2(front.y,-front.x)*edge;
+          vec3 cap=normalize(vec3(radial.x*.76,1.,radial.y*.76));
+          float facing=smoothstep(-.20,.68,dot(cap,lowSun.xyz))
+            *mix(.10,1.,smoothstep(-.66,.48,dot(radial,normalize(lowSun.xz))));
+          float crown=1.-smoothstep(.71,.89,vUv.y);
+          float canopyShade=(1.-facing)*crown*lowSun.w*(1.-smoothstep(30.,72.,vBranch.w));
+          color*=1.-canopyShade*mix(.22,.11,bare);
+          if(vBranch.w<34.&&pixel<.81){
+            // A light, neutral patch with a darker bough directly beneath it is
+            // a snow cap. The open trunk and central bark stay excluded.
+            vec4 below=texture2D(atlas,vUv+vec2(0.,.0055));
+            float contrast=lum-dot(below.rgb,vec3(.22,.68,.10));
+            float chroma=max(c.r,max(c.g,c.b))-min(c.r,min(c.g,c.b));
+            float branchSnow=smoothstep(.19,.54,lum)*(1.-smoothstep(.085,.22,chroma))
+              *smoothstep(.035,.19,contrast)*smoothstep(.34,.85,min(c.a,below.a))*crown*smoothstep(.018,.070,abs(vBranch.z));
+            float sparkle=iceReflection(vBranch.xy,pixel,cap,normalize(eye+lowSun.xyz));
+            color+=vec3(1.,.97,.89)*sparkle*branchSnow*facing*lowSun.w*mix(3.5,.85,bare)*(1.-smoothstep(19.,34.,vBranch.w));
+          }
+        }
+        gl_FragColor=vec4(color,1.);
         #include <fog_fragment>
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -322,5 +425,5 @@ export async function plantForest(scene,data) {
     const center=new THREE.Vector3(x0+cell/2,data.height(x0+cell/2,z0+cell/2)+8,z0+cell/2);
     g.boundingSphere=new THREE.Sphere(center,340);const m=new THREE.Mesh(g,sm);scene.add(m);chunks.push(m);
   }
-  return {setLight(env){uniforms.tint.value.set(env.treeTint??0xffffff);if(env.nightAmount)uniforms.tint.value.multiplyScalar(1-.33*env.nightAmount);},locate(x,z,quality){const d=quality==='lite'?1270:quality==='high'?2640:1920;for(const m of chunks){const c=m.geometry.boundingSphere.center;m.visible=(c.x-x)**2+(c.z-z)**2<d*d;}}};
+  return {setLight(env){setSnowSun(uniforms.lowSun.value,env);uniforms.tint.value.set(env.treeTint??0xffffff);if(env.nightAmount)uniforms.tint.value.multiplyScalar(1-.33*env.nightAmount);},locate(x,z,quality){const d=quality==='lite'?1270:quality==='high'?2640:1920;for(const m of chunks){const c=m.geometry.boundingSphere.center;m.visible=(c.x-x)**2+(c.z-z)**2<d*d;}}};
 }

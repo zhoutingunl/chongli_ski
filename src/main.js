@@ -17,7 +17,7 @@ const previous=read(prefKey,{});
 const setupOptions={
   resort:[['wanlong','万龙'],['genting','云顶']],
   gear:[['ski','双板','ski'],['board','单板','board']],
-  gender:[['male','男'],['female','女']],
+  gender:[['male','男士'],['female','女士'],['boy','男孩'],['girl','女孩']],
   color:[['#aa5536','赭红'],['#ba9041','麦金'],['#597b78','松绿'],['#476d91','冰蓝'],['#c5c3b6','雪灰']]
 };
 const prefs={view:'first',outsideView:'follow',quality:'auto',assist:true,sound:false,controls:true,
@@ -93,13 +93,16 @@ function syncSetupChoice(kind){
   const control=$('#'+kind+'-choices');
   for(const b of control.children)b.setAttribute('aria-pressed',String(b.dataset.value===prefs[kind]));
   if(kind==='color')$('#coat-name').textContent=control.querySelector('[aria-pressed="true"]').title;
+  if(kind==='gender')$('#rider-age').hidden=!childSelected();
   if(kind==='resort')mini?.select(selectedRoute());
 }
+const childSelected=()=>prefs.gender==='boy'||prefs.gender==='girl';
 function homeChoices(){
   for(const [kind,options] of Object.entries(setupOptions)){
     $('#'+kind+'-choices').innerHTML=kind==='color'?swatches():options.map(([id,name,icon])=>choice(kind,id,label(name),prefs[kind],icon)).join('');
   }
   syncSetupChoice('color');
+  syncSetupChoice('gender');
   mini?.select(selectedRoute());
 }
 function setupText(){
@@ -112,6 +115,7 @@ function setupText(){
   $('.intro').textContent=t('从红花梁出发，滑向同一座山的两面。','Two ski resorts on opposite faces of Honghualiang.');
   const setupLabels={resort:t('出发雪场','Starting resort'),gear:t('滑行装备','Equipment'),gender:label('角色'),color:t('雪服配色','Jacket colour')};
   for(const el of $$('[data-setup-label]'))el.textContent=setupLabels[el.dataset.setupLabel];
+  $('#rider-age').textContent=t('5–6 岁','Ages 5–6');
   function face(sel,icon,txt){for(const el of $$(sel))el.innerHTML=glyph(icon,18)+txt;}
   face('[data-act="start"]','mountain',t('进入山顶','Enter summit'));face('.start-actions [data-act="help"]','controls',t('操作指南','Controls'));
   face('.mini-heading,.narrow-map','map',label('雪场地图'));
@@ -316,7 +320,7 @@ function renderPanel(keep=false){
   else if(page==='settings')p.innerHTML=settingsPanel(prefs,music.track,sourceText());
   else if(page==='help')p.innerHTML=controlsPanel();
   else if(page==='rider'){
-    p.innerHTML=heading('RIDER','角色',t('角色与雪具','Rider and equipment'))+row(t('滑行装备','Equipment'),seg('gear',setupOptions.gear,prefs.gear))+row(label('角色'),seg('gender',setupOptions.gender,prefs.gender))+row(t('雪服配色','Jacket colour'),'<div class="swatches">'+swatches()+'</div>');
+    p.innerHTML=heading('RIDER','角色',t('角色与雪具','Rider and equipment'))+row(t('滑行装备','Equipment'),seg('gear',setupOptions.gear,prefs.gear))+row(label('角色'),seg('gender',setupOptions.gender,prefs.gender),childSelected()?t('5–6 岁','Ages 5–6'):'')+row(t('雪服配色','Jacket colour'),'<div class="swatches">'+swatches()+'</div>');
   }else if(page==='map'){
     const r=panelRoute(),side=(screen==='summit'&&world.station?.side)||r.resort;
     const priority={'wanlong-gold':0,'wanlong-silver':1};

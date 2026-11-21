@@ -50,7 +50,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
   const trailGuide=createTrailGuide(scene,data,renderer);
   const fx=makeSnowFX(scene,data);
   let rider=createRider(opts);scene.add(rider.group);
-  const sim=new Descent(data,opts);
+  const sim=new Descent(data,opts,rider.dimensions);
   const yawQ=new THREE.Quaternion(),tiltQ=new THREE.Quaternion(),surfNorm=new THREE.Vector3(),want=new THREE.Vector3(),look=new THREE.Vector3(),target=new THREE.Vector3();
   let active=false,paused=false,photo=false,orbitYaw=0,orbitPitch=.10,orbitZoom=5.9,ride=null,clock=0,prev=0,lastUI=0,simLag=0,treesLag=1,camHeading=0,snap=true,frame=0,graphicsScale=1;
   let photoSite=null,station=null,baseTurn=null;
@@ -115,7 +115,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
     rider.group.visible=!ride;
     const embodied=!photo && (!station || station.view==='wide' || opts.view==='first');
     rider.setVisibility(embodied&&opts.view==='first'?'first':embodied&&opts.view==='tips'?'tips':'body');
-    rider.group.position.set(p.x,p.y+.004,p.z);
+    rider.group.position.set(p.x,p.y+.004-p.snowSink,p.z);
     surfNorm.set((data.height(p.x-2,p.z)-data.height(p.x+2,p.z))/4,1,(data.height(p.x,p.z-2)-data.height(p.x,p.z+2))/4).normalize();
     if(p.airHeight>.1)surfNorm.lerp(up,clamp(p.airHeight*.8,0,1)).normalize();
     tiltQ.setFromUnitVectors(up,surfNorm);yawQ.setFromAxisAngle(up,-p.heading);tiltQ.multiply(yawQ);
@@ -124,6 +124,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
   }
   function moveCamera(dt){
     const p=sim,mode=opts.view,run=p.mode==='run';
+    const bodyScale=rider.dimensions.scale;
     const travel=p.travelHeading??p.heading,fast=clamp(p.speed/22,0,1);
     const first=mode==='first'&&!photo&&!ride;
     const tips=mode==='tips'&&!photo&&!ride&&(!station||station.view==='wide');
@@ -136,7 +137,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
     if(photo){
       const focus=photoSite?.focus,theta=photoSite ? -photoSite.yaw+orbitYaw : travel+orbitYaw;
       const reach=orbitZoom*Math.cos(orbitPitch);
-      look.set(focus?.x??p.x,focus?.y??(p.y+.96),focus?.z??p.z).add(photoPan);
+      look.set(focus?.x??p.x,focus?.y??(p.y-p.snowSink+.96*bodyScale),focus?.z??p.z).add(photoPan);
       want.set(look.x-Math.sin(theta)*reach,look.y+.32+Math.sin(orbitPitch)*orbitZoom,look.z+Math.cos(theta)*reach);
       want.y=Math.max(want.y,data.height(want.x,want.z)+.30);fov=52;
     }else if(ride){
@@ -153,7 +154,8 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
         if(snap)eyeOffset.copy(want);else eyeOffset.lerp(want,1-Math.exp(-dt*(reducedMotion?7:17)));
         want.copy(bodyOrigin).add(eyeOffset);
       }else{
-        want.set(p.x-.15*Math.sin(travel),p.y+.90,p.z+.15*Math.cos(travel));
+        const back=.15*rider.dimensions.lengthScale;
+        want.set(p.x-back*Math.sin(travel),p.y-p.snowSink+.90*bodyScale,p.z+back*Math.cos(travel));
       }
       fov=tips?76:station?71:72+(reducedMotion?2:15)*fast+Math.min(2,p.boost*fast*2);
       const grade=THREE.MathUtils.degToRad(p.slope||0);
@@ -201,6 +203,10 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
       if(mode==='follow'){
         back=3.55+fast*.62;lift=1.55+fast*.18;lead=3.8;eye=1.03;
         fov=57+(reducedMotion?1:4)*fast;
+      }
+      if(mode!=='top'&&mode!=='far'){
+        const framing=.40+.60*bodyScale;
+        back*=framing;side*=framing;lead*=framing;lift*=framing;eye*=bodyScale;
       }
       const x=dx(back,side),z=dz(back,side),aheadX=dx(-lead,0),aheadZ=dz(-lead,0);
       want.set(x,Math.max(p.y+lift,data.height(x,z)+lift),z);
@@ -253,7 +259,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
     const side=station?.side||ride?.lift.meta.resort||(sim.mode==='finished'?sim.route.destination:
       (['wanlong','genting'].includes(sim.trail?.resort)?sim.trail.resort:sim.route.resort));
     photoPan.set(0,0,0);photoSite=photoPlaces.get(side+'-'+kind)||null;orbitYaw=photoSite?.kind==='hall'?-.13:0;
-    orbitZoom=photoSite?.distance||5.9;orbitPitch=photoSite?.kind==='hall'?.13:.15;snap=true;treesLag=1;kick();
+    orbitZoom=photoSite?.distance||5.9*(.40+.60*rider.dimensions.scale);orbitPitch=photoSite?.kind==='hall'?.13:.15;snap=true;treesLag=1;kick();
   }
   function resetScene(route){
     sim.start(route);station=null;ride=null;photo=paused=false;active=true;resetLook();
@@ -388,7 +394,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
       }
       if(baseTurn)turnInPlace(dt);
       for(const l of lifts)if(l.group.visible)l.update(clock,camera,ride?.lift===l ? ride.t : null,ride?.dir);
-      updateAvatar(dt);fx.update(sim,dt,conditions,camera.position);
+      updateAvatar(dt);fx.update(sim,dt,conditions,camera.position,rider.dimensions);
     }else if(photo)updateAvatar(0);
     moveCamera(dt);
     treesLag+=dt;if(treesLag>.40){refreshLOD();treesLag=0;}
@@ -430,7 +436,8 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
         else orbitPivot.copy(station.target);
         const dx=orbitPivot.x-sim.x,dz=orbitPivot.z-sim.z;
         lookYaw=wrap(Math.atan2(dx,-dz)-sim.heading);
-        lookPitch=clamp(Math.atan2(orbitPivot.y-(sim.y+1.55),Math.hypot(dx,dz))+.055,-pitchLimit,pitchLimit);
+        const eyeY=rider.group.localToWorld(rider.eyePosition(want)).y;
+        lookPitch=clamp(Math.atan2(orbitPivot.y-eyeY,Math.hypot(dx,dz))+.055,-pitchLimit,pitchLimit);
       }
       snap=true;treesLag=1;kick();
     },
@@ -441,7 +448,13 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
     pause(b){paused=b;input.lookX=input.lookY=input.trim=input.steer=0;input.brake=input.boost=false;prev=0;kick();},
     stop(){active=false;paused=false;photo=false;ride=station=baseTurn=null;sim.pivotRate=0;if(frame)cancelAnimationFrame(frame);frame=0;sim.mode='idle';},
     environment(){environment();kick();},graphics(){graphicsScale=1;sun.castShadow=opts.quality!=='lite';resize();treesLag=1;kick();},
-    changeRider(){scene.remove(rider.group);rider.dispose();rider=createRider(opts);scene.add(rider.group);sim.gear=opts.gear;updateAvatar(0);kick();},
+    changeRider(){
+      const previousScale=rider.dimensions.scale;
+      scene.remove(rider.group);rider.dispose();rider=createRider(opts);scene.add(rider.group);
+      sim.gear=opts.gear;sim.dimensions=rider.dimensions;
+      if(previousScale!==rider.dimensions.scale)snap=true;
+      updateAvatar(0);kick();
+    },
     cameraChanged(){
       if(station){station.view='wide';station.preset=false;station.eye.copy(station.homeEye);station.target.copy(station.homeTarget);}
       if(baseTurn)baseTurn.focus=null;
