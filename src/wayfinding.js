@@ -33,6 +33,8 @@ function legAt(route,index,trails) {
 }
 function signSites(data,plans) {
   const sites=[];
+  // Fork directions are painted on the snow. Keep route identification posts clear of those approaches.
+  const forks=plans.filter(p=>p.type==='junction').map(p=>p.junctionPosition||[p.x,p.z]);
   for(const p of plans) {
     if(!p.options?.length)continue;
     const src=[p.x,p.z],side=p.resort,approach=p.approach;
@@ -44,23 +46,6 @@ function signSites(data,plans) {
       const pos=side==='wanlong'?alongShoulder(start.position,h,6.75,9.85):alongShoulder(start.position,h,-3.05,8.65);
       const heading=bearing(start.position,pos);
       sites.push({id:p.id,signId:p.id,type:'summit',pos,side,heading,approach:h,rows,header:side==='wanlong'?'红花梁 · 雪道入口':'云顶 · 雪道入口',en:'TRAILHEAD'});
-    } else if(p.type==='junction') {
-      const fork=p.junctionPosition||src;
-      const nearest=data.index.near(...fork),width=nearest.trail?.width||34;
-      // The facing normal follows the incoming piste, whereas every arrow follows the
-      // outgoing geometry. A warning board upstream consequently depicts the fork ahead.
-      const route=data.routes.find(r=>r.id===p.sourceRouteId);
-      const lane=p.junctionPosition&&route ? route.frame(p.along-12) : null;
-      const railSide=lane ? Math.sign((p.x-lane.x)*Math.cos(lane.angle)+(p.z-lane.z)*Math.sin(lane.angle))||1 : side==='genting'?-1:1;
-      const ahead=p.upstreamPosition || alongShoulder(fork,approach,0,-46);
-      const approach0=route?route.frame(p.along-48).angle:approach;
-      const aheadWidth=data.index.near(...ahead).trail?.width||width;
-      const aheadPos=alongShoulder(ahead,approach0,railSide*clamp(aheadWidth*.43,7.5,15.5));
-      const pos=p.junctionPosition?src:alongShoulder(fork,approach,railSide*clamp(width*.42,7.2,15));
-      const rounded=Math.round(Math.hypot(fork[0]-ahead[0],fork[1]-ahead[1])/5)*5;
-      sites.push({id:p.id+'-advance',signId:p.id,type:'advance',side,pos:aheadPos,heading:approach0+railSide*.16,approach:approach0,rows,
-        header:`前方 ${rounded} 米分岔`,en:'JUNCTION AHEAD'});
-      sites.push({id:p.id,signId:p.id,type:'junction',side,pos,heading:approach+railSide*.16,approach,rows,header:'雪道分岔',en:'TRAIL JUNCTION'});
     } else if(p.type==='confirmation') {
       sites.push({id:p.id,type:'repeater',side,pos:src,heading:approach,approach,rows});
     }
@@ -75,6 +60,7 @@ function signSites(data,plans) {
       const name=simpleName(trail.name),en=localNames[name];
       if(!en)continue;
       const side=trail.resort==='genting'?-1:1,pos=alongShoulder([f.x,f.z],f.angle,side*clamp(trail.width*.47,7.5,20));
+      if(forks.some(([x,z])=>Math.hypot(pos[0]-x,pos[1]-z)<115))continue;
       if(sites.some(o=>Math.hypot(pos[0]-o.pos[0],pos[1]-o.pos[1])<Math.min(170,o.type==='repeater'?170:125)))continue;
       const lower=trail.name.includes('大奔头');
       sites.push({id:'follow-'+trail.id+'-'+Math.round(s),type:'repeater',side:trail.resort,pos,heading:f.angle+side*.16,approach:f.angle,
@@ -130,9 +116,12 @@ function drawCell(c,r,x,y,w,h) {
     c.textAlign='right';c.fillStyle='#eee1bd';textFit(c,r.en.toUpperCase(),734,78,237,34,21,650,latin);
   }else{
     badge(c,r.difficulty);
-    c.fillStyle='#fcfcf4';textFit(c,r.name,125,56,494,77,45,720,font);
-    c.fillStyle='#dbe8e6';textFit(c,r.en.toUpperCase(),128,112,486,31,19,650,latin);
-    c.strokeStyle='rgba(229,239,236,.39)';c.lineWidth=1.6;c.beginPath();c.moveTo(623,28);c.lineTo(623,122);c.stroke();
+    const hasArrow=r.labelType!=='piste';
+    c.fillStyle='#fcfcf4';textFit(c,r.name,125,56,hasArrow?494:607,77,45,720,font);
+    c.fillStyle='#dbe8e6';textFit(c,r.en.toUpperCase(),128,112,hasArrow?486:604,31,19,650,latin);
+    if(hasArrow){
+      c.strokeStyle='rgba(229,239,236,.39)';c.lineWidth=1.6;c.beginPath();c.moveTo(623,28);c.lineTo(623,122);c.stroke();
+    }
   }
   c.restore();
 }
@@ -140,7 +129,10 @@ function labelAtlas(sites) {
   const unique=new Map(),white={labelType:'white',name:'',en:''};unique.set(keyFor(white),white);
   for(const s of sites) {
     if(s.header){s.top={name:s.header,en:s.en,labelType:'header'};unique.set(keyFor(s.top),s.top);}
-    for(const row of s.rows)unique.set(keyFor(row),row);
+    for(const row of s.rows){
+      if(s.type==='repeater')row.labelType='piste';
+      unique.set(keyFor(row),row);
+    }
   }
   const tiles=[...unique.entries()],cols=tiles.length>24?4:3,cellWidth=cols===4?512:640,cellHeight=128,rows=Math.ceil(tiles.length/cols);
   const c=document.createElement('canvas');c.width=cols*cellWidth;c.height=rows*cellHeight;
@@ -219,7 +211,7 @@ function signModel(data,site,batches,atlas) {
       const sign=reverse?-1:1,z=sign*(deep+.005);
       const vs=xy.map(([x,y])=>at(x,cy+y,z)),uv=xy.map(([x,y])=>[rect[0]+(x*sign/width+.5)*(rect[2]-rect[0]),rect[1]+(y/h+.5)*(rect[3]-rect[1])]);
       if(reverse){vs.reverse();uv.reverse();}fac.polygon(vs,null,uv);
-      if(!header){const delta=wrap(row.heading-heading-(reverse?Math.PI:0));graphicArrow(fac,at,atlas.white,delta,Math.min(h*.94,width*.15),hw*.79,cy,sign*(deep+.031),reverse);}
+      if(!header&&!repeater){const delta=wrap(row.heading-heading-(reverse?Math.PI:0));graphicArrow(fac,at,atlas.white,delta,Math.min(h*.94,width*.15),hw*.79,cy,sign*(deep+.031),reverse);}
     }
     if(header||repeater||rows.length===1)box(shell,at,0,cy+hh+.010,0,width-cut*2,.041,.34,'#ecf0ee');
   }

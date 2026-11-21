@@ -14,8 +14,20 @@ const prefKey='ridgeline.preferences.v1',recordKey='ridgeline.descents.v1';
 function read(key,fallback){try{return JSON.parse(localStorage.getItem(key))??fallback;}catch{return fallback;}}
 function store(key,value){try{localStorage.setItem(key,JSON.stringify(value));}catch{}}
 const previous=read(prefKey,{});
-const prefs={resort:'wanlong',gear:'ski',gender:'male',color:'#aa5536',view:'first',outsideView:'follow',quality:'auto',assist:true,sound:false,controls:true,
+const setupOptions={
+  resort:[['wanlong','万龙'],['genting','云顶']],
+  gear:[['ski','双板','ski'],['board','单板','board']],
+  gender:[['male','男'],['female','女']],
+  color:[['#aa5536','赭红'],['#ba9041','麦金'],['#597b78','松绿'],['#476d91','冰蓝'],['#c5c3b6','雪灰']]
+};
+const prefs={view:'first',outsideView:'follow',quality:'auto',assist:true,sound:false,controls:true,
   time:'auto',weather:'auto',language:'zh',music:true,followMusic:true,track:'ridge',volume:75,tilt:false,...previous};
+const chosenSetup={};
+for(const [kind,options] of Object.entries(setupOptions)){
+  const saved=options.find(([id])=>id===previous[kind]);
+  if(saved)chosenSetup[kind]=saved[0];
+  prefs[kind]=saved?saved[0]:options[Math.floor(Math.random()*options.length)][0];
+}
 if(!previous.time&&previous.env){
   prefs.time=({morning:'day',noon:'day',snow:'day',dusk:'sunset'})[previous.env]||'auto';
   prefs.weather=previous.env==='snow'?'light':'clear';delete prefs.env;
@@ -25,9 +37,9 @@ if(!weatherOptions.some(o=>o.id===prefs.weather))prefs.weather='auto';
 if(!viewNames[prefs.view])prefs.view='first';
 if(!viewNames[prefs.outsideView]||prefs.outsideView==='first')prefs.outsideView='follow';
 prefs.volume=clamp(Number.isFinite(+prefs.volume)?+prefs.volume:75,0,100);
-const colors={'#aa5536':'赭红','#ba9041':'麦金','#597b78':'松绿','#476d91':'冰蓝','#c5c3b6':'雪灰'};
 const sound=new MountainSound(),music=new MountainMusic(sound);
 let data,world,mini,large,routeId=prefs.resort+'-classic',mapId=routeId,summitChoice='';
+let sharedRouteId=new URLSearchParams(location.search).get('run');
 let screen='home',page='',photoOrigin='run',recordTab='times',busy=false,toastTimer,focusBack,restoreRequested=false,recorded=false,tray=false;
 const keys=new Set(),holds=new Set(),touches=new Map(),drivePointers=new Map();
 let drag=0,trim=0,multi=null,backDepart=false;
@@ -35,7 +47,12 @@ const keyDirection={ArrowUp:'up',KeyW:'up',ArrowLeft:'left',KeyA:'left',ArrowDow
 const departureTurn={up:0,left:-Math.PI/2,right:Math.PI/2,down:Math.PI};
 const touchDevice=matchMedia('(pointer:coarse)').matches||navigator.maxTouchPoints>0;
 document.documentElement.classList.toggle('touch',touchDevice);
-const save=()=>store(prefKey,prefs);
+function save(){
+  // A sound, camera or route change must not turn today's random outfit into a saved choice.
+  const settings={...prefs};
+  for(const kind of Object.keys(setupOptions))delete settings[kind];
+  store(prefKey,{...settings,...chosenSetup});
+}
 const selectedRoute=()=>data?.routes.find(r=>r.id===routeId)||data?.routes[0];
 const panelRoute=()=>data?.routes.find(r=>r.id===mapId)||selectedRoute();
 const inWorld=()=>['summit','station','trailhead','run','base','lift'].includes(screen);
@@ -69,9 +86,20 @@ function switchCamera(view){
   prefs.view=view;if(view!=='first')prefs.outsideView=view;
   world?.cameraChanged();showCameraMode();save();if(watching())hudVisible(true);
 }
+function swatches(){
+  return setupOptions.color.map(([id,name])=>'<button class="swatch" aria-label="'+label(name)+'" title="'+label(name)+'" data-choice="color" data-value="'+id+'" aria-pressed="'+(prefs.color===id)+'" style="--coat:'+id+'">'+glyph('check',13)+'</button>').join('');
+}
+function syncSetupChoice(kind){
+  const control=$('#'+kind+'-choices');
+  for(const b of control.children)b.setAttribute('aria-pressed',String(b.dataset.value===prefs[kind]));
+  if(kind==='color')$('#coat-name').textContent=control.querySelector('[aria-pressed="true"]').title;
+  if(kind==='resort')mini?.select(selectedRoute());
+}
 function homeChoices(){
-  $('#resort-choices').innerHTML=choice('resort','wanlong',resort('wanlong'),prefs.resort)+choice('resort','genting',resort('genting'),prefs.resort);
-  $('#gear-choices').innerHTML=choice('gear','ski',label('双板'),prefs.gear,'ski')+choice('gear','board',label('单板'),prefs.gear,'board');
+  for(const [kind,options] of Object.entries(setupOptions)){
+    $('#'+kind+'-choices').innerHTML=kind==='color'?swatches():options.map(([id,name,icon])=>choice(kind,id,label(name),prefs[kind],icon)).join('');
+  }
+  syncSetupChoice('color');
   mini?.select(selectedRoute());
 }
 function setupText(){
@@ -82,7 +110,8 @@ function setupText(){
   $('.location').innerHTML='<span></span>'+t('河北 · 崇礼','CHONGLI · HEBEI');
   $('.start-content h1').innerHTML=t('万龙<span>·</span>云顶','Wanlong<span>·</span>Genting');$('.roman').hidden=prefs.language==='en';
   $('.intro').textContent=t('从红花梁出发，滑向同一座山的两面。','Two ski resorts on opposite faces of Honghualiang.');
-  const legends=$$('.start-choices legend');legends[0].textContent=t('出发雪场','Starting resort');legends[1].textContent=t('滑行装备','Equipment');
+  const setupLabels={resort:t('出发雪场','Starting resort'),gear:t('滑行装备','Equipment'),gender:label('角色'),color:t('雪服配色','Jacket colour')};
+  for(const el of $$('[data-setup-label]'))el.textContent=setupLabels[el.dataset.setupLabel];
   function face(sel,icon,txt){for(const el of $$(sel))el.innerHTML=glyph(icon,18)+txt;}
   face('[data-act="start"]','mountain',t('进入山顶','Enter summit'));face('.start-actions [data-act="help"]','controls',t('操作指南','Controls'));
   face('.mini-heading,.narrow-map','map',label('雪场地图'));
@@ -164,14 +193,14 @@ function hudVisible(show){
   }
 }
 function discardMap(){if(large){large.observer.disconnect();large=null;}}
-async function begin(id=routeId){
+async function begin(id){
   if(busy)return;busy=true;restoreRequested=false;activateAudio();
   if(prefs.tilt&&!tilt.enabled)enableTilt();
   $('#loading').hidden=false;$('#load-text').textContent=label('读取红花梁地形');
   try{
-    await ensureData();const route=data.routes.find(r=>r.id===id)||selectedRoute();
+    await ensureData();const route=data.routes.find(r=>r.id===(id||routeId))||selectedRoute();
     if(!world){const {createWorld}=await import('./world.js');world=await createWorld($('#gl'),data,prefs,worldEvent,s=>$('#load-text').textContent=label(s));}
-    discardMap();page='';$('#overlay').hidden=true;routeId=route.id;prefs.resort=route.resort;save();
+    discardMap();page='';$('#overlay').hidden=true;routeId=route.id;
     recorded=false;screen='summit';summitChoice='';tray=false;clearInputs();world.stage(route);
     hudVisible(true);paintHUD();world.graphics();refreshMusic();
     if(restoreRequested||document.hidden)openPanel('view');
@@ -179,14 +208,14 @@ async function begin(id=routeId){
   finally{busy=false;$('#loading').hidden=true;}
 }
 function launch(route){
-  discardMap();page='';$('#overlay').hidden=true;routeId=route.id;prefs.resort=route.resort;save();
+  discardMap();page='';$('#overlay').hidden=true;routeId=route.id;
   recorded=false;screen='run';tray=false;clearInputs();tilt.calibrate();world.start(route);hudVisible(true);paintHUD();refreshMusic();
 }
 function pushOff(direction,preferred=screen==='summit'?summitChoice||undefined:undefined,heading){
   if(!watching()||page||busy||!world)return false;
   const route=world.pushOff(departureTurn[direction]??0,preferred,heading);
   if(!route)return false;
-  recorded=false;screen='run';tray=false;routeId=route.id;prefs.resort=route.resort;save();
+  recorded=false;screen='run';tray=false;routeId=route.id;
   tilt.calibrate();hudVisible(true);paintHUD();refreshMusic();return true;
 }
 function beginDirection(direction){
@@ -202,6 +231,7 @@ function beginDirection(direction){
 }
 function home(){
   clearInputs();world?.stop();screen='home';page='';discardMap();$('#overlay').hidden=true;
+  if(!data?.routes.some(r=>r.id===routeId&&r.resort===prefs.resort))routeId=prefs.resort+'-classic';
   homeChoices();hudVisible(false);sound.update(0,0);refreshMusic();
 }
 function worldEvent(type,arg){
@@ -213,7 +243,7 @@ function worldEvent(type,arg){
     records.push({routeId:arg.route.id,name:arg.route.name,resort:arg.route.destination,when:new Date().toISOString(),gear:prefs.gear,time:Math.round(arg.elapsed),max:arg.maxSpeed*3.6,dist:arg.travel,drop:Math.round(arg.startY-arg.ground)});
     store(recordKey,records.slice(-100));clearInputs();hudVisible(true);paintHUD();refreshMusic();
   }
-  if(type==='disembark'){routeId=arg.route.id;prefs.resort=arg.side;screen=arg.mode;recorded=false;summitChoice='';save();
+  if(type==='disembark'){routeId=arg.route.id;screen=arg.mode;recorded=false;summitChoice='';
     hudVisible(true);paintHUD();refreshMusic();announce(arg.mode==='summit'?t('已到山顶，可环顾或选道','At the summit. Look around or choose a trail.'):t('已到站，可环顾或乘回程索道','At the station. Look around or take the return lift.'));}
   if(type==='lost')openPanel('lost');
 }
@@ -286,7 +316,7 @@ function renderPanel(keep=false){
   else if(page==='settings')p.innerHTML=settingsPanel(prefs,music.track,sourceText());
   else if(page==='help')p.innerHTML=controlsPanel();
   else if(page==='rider'){
-    p.innerHTML=heading('RIDER','角色',t('角色与雪具','Rider and equipment'))+row(t('滑行装备','Equipment'),seg('gear',[['ski','双板','ski'],['board','单板','board']],prefs.gear))+row(label('角色'),seg('gender',[['male','男'],['female','女']],prefs.gender))+row(t('雪服配色','Jacket colour'),'<div class="swatches">'+Object.entries(colors).map(([c,n])=>'<button class="swatch" aria-label="'+label(n)+'" title="'+label(n)+'" data-choice="color" data-value="'+c+'" aria-pressed="'+(c===prefs.color)+'" style="--coat:'+c+'"></button>').join('')+'</div>');
+    p.innerHTML=heading('RIDER','角色',t('角色与雪具','Rider and equipment'))+row(t('滑行装备','Equipment'),seg('gear',setupOptions.gear,prefs.gear))+row(label('角色'),seg('gender',setupOptions.gender,prefs.gender))+row(t('雪服配色','Jacket colour'),'<div class="swatches">'+swatches()+'</div>');
   }else if(page==='map'){
     const r=panelRoute(),side=(screen==='summit'&&world.station?.side)||r.resort;
     const priority={'wanlong-gold':0,'wanlong-silver':1};
@@ -328,18 +358,24 @@ function setChoice(kind,v){
     for(const el of $$('.route-choice'))el.setAttribute('aria-pressed',String(el.dataset.value===v));
     large?.select(panelRoute(),inWorld()?world.sim:null);mapAction();return;
   }
-  if(kind==='track'){prefs.track=v;prefs.followMusic=false;prefs.music=true;activateAudio();}
-  else if(kind==='resort'){prefs.resort=v;routeId=v+'-classic';homeChoices();}
+  if(Object.hasOwn(setupOptions,kind)){
+    if(!setupOptions[kind].some(([id])=>id===v))return;
+    const changed=prefs[kind]!==v;
+    chosenSetup[kind]=v;prefs[kind]=v;
+    if(kind==='resort'){sharedRouteId=null;routeId=v+'-classic';}
+    else if(changed&&world?.sim.route)world.changeRider();
+    syncSetupChoice(kind);
+  }
+  else if(kind==='track'){prefs.track=v;prefs.followMusic=false;prefs.music=true;activateAudio();}
   else if(kind==='assist'){world?.sim.setAssist(v==='on');prefs.assist=v==='on';}
   else if(kind==='controls'){prefs.controls=v==='on';}
   else{
     prefs[kind]=v;
-    if(['gear','gender','color'].includes(kind)){if(world?.sim.route)world.changeRider();homeChoices();}
     if(kind==='view')switchCamera(v);
     if(kind==='time'||kind==='weather'){world?.environment();refreshMusic();}
     if(kind==='quality')world?.graphics();
   }
-  save();if(page){renderPanel(true);$$('[data-choice="'+kind+'"]').find(b=>b.dataset.value===v)?.focus({preventScroll:true});}
+  save();if(page){renderPanel(true);$$('#panel [data-choice="'+kind+'"]').find(b=>b.dataset.value===v)?.focus({preventScroll:true});}
 }
 async function enableTilt(){
   const ok=await tilt.enable();prefs.tilt=ok;save();if(page==='settings')renderPanel(true);
@@ -397,6 +433,10 @@ function action(a){
   if(a==='look-hall'&&screen==='base'){world.lookAtBaseHall();return;}
   if(a==='apply-route'){
     const r=panelRoute();
+    if(screen==='home'){
+      sharedRouteId=null;chosenSetup.resort=prefs.resort=r.resort;save();
+      return begin(r.id);
+    }
     if(screen==='summit'&&summitChoice&&r.resort===world.station.side){
       const heading=world.summitHeading(r.id);closePanel();pushOff('up',r.id,heading);
     }
@@ -540,6 +580,6 @@ for(const el of [$('#gl'),$('#steering')]){
 $('#gl').addEventListener('wheel',e=>{if(screen==='photo'){e.preventDefault();world.zoom(e.deltaY>0?1.11:.90);}},{passive:false});
 $('#photo-place').addEventListener('change',e=>world?.photoPlace(e.target.value));
 setupText();refreshMusic();
-ensureData().then(()=>{const id=new URLSearchParams(location.search).get('run'),r=data.routes.find(r=>r.id===id);
+ensureData().then(()=>{const r=data.routes.find(r=>r.id===sharedRouteId);
   if(r){routeId=r.id;prefs.resort=r.resort;homeChoices();}
 }).catch(()=>{});
