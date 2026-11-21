@@ -5,6 +5,7 @@ export const resortName = id => id === 'genting' ? '云顶' : '万龙';
 export const formatTime = seconds => Math.floor(seconds / 60) + '′ ' + String(Math.floor(seconds % 60)).padStart(2, '0') + '″';
 export const difficultyName = {easy:'初级', intermediate:'中级', advanced:'高级', expert:'专家'};
 export const difficultyColor = {easy:'#8fc79d', intermediate:'#84b9e2', advanced:'#e49c85', expert:'#c49eb8'};
+import {loadData} from './platform.js';
 
 export class HeightField {
   constructor({bounds, dem}) {
@@ -135,9 +136,7 @@ export class SkiRoute {
 
 let pending;
 export function loadMountain() {
-  if (!pending) pending = fetch(import.meta.env.BASE_URL+'assets/geo/mountain.json').then(r=>{
-    if(!r.ok)throw new Error('雪场数据加载失败'); return r.json();
-  }).then(raw=>{
+  if (!pending) pending = loadData('mountain').then(raw=>{
     const field=new HeightField(raw);
     const data={...raw, field, height:field.height.bind(field), index:new TrailIndex(raw.trails),obstacles:new ObstacleIndex(raw.buildings)};
     data.routes=raw.routes.map(r=>new SkiRoute(r,data));

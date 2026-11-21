@@ -2,6 +2,8 @@ import {glyph} from './icons.js';
 import {timeOptions,weatherOptions} from './environment.js';
 import {tracks} from './music.js';
 import {t,label} from './language.js';
+import {isMiniTool,motionSupported} from './platform.js';
+import {version} from '../package.json';
 
 export const button=(action,content,cls='')=>'<button class="'+cls+'" data-act="'+action+'">'+content+'</button>';
 export const choice=(kind,id,txt,selected,icon='')=>'<button data-choice="'+kind+'" data-value="'+id+'" aria-pressed="'+(id===selected)+'">'+(icon?glyph(icon,17):'')+txt+'</button>';
@@ -32,9 +34,9 @@ export function settingsPanel(prefs,song,sources){
     '<div class="music-head"><span>'+t('背景音乐','Background music')+'</span><div>'+pill('follow-music',t('随环境切换','Follow environment'),prefs.followMusic)+pill('music',t('音乐 '+(prefs.music?'开':'关'),'Music '+(prefs.music?'on':'off')),prefs.music)+'</div></div><div class="track-grid">'+musicGrid+'</div>'+
     '<div class="music-mix"><div><p id="now-playing">'+(prefs.music?t('正在播放 · ','Playing · '):t('已静音 · ','Muted · '))+t(song.name,song.en)+' / '+song.bpm+' BPM</p><small>'+t('点选曲目固定播放，或随环境切换。','Pick a track to keep it, or follow the environment.')+'</small></div><label for="music-volume">'+t('音乐音量','Music volume')+' <input id="music-volume" type="range" min="0" max="100" value="'+prefs.volume+'"> <output id="volume-readout">'+prefs.volume+'%</output></label></div>'+
     '<details class="settings-detail"><summary>'+t('滑行设置','Riding options')+'</summary>'+row(t('循线辅助','Trail assist'),seg('assist',[['on','开启'],['off','关闭']],prefs.assist?'on':'off'),t('顺着所选线路滑行，关闭可自由选线。','Follow the selected line or steer freely with assist off.'))+
-    row(t('屏幕按键','Touch controls'),seg('controls',[['on','显示'],['off','隐藏']],prefs.controls?'on':'off'))+'</details>'+
-    '<div class="tilt-setting">'+pill('tilt',t('倾斜转弯 '+(prefs.tilt?'开':'关'),'Tilt steering '+(prefs.tilt?'on':'off')),prefs.tilt)+(prefs.tilt?button('calibrate',t('校准','Calibrate'),'setting-pill'):'')+'</div>'+
-    '<details class="source-detail"><summary>'+t('数据来源','Data sources')+'</summary>'+sources+'</details><small class="version">'+t('版本','Version')+' 1.6.0</small>';
+    (isMiniTool?'':row(t('屏幕按键','Touch controls'),seg('controls',[['on','显示'],['off','隐藏']],prefs.controls?'on':'off')))+'</details>'+
+    (motionSupported?'<div class="tilt-setting">'+pill('tilt',t('倾斜转弯 '+(prefs.tilt?'开':'关'),'Tilt steering '+(prefs.tilt?'on':'off')),prefs.tilt)+(prefs.tilt?button('calibrate',t('校准','Calibrate'),'setting-pill'):'')+'</div>':'')+
+    '<details class="source-detail"><summary>'+t('数据来源','Data sources')+'</summary>'+sources+'</details><small class="version">'+t('版本','Version')+' '+version+'</small>';
 }
 export function controlsPanel(){
   const controls=[
@@ -52,5 +54,6 @@ export function controlsPanel(){
     [t('机位','Camera'),t('右上角切换第一人称和外部机位，眼形图标轮换九种视角。','Use the top switch for first or third person, or the eye to cycle all nine views.'),'V / C'],
     [t('拍照','Photo'),t('暂停菜单中点「拍照」冻结雪场。拖动环顾，双指平移或缩放，再按快门存图。','Freeze the scene from the pause menu. Drag to look, pan or pinch with two fingers, then save.'),'WASD · Q / E']
   ];
+  if(!motionSupported)controls.splice(4,1);
   return heading('CONTROLS','操作说明')+'<div class="controls-guide">'+controls.map(([title,body,key])=>'<div class="ctrl-row"><strong>'+title+'</strong><span>'+body+'</span><span>'+key+'</span></div>').join('')+'</div>';
 }

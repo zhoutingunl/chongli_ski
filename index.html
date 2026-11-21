@@ -15,7 +15,7 @@
 </head>
 <body>
 <div id="app">
-  <div id="world"><canvas id="gl" aria-label="崇礼三维滑雪场"></canvas></div>
+  <div id="world"><canvas id="gl" aria-label="崇礼三维滑雪场"></canvas><canvas id="flat-view" hidden aria-label="崇礼轻量雪道视图"></canvas></div>
   <main id="home">
     <div class="cover-art"></div><div class="cover-shade"></div>
     <header class="mast">
@@ -76,6 +76,12 @@
     <div id="lift-strip" hidden><span data-glyph="lift"></span><span id="lift-text"></span><button data-act="skip-lift">直达山顶</button></div>
   </section>
   <div id="photo-bar" hidden><button data-act="exit-photo" class="glass-button">返回</button><select id="photo-place" aria-label="选择拍摄位置"><option value="rider">滑行者</option><option value="lodge">山顶餐厅</option><option value="hall">山下大厅与酒店</option></select><span>拖动环顾 · 双指平移和缩放</span><button data-act="save-photo" class="glass-button" id="shutter"></button></div>
+  <section id="photo-preview" hidden role="dialog" aria-modal="true" aria-labelledby="photo-preview-title">
+    <h2 id="photo-preview-title">雪场照片</h2>
+    <img alt="雪场截图">
+    <p id="photo-preview-notice" role="status"></p>
+    <div><button class="glass-button" data-act="close-preview">返回取景</button><button class="launch" data-act="save-album" hidden>存入相册</button></div>
+  </section>
   <section id="overlay" hidden aria-label="设置">
     <div class="overlay-inner"><nav id="pause-nav"></nav><article id="panel"></article></div>
   </section>

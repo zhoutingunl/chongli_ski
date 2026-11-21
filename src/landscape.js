@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {HeightField,clamp,randomGenerator} from './mountain.js';
+import {loadData,loadForestImage} from './platform.js';
 
 const asset = name => import.meta.env.BASE_URL+'assets/'+name;
 const glNoise = `
@@ -88,21 +89,69 @@ function addTerrainTiles(scene,field,material,innerBounds=null) {
     const patch=new THREE.Mesh(geo,material);patch.receiveShadow=!innerBounds;scene.add(patch);
   }
 }
+const atmosphereGLSL=`
+  vec3 aerialSnow(vec3 radiance,vec3 point,vec3 eye){
+    vec3 ray=point-eye;
+    float distanceToPoint=length(ray);
+    float layer=exp(-max(0.,point.y-1370.)*.00185);
+    float eyeLayer=exp(-max(0.,eye.y-1370.)*.00185);
+    float mist=.000038+.000113*(eyeLayer+layer)*.5;
+    float opticalDepth=max(0.,distanceToPoint-145.)*mist;
+    float scattered=(1.-exp(-opticalDepth))*aerialStrength;
+    float towardsSun=max(0.,dot(ray/max(1.,distanceToPoint),airSun.xyz));
+    vec3 atmosphere=mix(ridgeAir,hazeAir,.24+.48*layer);
+    atmosphere=mix(atmosphere,horizonAir,.30*pow(towardsSun,5.)*airSun.w);
+    return mix(radiance,atmosphere,scattered);
+  }
+`;
+const shadowBones=[[0,0,.115],[0,1,.104],[1,2,.173],[2,3,.095],[3,4,.078],[2,7,.095],[7,8,.078],
+  [1,5,.071],[5,6,.058],[1,9,.071],[9,10,.058]];
+const riderShadowGLSL=`
+  float bodyShadow(vec2 spot){
+    if(shadowArea.w<=0.||distance(spot,shadowArea.xy)>shadowArea.z)return 0.;
+    float cover=0.;
+    for(int j=0;j<${shadowBones.length};j++){
+      vec2 a=shadowStarts[j].xy,b=shadowEnds[j],ab=b-a;
+      float along=clamp(dot(spot-a,ab)/max(.0001,dot(ab,ab)),0.,1.);
+      float r=shadowStarts[j].z;
+      float distanceToBody=length(spot-(a+along*ab));
+      cover=max(cover,1.-smoothstep(r*.50,r*1.45,distanceToBody));
+    }
+    return cover*shadowArea.w;
+  }
+`;
+const ridgeShadowGLSL=`
+  float horizonAt(vec2 uv,float tile){
+    vec2 corner=vec2(mod(tile,2.),floor(tile*.5));
+    vec2 texel=clamp(uv,vec2(0.),vec2(1.))*191.+.5;
+    return texture2D(solarHorizons,(corner*192.+texel)/384.).r*.95;
+  }
+  float ridgeShadow(vec2 uv){
+    if(sunHorizon.w<.01)return 0.;
+    float horizon=mix(horizonAt(uv,sunHorizon.x),horizonAt(uv,sunHorizon.x+1.),sunHorizon.y);
+    return sunHorizon.w*smoothstep(sunHorizon.z-.035,sunHorizon.z+.060,horizon);
+  }
+`;
 function snowMaterial(uniforms,far) {
   const mat=new THREE.MeshLambertMaterial({color:0xffffff});
-  mat.customProgramCacheKey=()=>far?'distant-snow-v2':'near-snow-v3';
+  mat.customProgramCacheKey=()=>far?'distant-snow-v3':'near-snow-v4';
   mat.onBeforeCompile=s=>{
     Object.assign(s.uniforms,uniforms);
     s.vertexShader='varying vec3 vGround;\n'+s.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvGround=position;');
     s.fragmentShader=`varying vec3 vGround;
       uniform sampler2D trailMask,ortho,crystals,lampMap; uniform float pisteLights; uniform vec4 lowSun; uniform float hasOrtho; uniform vec4 terrainBounds;
-      `+glNoise+(far?'':iceFacets)+s.fragmentShader.replace('#include <color_fragment>',far?`
+      uniform vec3 ridgeAir,hazeAir,horizonAir; uniform vec4 airSun; uniform float aerialStrength;
+      uniform vec3 shadowStarts[${shadowBones.length}]; uniform vec2 shadowEnds[${shadowBones.length}]; uniform vec4 shadowArea;
+      uniform sampler2D solarHorizons; uniform vec4 sunHorizon;
+      `+glNoise+atmosphereGLSL+(far?'':iceFacets+riderShadowGLSL+ridgeShadowGLSL)+s.fragmentShader.replace('#include <color_fragment>',far?`
       vec2 p=vGround.xz;
       float n=noise21(p*.00081)*.56+noise21(p*.0034)*.27+noise21(p*.009)*.17;
       float snow=smoothstep(.21,.80,n+(vGround.y-1800.)*.00082);
       vec3 distant=texture2D(ortho,(p-terrainBounds.xy)/terrainBounds.zw).rgb;
-      vec3 bank=mix(vec3(.13,.17,.19),vec3(.64,.70,.75),snow);
-      diffuseColor.rgb=mix(bank,distant*.84+vec3(.043,.055,.066),hasOrtho*.82);
+      vec3 bank=mix(vec3(.092,.131,.157),vec3(.67,.72,.79),snow);
+      float exposed=1.-smoothstep(.08,.45,dot(distant,vec3(.22,.66,.12)));
+      vec3 photograph=distant*mix(1.02,.72,exposed)+vec3(.019,.030,.041);
+      diffuseColor.rgb=mix(bank,photograph,hasOrtho*.89);
     `:`
       vec2 p=vGround.xz;
       vec2 uv=(p-terrainBounds.xy)/terrainBounds.zw;
@@ -126,7 +175,7 @@ function snowMaterial(uniforms,far) {
       vec3 snowy=mix(vec3(.64,.72,.83),vec3(.86,.90,.93),slow);
       vec3 timber=mix(vec3(.42,.49,.55),vec3(.76,.81,.84),smoothstep(.29,.75,slow));
       vec3 local=mix(timber,snowy,course);
-      vec3 actual=mix(vec3(.095,.13,.15),vec3(.84,.89,.94),smoothstep(.024,.78,luma));
+      vec3 actual=mix(vec3(.053,.088,.117),vec3(.86,.91,.96),smoothstep(.033,.72,luma));
       actual=mix(actual,nativeColor*.92+vec3(.018,.024,.029),.33);
       float distanceBlend=smoothstep(110.,1050.,dist);
       float imageWeight=mix(mix(.22,.87,distanceBlend),mix(.065,.47,distanceBlend),course);
@@ -135,19 +184,22 @@ function snowMaterial(uniforms,far) {
       float winds=noise21(p*.21+vec2(4.3,1.7));
       float phase=across*78.+(winds-.5)*1.25;
       float detail=1.-smoothstep(14.,72.,dist);
-      float teeth=course*detail*(1.-smoothstep(.80,2.85,fwidth(phase)));
+      float grooming=mix(.38,.86,smoothstep(.26,.69,noise21(p*.108+vec2(18.,-7.))));
+      float teeth=course*detail*grooming*(1.-smoothstep(.80,2.85,fwidth(phase)));
       float ridge=sin(phase),flute=cos(phase)*(.85-.23*ridge);
       float trackPhase=across*1.49+slow*.52;
       float seam=smoothstep(.955,.998,cos(trackPhase))*(1.-smoothstep(.07,.62,fwidth(trackPhase)));
       float grain=(noise21(p*7.6)-.5)*(1.-smoothstep(8.,30.,dist));
       vec2 relief=texture2D(crystals,p*.47).rg*2.-1.16;
       vec2 broad=texture2D(crystals,p*.081+vec2(.12,.34)).rg*2.-1.16;
+      float windSculpt=noise21(vec2(.097*p.x+.047*p.y,.32*p.y-.15*p.x))-.5;
       float facets=dot(relief*.64+broad*.36,normalize(lowSun.xz));
       local*=1.+facets*mix(.26,.13,course)*(1.-smoothstep(24.,130.,dist));
       local+=(winds-.5)*vec3(.052,.046,.035)*(1.-smoothstep(14.,110.,dist));
       local+=teeth*(ridge*.039-.016*(1.-ridge))*vec3(1.,.89,.68);
       local-=course*seam*detail*vec3(.037,.030,.019);
       local+=grain*.037;
+      local+=vec3(.083,.100,.126)*windSculpt*mix(1.,.26,course)*(1.-smoothstep(35.,190.,dist));
       vec2 snowSlope=(relief*mix(.58,.35,course)+broad*mix(.50,.28,course))*(1.-smoothstep(28.,105.,dist))
         -crossTrail*(teeth*flute*.24);
       vec2 iceGrid=p*6.4+vec2(7.13,18.2);
@@ -161,6 +213,8 @@ function snowMaterial(uniforms,far) {
       vec3 snowNormal=normalize(slopeNormal+bump-slopeNormal*dot(slopeNormal,bump));
       normal=normalize(mat3(viewMatrix)*snowNormal);
     `).replace('#include <opaque_fragment>',`
+      float silhouette=max(bodyShadow(vGround.xz),ridgeShadow(uv));
+      outgoingLight-=reflectedLight.directDiffuse*silhouette;
       if(lowSun.w>.001&&dist<45.&&icePixel<.81){
         vec3 eye=normalize(cameraPosition-vGround),h=normalize(eye+lowSun.xyz);
         float crystal=iceReflection(iceGrid,icePixel,snowNormal,h);
@@ -168,12 +222,18 @@ function snowMaterial(uniforms,far) {
         // Direct diffuse already contains the directional light's colour, slope
         // incidence and scene shadow, so shaded snow cannot sparkle in sunlight.
         vec3 sunlight=reflectedLight.directDiffuse/max(diffuseColor.rgb,vec3(.15));
-        outgoingLight+=sunlight*(5.2*crystal*lowSun.w*snowCover*(1.-smoothstep(25.,45.,dist)));
+        float sheen=pow(max(0.,dot(snowNormal,h)),19.)*mix(.055,.112,course);
+        float weight=lowSun.w*snowCover*(1.-silhouette)*(1.-smoothstep(25.,45.,dist));
+        outgoingLight+=sunlight*weight*(7.1*crystal+sheen);
       }
       if(pisteLights>.005){
         float pool=texture2D(lampMap,(vGround.xz-terrainBounds.xy)/terrainBounds.zw).r;
         outgoingLight+=diffuseColor.rgb*vec3(.91,.76,.53)*pool*pisteLights*.91;
       }
+      #include <opaque_fragment>
+    `);
+    s.fragmentShader=s.fragmentShader.replace('#include <opaque_fragment>',`
+      outgoingLight=aerialSnow(outgoingLight,vGround,cameraPosition);
       #include <opaque_fragment>
     `);
   };
@@ -211,10 +271,10 @@ export function createSky(scene) {
       }
       void main(){
         vec3 d=normalize(vDir); float h=max(d.y,0.);
-        vec3 sky=mix(horizonColor,zenith,1.-exp(-3.8*h));
+        vec3 sky=mix(horizonColor,zenith,1.-exp(-5.8*h));
         float sunAngle=max(dot(d,sunDir),0.);
         float glint=pow(sunAngle,32.);
-        sky+=sunColor*solar*(.13*pow(sunAngle,7.)+.40*glint+.48*pow(sunAngle,550.)+2.65*smoothstep(.99986,.999965,sunAngle));
+        sky+=sunColor*solar*(.13*pow(sunAngle,7.)+.41*glint+.68*pow(sunAngle,630.)+4.2*smoothstep(.99988,.999972,sunAngle));
         vec2 p=d.xz/max(h+.09,.05)*vec2(1.85,4.25);
         vec2 drift=vec2(phase*(.00095+snow*.0017),phase*.00053);
         vec2 q=p+drift;
@@ -223,6 +283,20 @@ export function createSky(scene) {
         float stratus=smoothstep(.47,.98,snow);
         vec3 ceiling=mix(horizonColor,zenith,smoothstep(-.01,.57,d.y))*(.89+.19*noise21(q*.44));
         sky=mix(sky,ceiling,stratus*.91);
+        if(solar>.025&&h>.002&&stratus<.96){
+          // An oblique sheet of ice clouds, sheared along a fixed wind
+          // direction. Its perspective compresses the bands near the skyline.
+          vec2 upper=d.xz/(h+.065);
+          upper=mat2(.86,-.51,.51,.86)*upper;
+          vec2 wind=upper*vec2(.34,3.9)+drift*.62;
+          float ripples=noise21(wind*.66+vec2(2.,11.));
+          float threads=noise21(wind+vec2(ripples*.55,ripples*.29))*.64
+            +noise21(wind*2.14+vec2(7.,1.))*.25+noise21(wind*4.18)*.11;
+          float coverage=smoothstep(.49,.77,threads)*smoothstep(.026,.126,h);
+          vec3 iceCloud=mix(vec3(.60,.70,.84),cloudColor*.92,threads);
+          iceCloud+=sunColor*glint*.48;
+          sky=mix(sky,iceCloud,coverage*(.58+.20*glint)*(1.-stratus)*solar);
+        }
         float az=atan(d.x,-d.z);
         if(stars>.002 && h>.008){
           vec2 sphere=vec2(az*.15915494+.50,asin(clamp(d.y,-1.,1.))*.3183099+.5);
@@ -306,27 +380,83 @@ function makePisteLighting(scene,data) {
 
 export async function buildSurface(scene,data) {
   const b=data.bounds,fixtures=makePisteLighting(scene,data);
-  const uniforms={lampMap:{value:fixtures.texture},pisteLights:{value:0},crystals:{value:dataTexture(128,128,255)},lowSun:{value:new THREE.Vector4(-.5,.47,-.66,0)},trailMask:{value:prepareTrailMask(data)},terrainBounds:{value:new THREE.Vector4(b.minX,b.minZ,b.maxX-b.minX,b.maxZ-b.minZ)},ortho:{value:dataTexture(160,160,160)},hasOrtho:{value:0}};
+  const uniforms={
+    lampMap:{value:fixtures.texture},pisteLights:{value:0},crystals:{value:dataTexture(128,128,255)},
+    lowSun:{value:new THREE.Vector4(-.5,.47,-.66,0)},trailMask:{value:prepareTrailMask(data)},
+    terrainBounds:{value:new THREE.Vector4(b.minX,b.minZ,b.maxX-b.minX,b.maxZ-b.minZ)},
+    ortho:{value:dataTexture(160,160,160)},hasOrtho:{value:0},
+    ridgeAir:{value:new THREE.Color()},hazeAir:{value:new THREE.Color()},horizonAir:{value:new THREE.Color()},
+    airSun:{value:new THREE.Vector4()},aerialStrength:{value:0},
+    solarHorizons:{value:dataTexture(0,0,0)},sunHorizon:{value:new THREE.Vector4()},
+    shadowStarts:{value:shadowBones.map(()=>new THREE.Vector3())},
+    shadowEnds:{value:shadowBones.map(()=>new THREE.Vector2())},shadowArea:{value:new THREE.Vector4()}
+  };
   addTerrainTiles(scene,data.field,snowMaterial(uniforms,false));
+  let hasSolarHorizons=false;
   await Promise.all([
     loadTexture(asset('art/snow-normal.webp')).then(t=>{t.wrapS=t.wrapT=THREE.RepeatWrapping;uniforms.crystals.value=t;}),
+    loadTexture(asset('geo/solar-horizons.png')).then(t=>{
+      t.generateMipmaps=false;t.minFilter=THREE.LinearFilter;uniforms.solarHorizons.value=t;hasSolarHorizons=true;
+    }).catch(()=>{}),
     loadTexture(asset('geo/winter.jpg'),THREE.SRGBColorSpace).then(t=>{uniforms.ortho.value=t;uniforms.hasOrtho.value=1;}).catch(()=>{}),
-    fetch(asset('geo/horizon.json')).then(r=>r.json()).then(h=>{
+    loadData('horizon').then(h=>{
       const hb=h.bounds;
       const far={...uniforms,terrainBounds:{value:new THREE.Vector4(hb.minX,hb.minZ,hb.maxX-hb.minX,hb.maxZ-hb.minZ)},ortho:{value:dataTexture(140,140,140)},hasOrtho:{value:0}};
       addTerrainTiles(scene,new HeightField(h),snowMaterial(far,true),b);
       return loadTexture(asset('geo/horizon.jpg'),THREE.SRGBColorSpace).then(t=>{far.ortho.value=t;far.hasOrtho.value=1;}).catch(()=>{});
     })
   ]);
-  return {setLight(env){setSnowSun(uniforms.lowSun.value,env);uniforms.pisteLights.value=env.lampAmount||0;fixtures.setLight(env);}};
+  const joints=Array.from({length:11},()=>new THREE.Vector3());
+  const floor=joints.map(()=>new THREE.Vector2());
+  function setRiderShadow(rider){
+    const area=uniforms.shadowArea.value,sun=uniforms.lowSun.value;
+    const strength=sun.w*THREE.MathUtils.smoothstep(sun.y,.095,.22);
+    if(!rider||strength<.015){area.w=0;return;}
+    rider.shadowPose(joints);
+    const root=rider.group.position;
+    const maxTravel=13;
+    let span=0;
+    for(let i=0;i<joints.length;i++){
+      const p=joints[i], above=t=>p.y-t*sun.y-data.height(p.x-t*sun.x,p.z-t*sun.z);
+      let lo=0,hi=0;
+      if(above(0)>.015){
+        hi=.55;
+        while(hi<maxTravel&&above(hi)>0){lo=hi;hi=Math.min(maxTravel,hi*1.63);}
+        for(let n=0;n<5;n++){const mid=(lo+hi)*.5;if(above(mid)>0)lo=mid;else hi=mid;}
+      }
+      const projected=floor[i].set(p.x-hi*sun.x,p.z-hi*sun.z);
+      span=Math.max(span,Math.hypot(projected.x-root.x,projected.y-root.z));
+    }
+    for(let i=0;i<shadowBones.length;i++){
+      const [a,b,width]=shadowBones[i],p=floor[a];
+      uniforms.shadowStarts.value[i].set(p.x,p.y,width*rider.dimensions.scale);
+      uniforms.shadowEnds.value[i].copy(floor[b]);
+    }
+    area.set(root.x,root.z,span+.45,strength*(span>10?.58:.82));
+  }
+  return {setRiderShadow,setLight(env){
+    setSnowSun(uniforms.lowSun.value,env);uniforms.pisteLights.value=env.lampAmount||0;fixtures.setLight(env);
+    const day=1-env.nightAmount,haze=env.snowAmount;
+    uniforms.ridgeAir.value.set(env.fog).multiplyScalar(.70+.10*day);
+    uniforms.hazeAir.value.set(env.fog).lerp(uniforms.ridgeAir.value,.20);
+    uniforms.horizonAir.value.set(env.horizon).multiplyScalar(.88);
+    uniforms.airSun.value.set(...env.sunDir,env.sunAmount);
+    uniforms.aerialStrength.value=(.42+.58*day)*(1-.62*haze);
+    const [x,y,z]=env.sunDir;
+    const directions=[-1.36,-.45,.45,1.36];
+    const angle=clamp(Math.atan2(x,z),directions[0],directions[3]);
+    const index=angle<directions[1]?0:angle<directions[2]?1:2;
+    const amount=(angle-directions[index])/(directions[index+1]-directions[index]);
+    const elevation=y/Math.max(.001,Math.hypot(x,z));
+    uniforms.sunHorizon.value.set(index,amount,elevation,hasSolarHorizons?uniforms.lowSun.value.w*.78:0);
+  }};
 }
 
 async function readForest() {
   try{
-    const response=await fetch(asset('geo/forest.png'));if(!response.ok)return null;
-    const img=await createImageBitmap(await response.blob());
+    const img=await loadForestImage(asset('geo/forest.png'));if(!img)return null;
     const c=document.createElement('canvas');c.width=img.width;c.height=img.height;
-    const ct=c.getContext('2d',{willReadFrequently:true});ct.drawImage(img,0,0);const out=ct.getImageData(0,0,c.width,c.height);img.close();return out;
+    const ct=c.getContext('2d',{willReadFrequently:true});ct.drawImage(img,0,0);const out=ct.getImageData(0,0,c.width,c.height);img.close?.();return out;
   }catch{return null;}
 }
 export async function plantForest(scene,data) {

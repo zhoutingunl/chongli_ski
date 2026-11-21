@@ -177,8 +177,10 @@ function snowTracks(scene,data,uniforms){
         vec3 n=normalize(cross(dFdx(wp),dFdy(wp)));if(n.y<0.)n=-n;
         float sun=clamp(dot(n,keyDir)*.63+.38,0.,1.);
         vec3 compressed=mix(vec3(.105,.18,.275),vec3(.40,.52,.64),.29+grain.x*.29-etch*.24);
-        vec3 shoulder=mix(vec3(.32,.44,.58),vec3(.96,.97,.95),sun*.78+grain.x*.18);
-        vec3 color=mix(compressed,shoulder,ridge);float alpha=(bed*(.51+.13*etch)*v.y+ridge*.72)*outside;
+        vec3 shoulder=mix(vec3(.32,.44,.58),vec3(.92,.94,.94),sun*.73+grain.x*.20);
+        float edgeLip=ridge*max(exp(-abs(u-.16)*19.),exp(-abs(u-.84)*19.));
+        vec3 color=mix(compressed,shoulder,edgeLip);
+        float alpha=(bed*(.32+.13*etch)*v.y+edgeLip*.54)*outside;
         alpha*=.83+.25*grain.x;alpha*=1.-smoothstep(95.,210.,dist);alpha*=exp(-haze*haze*dist*dist);
         gl_FragColor=vec4(color*mix(vec3(1.),vec3(.18,.26,.39),night),alpha);
         #include <tonemapping_fragment>
@@ -197,14 +199,15 @@ function snowTracks(scene,data,uniforms){
       const advance=p.length*(.325-.38*Math.max(0,p.press)+.095*Math.max(0,-p.press))+(lane?-lane*p.edge*p.length*.037:0);
       const x=p.x-fx*advance+sx*contact,z=p.z-fz*advance+sz*contact;
       const load=.57+.39*p.soft+.34*p.load+.22*p.skid;
-      const lip=(.0015+.005*p.soft+outside*p.force*(.024+.090*p.soft))*p.scale+p.sink*.14;
+      const lip=(.0015+.005*p.soft+outside*p.force*(.024+.066*p.soft))*p.scale+p.sink*.13;
       const widths=[-1,1].map(side=>(.010+(.026+.107*p.soft)*p.force*(side===p.side?1:lerp(1,.17,edging))+.012*p.soft)*p.scale);
       const heights=[-1,1].map(side=>lip*(side===p.side?1:lerp(1,.12,edging)));
       const across=[-half-widths[0],-half-widths[0]*.42,-half*.69,half*.69,half+widths[1]*.42,half+widths[1]];
       const levels=[0,heights[0],0,0,heights[1],0],profile=[0,.16,.32,.68,.84,1],vertices=new Float32Array(cols*6);
       for(let j=0;j<cols;j++){
         const tx=x+rx*across[j],tz=z+rz*across[j],h=levels[j],k=j*6;
-        vertices.set([tx,data.height(tx,tz)+.005+h,tz,profile[j],load*outside,Math.min(.92,h/(.010*p.scale))],k);
+        const compacted=load*outside*(merged ? .52 : 1);
+        vertices.set([tx,data.height(tx,tz)+.005+h,tz,profile[j],compacted,Math.min(.92,h/(.010*p.scale))],k);
       }
       row.push(vertices);
     }
@@ -251,7 +254,9 @@ function snowFan(scene,data,uniforms){
       void main(){vec3 grains=texture2D(snowGrain,vec2(v.y*.78,v.x*.98+v.y*.034)).rgb;
         float top=smoothstep(.36,1.,v.x);float pore=.185+.31*top+.41*v.z+top*.16*v.z;
         float mass=smoothstep(pore-.065,pore+.08,grains.r*.63+grains.b*.25+grains.g*.12);
-        float opacity=mass*v.w*(.83-.39*top)*smoothstep(0.,.16,v.x)*(1.-smoothstep(.81,1.,v.x));
+        float ageFade=1.-smoothstep(.17,.69,v.z);
+        float opacity=mass*v.w*(.66-.35*top)*(.27+.73*ageFade)*
+          smoothstep(0.,.14,v.x)*(1.-smoothstep(.70,.98,v.x));
         if(opacity<.025)discard;vec3 n=normalize(cross(dFdx(wp),dFdy(wp)));if(n.y<0.)n=-n;
         float lit=.29+.51*max(0.,dot(n,keyDir))+.18*grains.r;
         vec3 c=mix(vec3(.34,.47,.60),vec3(.98,.97,.92),lit);
@@ -415,11 +420,92 @@ function snowParticles(scene,data,random,uniforms,updateScreen){
   return {update,clear(){previous=null;clods.length=grains.length=0;chunkBank=grainBank=lumps.count=0;lumps.visible=specks.visible=false;geo.setDrawRange(0,0);}};
 }
 
+function powderWake(scene,data,random,uniforms,updateScreen){
+  const capacity=92,live=[];
+  const positions=new Float32Array(capacity*3),shapes=new Float32Array(capacity*4);
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',dynamic(positions,3));
+  geo.setAttribute('puff',dynamic(shapes,4));
+  const mat=new THREE.ShaderMaterial({uniforms,transparent:true,depthWrite:false,
+    vertexShader:`attribute vec4 puff;uniform float screen;uniform vec3 keyDir;varying vec4 shape;varying float lit;
+      void main(){
+        vec4 eye=modelViewMatrix*vec4(position,1.);
+        gl_Position=projectionMatrix*eye;
+        float depth=-eye.z;
+        float pixels=puff.x*screen*.5*projectionMatrix[1][1]/max(.1,depth);
+        gl_PointSize=clamp(pixels,1.,144.);
+        float fade=smoothstep(1.25,2.75,depth)*(1.-smoothstep(132.,202.,pixels));
+        shape=vec4(puff.x,puff.y*fade,puff.z,puff.w);
+        lit=.65+.35*dot(normalize(cameraPosition-position),keyDir);
+      }`,
+    fragmentShader:`uniform sampler2D snowGrain;uniform float night;varying vec4 shape;varying float lit;
+      void main(){
+        vec2 uv=gl_PointCoord-.5;
+        float radial=length(uv*vec2(1.02,1.38)+vec2(0.,.10));
+        vec3 fine=texture2D(snowGrain,uv*.94+vec2(shape.z,shape.z*.643+shape.w*.12)).rgb;
+        float density=(.55*fine.r+.29*fine.g+.16*fine.b);
+        float opacity=(1.-smoothstep(.16,.49,radial+(density-.54)*.22))*shape.y;
+        opacity*=smoothstep(.19,.65,density);
+        if(opacity<.013)discard;
+        float top=clamp((.47-uv.y)*.97+lit*.42+density*.28,0.,1.);
+        vec3 color=mix(vec3(.46,.57,.72),vec3(1.24,1.25,1.20),top);
+        gl_FragColor=vec4(color*mix(vec3(1.),vec3(.22,.32,.49),night),opacity);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`
+  });
+  const cloud=new THREE.Points(geo,mat);
+  cloud.name='Windblown carve wake';cloud.frustumCulled=false;cloud.visible=false;
+  cloud.renderOrder=3;cloud.onBeforeRender=updateScreen;scene.add(cloud);
+  let bank=0,previous=null;
+  function update(c,dt,impact,wind=.18){
+    if(c){
+      const hard=clamp((c.force-(.23-.15*c.soft))*1.3,0,1.10)*smooth(3.8,15,c.speed);
+      bank+=dt*hard*(35+31*c.soft+19*c.skid);
+      const count=Math.floor(bank);bank-=count;
+      const landing=Math.round(impact*(3+4*c.soft));
+      const vx=Math.sin(c.travel),vz=-Math.cos(c.travel);
+      const sideX=Math.cos(c.heading)*c.side,sideZ=Math.sin(c.heading)*c.side;
+      const edge=(c.skis?c.stance*.5:0)+c.waist*.45;
+      for(let i=0;i<count+landing&&live.length<capacity;i++){
+        const power=i<count?hard:Math.min(1,impact);
+        const f=(i+random())/Math.max(1,count+landing),start=previous||c;
+        const across=edge+.06+random()*.23,trail=c.length*(.24+random()*.18);
+        const x=lerp(start.x,c.x,f)-vx*trail+sideX*across,z=lerp(start.z,c.z,f)-vz*trail+sideZ*across;
+        const drift=(.68+random()*1.45+power*1.7)*c.scale;
+        live.push({x,z,y:data.height(x,z)+(.13+.16*random())*c.scale,age:0,
+          vx:sideX*drift+vx*c.speed*.09+wind*.46,vz:sideZ*drift+vz*c.speed*.09+wind*.18,
+          life:.56+.56*random()+.26*c.soft,lift:(.48+power*.96)*c.scale,scale:c.scale,
+          force:power,seed:random()});
+      }
+      previous=c;
+    }else{previous=null;bank=0;}
+    let count=0;
+    for(const puff of live){
+      puff.age+=dt;
+      if(puff.age>=puff.life)continue;
+      const age=puff.age/puff.life,drift=1/(1+dt*1.55);
+      puff.x+=puff.vx*dt;puff.z+=puff.vz*dt;puff.vx*=drift;puff.vz*=drift;
+      puff.y=Math.max(data.height(puff.x,puff.z)+.10,puff.y+dt*puff.lift*(1-1.23*age));
+      const at=count*3,style=count*4;
+      positions[at]=puff.x;positions[at+1]=puff.y;positions[at+2]=puff.z;
+      shapes[style]=puff.scale*(.46+age*(.91+puff.force*.79));
+      shapes[style+1]=puff.force*.79*smooth(0,.10,age)*(1-smooth(.29,1,age));
+      shapes[style+2]=puff.seed;shapes[style+3]=age;
+      live[count++]=puff;
+    }
+    live.length=count;cloud.visible=count>0;geo.setDrawRange(0,count);
+    if(count){geo.attributes.position.needsUpdate=true;geo.attributes.puff.needsUpdate=true;}
+  }
+  return {update,clear(){live.length=0;previous=null;bank=0;cloud.visible=false;geo.setDrawRange(0,0);}};
+}
+
 export function makeSnowFX(scene,data){
   const random=randomGenerator(6127),screen={value:720},night={value:0},viewport=new THREE.Vector2();
   const uniforms={screen,night,haze:{value:0},keyDir:{value:new THREE.Vector3(.36,.75,.55).normalize()},snowGrain:{value:powderGrain()}};
   const updateScreen=renderer=>{screen.value=renderer.getDrawingBufferSize(viewport).y;};
   const tracks=snowTracks(scene,data,uniforms),fan=snowFan(scene,data,uniforms),particles=snowParticles(scene,data,random,uniforms,updateScreen);
+  const wake=powderWake(scene,data,randomGenerator(6419),uniforms,updateScreen);
   const flakeCount=1100,flakes=new Float32Array(flakeCount*3),specks=new Float32Array(flakeCount*3);
   for(let i=0;i<flakeCount;i++){
     flakes[i*3]=(random()-.5)*39;flakes[i*3+1]=random()*24-9;flakes[i*3+2]=(random()-.5)*39;
@@ -460,19 +546,19 @@ export function makeSnowFX(scene,data){
     fg.attributes.position.needsUpdate=true;
   }
   return {
-    reset(){tracks.clear();fan.clear();particles.clear();hadSnow=wasAirborne=movingSnow=false;},
+    reset(){tracks.clear();fan.clear();particles.clear();wake.clear();hadSnow=wasAirborne=movingSnow=false;},
     update(p,dt,weather,view,dimensions){
       night.value=weather?.nightAmount??0;uniforms.haze.value=scene.fog?.density??0;
       if(weather?.dir)uniforms.keyDir.value.fromArray(weather.dir);
       snowfall(dt,weather,view);
       if(p.mode!=='run'){
-        if(movingSnow){tracks.lift();fan.clear();particles.clear();movingSnow=false;}wasAirborne=false;return;
+        if(movingSnow){tracks.lift();fan.clear();particles.clear();wake.clear();movingSnow=false;}wasAirborne=false;return;
       }
       movingSnow=true;
       const inAir=!!p.airborne||(p.airHeight||0)>.04,impact=!inAir&&wasAirborne?(p.impact??p.landing??.45):0;
       const contact=!inAir&&(p.speed>.35||impact>.12)?snowContact(p,dimensions):null;
       if(contact&&p.speed>.35)tracks.draw(contact);else tracks.lift();
-      fan.update(contact,dt);particles.update(contact,dt,impact);wasAirborne=inAir;
+      fan.update(contact,dt);particles.update(contact,dt,impact);wake.update(contact,dt,impact,weather?.wind);wasAirborne=inAir;
     }
   };
 }

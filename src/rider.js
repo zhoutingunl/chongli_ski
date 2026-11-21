@@ -1713,6 +1713,22 @@ export function createRider(options = {}) {
       .applyQuaternion(torso.quaternion).add(torso.position).multiplyScalar(size);
   }
 
+  function shadowPose(out) {
+    rig.updateWorldMatrix(true,false);
+    const transform=rig.matrixWorld;
+    const helmet=out[0].set(0,.165,0).multiply(head.scale).applyQuaternion(head.quaternion).add(head.position);
+    helmet.applyQuaternion(torso.quaternion).add(torso.position).applyMatrix4(transform);
+    out[1].set(0,.32,0).applyQuaternion(torso.quaternion).add(torso.position).applyMatrix4(transform);
+    out[2].copy(pelvis.position).applyMatrix4(transform);
+    for(let i=0;i<limbs.length;i++){
+      const limb=limbs[i],at=3+i*4;
+      out[at].copy(limb.knee).applyMatrix4(transform);
+      out[at+1].copy(limb.ankle).applyMatrix4(transform);
+      out[at+2].copy(limb.elbow).applyMatrix4(transform);
+      out[at+3].copy(limb.wrist).applyMatrix4(transform);
+    }
+  }
+
   function tipPosition(out = v3()) {
     out.set(0, 0, 0);
     for (let i = 0; i < decks.length; i++) {
@@ -1741,5 +1757,5 @@ export function createRider(options = {}) {
 
   if (junior) rig.scale.setScalar(size);
   update();
-  return { group, dimensions, update, setVisibility, eyePosition, tipPosition, dispose };
+  return { group, dimensions, update, setVisibility, eyePosition, tipPosition, shadowPose, dispose };
 }

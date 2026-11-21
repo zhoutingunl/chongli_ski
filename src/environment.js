@@ -24,9 +24,9 @@ const palette = {
   night:    [0x0b142e,0x354667,0x37465f,0xbdd5ff,0x96b0df,0x455573, .54,.98,.00018,.89,.23, 1.0,0.00],
   predawn:  [0x222f50,0x9b849a,0x746f89,0xc2d4ed,0xb1bbd9,0x67667e, .54,1.08,.00016,.93,.27, .63,0.0],
   dawn:     [0x485e87,0xf4cab7,0xbaaab0,0xffc4a2,0xcdcde7,0x8c8190, .80,1.16,.00017,.98,.30, .28,.37],
-  morning:  [0x3e76a8,0xe2e4df,0xc3d1d4,0xffdfb8,0xe0e8f4,0x9b9fa4,1.55,1.43,.00010,1.02,.26, 0,1],
-  day:      [0x498ac1,0xdae7ed,0xc0d2dd,0xfff4e3,0xe4f1ff,0x97a3af,1.65,1.46,.000080,1.03,.27, 0,1],
-  evening:  [0x557cac,0xf2d6b6,0xcebdaf,0xffc389,0xe1d9dd,0x9a8680,1.38,1.23,.00012,1.00,.31, .05,1],
+  morning:  [0x294e82,0xdbe2df,0x9eb5c1,0xffddb3,0xb7cafa,0x60788f,2.60,1.26,.000072,.98,.32, 0,1],
+  day:      [0x2c598c,0xd4e1e7,0x9eb7c5,0xffeee0,0xc4d9fb,0x688198,2.48,1.29,.000064,1.00,.31, 0,1],
+  evening:  [0x416494,0xf2d6b6,0xc2ac9f,0xffc389,0xc5cced,0x817989,2.38,1.14,.000096,1.00,.36, .05,1],
   sunset:   [0x536486,0xf5a780,0xce9e95,0xff9d62,0xd8bfc7,0x907686,1.11,1.12,.00017,1.00,.35, .16,.90],
   twilight: [0x34436b,0xc797a8,0x93879f,0xdcacc1,0xb6b9da,0x74718a, .65,1.10,.00019,.95,.31, .51,.07],
   latenight:[0x080f24,0x2d3d5a,0x314059,0xbcd5ff,0x8eaad7,0x3f506f, .53,.98,.00017,.91,.20, 1.0,0],
@@ -72,7 +72,7 @@ function calculate(timeMode,weatherMode,elapsed) {
   const fog=blendColor(tone(2),snowHorizon,haze*.89);
   const progress=clamp((h-6.42)/(16.98-6.42));
   const sunAz=mix(1.36,-1.37,progress);
-  const sunAlt=h<6.42 ? Math.max(-.6,(h-6.42)*.21) : h>16.98 ? Math.max(-.6,(16.98-h)*.21) : mix(.009,.62,Math.sin(progress*Math.PI));
+  const sunAlt=h<6.42 ? Math.max(-.6,(h-6.42)*.21) : h>16.98 ? Math.max(-.6,(16.98-h)*.21) : mix(.009,.47,Math.sin(progress*Math.PI));
   const sunDir=direction(sunAz,sunAlt), moonDir=direction(2.61,.39);
   const moon=smooth(.32,.87,nightAmount);
   const dx=mix(sunDir[0],moonDir[0],moon), dy=mix(Math.max(.012,sunDir[1]),moonDir[1],moon), dz=mix(sunDir[2],moonDir[2],moon);
@@ -95,8 +95,8 @@ function calculate(timeMode,weatherMode,elapsed) {
 export function createMountainClimate() {
   let prevTime,prevWeather,prevElapsed,result;
   return {sample(timeMode='auto',weatherMode='auto',elapsedSeconds=0) {
-    if(!Object.hasOwn(timeNames,timeMode)) timeMode='auto';
-    if(!Object.hasOwn(weatherNames,weatherMode)) weatherMode='auto';
+    if(!Object.prototype.hasOwnProperty.call(timeNames,timeMode)) timeMode='auto';
+    if(!Object.prototype.hasOwnProperty.call(weatherNames,weatherMode)) weatherMode='auto';
     const t=Number.isFinite(elapsedSeconds)?Math.max(0,elapsedSeconds):0;
     if(t!==prevElapsed || prevTime!==timeMode || prevWeather!==weatherMode) {
       result=calculate(timeMode,weatherMode,t);prevTime=timeMode;prevWeather=weatherMode;prevElapsed=t;
