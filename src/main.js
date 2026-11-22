@@ -2,15 +2,16 @@ import './style.css';
 import {glyph,emblem,viewNames,viewPicture} from './icons.js';
 import {loadMountain,clamp,resortName,formatTime,difficultyName} from './mountain.js';
 import {TrailMap} from './map.js';
+import {createPisteProgress} from './piste-progress.js';
 import {MountainSound} from './sound.js';
 import {MountainMusic,tracks,musicFor} from './music.js';
 import {TiltSteering,isMiniTool,motionSupported,initializePlatform,read,store,fullscreen,shareAvailable,shareRoute,albumAvailable,photoData,saveToAlbum,downloadPhoto} from './platform.js';
-import {timeOptions,weatherOptions} from './environment.js';
+import {createMountainClimate,timeOptions,weatherOptions} from './environment.js';
 import {setLanguage,t,label} from './language.js';
 import {heading,button,choice,seg,row,settingsPanel,environmentPanel,controlsPanel} from './settings.js';
 
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const prefKey='ridgeline.preferences.v1',recordKey='ridgeline.descents.v1';
+const prefKey='ridgeline.preferences.v1',recordKey='ridgeline.descents.v1',pisteKey='ridgeline.pistes.v1';
 const setupOptions={
   resort:[['wanlong','万龙'],['genting','云顶']],
   gear:[['ski','双板','ski'],['board','单板','board']],
@@ -40,9 +41,9 @@ function applySavedPreferences(){
   if(!viewNames[prefs.outsideView]||prefs.outsideView==='first')prefs.outsideView='follow';
   prefs.volume=clamp(Number.isFinite(+prefs.volume)?+prefs.volume:75,0,100);
 }
-const sound=new MountainSound(),music=new MountainMusic(sound);
+const sound=new MountainSound(),music=new MountainMusic(sound),climate=createMountainClimate();
 let mapRegion='';
-let data,world,mini,large,routeId=prefs.resort+'-classic',mapId=routeId,summitChoice='';
+let data,world,mini,large,pisteProgress,routeId=prefs.resort+'-classic',mapId=routeId,summitChoice='';
 let sharedRouteId=new URLSearchParams(location.search).get('run');
 let screen='home',page='',photoOrigin='run',recordTab='times',busy=false,toastTimer,focusBack,restoreRequested=false,recorded=false,tray=false;
 const keys=new Set(),holds=new Set(),touches=new Map(),drivePointers=new Map();
@@ -161,7 +162,10 @@ function setupText(){
 }
 async function ensureData(){
   const loaded=data||await loadMountain();
-  if(!mini){mini=new TrailMap($('#mini-map'),loaded,true);data=loaded;mini.select(selectedRoute());}
+  if(!mini){
+    data=loaded;pisteProgress=createPisteProgress(data,read(pisteKey,[]));
+    mini=new TrailMap($('#mini-map'),data,true,pisteProgress);mini.select(selectedRoute());
+  }
   return data;
 }
 function clearInputs(){
@@ -224,13 +228,13 @@ async function begin(id,flat=false,atHead=false){
         try{
           if(isMiniTool&&typeof WeakRef!=='function')throw new Error('旧版图形内核');
           const {createWorld}=await import('./world.js');
-          world=await createWorld($('#gl'),data,prefs,worldEvent,s=>$('#load-text').textContent=label(s));
+          world=await createWorld($('#gl'),data,prefs,worldEvent,s=>$('#load-text').textContent=label(s),climate);
         }catch(error){if(!isMiniTool)throw error;flat=true;}
       }
       if(isMiniTool&&flat){
         world?.stop();
         const {createFlatWorld}=await import('./xhs/flat-world.js');
-        world=createFlatWorld($('#flat-view'),data,prefs,worldEvent);
+        world=createFlatWorld($('#flat-view'),data,prefs,worldEvent,climate);
         announce(t('已切换到轻量雪道视图','Switched to the lightweight trail view.'));
       }
     }
@@ -269,6 +273,9 @@ function home(){
   homeChoices();hudVisible(false);sound.update(0,0);refreshMusic();
 }
 function worldEvent(type,arg){
+  if((type==='hud'||type==='finish')&&screen==='run'&&pisteProgress.observe(arg.pisteVisits)){
+    store(pisteKey,[...pisteProgress.completed]);mini.draw();
+  }
   if(type==='hud'&&inWorld()&&!page){
     if(screen==='run'&&arg.route?.id!==routeId)routeId=arg.route.id;
     paintHUD();sound.update(screen==='lift'?3:arg.speed,(arg.skid||0)*.65+(arg.brake||0)*.6,document.hidden);refreshMusic();}
@@ -303,7 +310,7 @@ function paintHUD(){
   $('#gradient').textContent=station?(station.summit?t('山顶停留','At the summit'):t('站台停留','At the station')):lift?dir:t('坡度 ','Grade ')+d+'° · '+(uphill?t('上坡 · 按住加速蹬行','Uphill · hold accelerate to push'):d<9?t('缓坡','Gentle'):d<20?t('中坡','Moderate'):t('陡坡','Steep'));
   $('#progress').textContent=station?'':lift?Math.round(lift.progress*100)+'%':resort(r.destination)+t('方向 · ',' · ')+Math.round(100*s.along/r.length)+'% · '+formatTime(s.elapsed);
   if(approach)$('#progress').textContent=t('通往','Towards ')+t(approach.target,approach.targetEn)+' · '+formatTime(s.elapsed);
-  $('#world-clock').textContent=info.clock;$('#weather-name').textContent=label(info.weatherName)+' · '+label(info.timeName);
+  $('#world-clock').textContent=info.clock;$('#weather-name').textContent=$('#weather-compact').textContent=label(info.weatherName)+' · '+label(info.timeName);
   const icon=info.resolvedWeather==='heavy'?'heavy':info.resolvedWeather==='light'?'snow':({day:'sun',evening:'evening',sunset:'dusk',twilight:'twilight',night:'night',aurora:'aurora',dawn:'dawn'}[info.resolvedTime]||'sun');
   if($('#weather-icon').dataset.icon!==icon){$('#weather-icon').innerHTML=glyph(icon);$('#weather-icon').dataset.icon=icon;}
   const flag=screen==='run'?world.nextFlag:null;
@@ -362,9 +369,12 @@ function renderPanel(keep=false){
     const r=panelRoute(),side=mapRegion||r.resort;
     const priority={'wanlong-gold':0,'wanlong-silver':1};
     const routes=data.allRoutes.filter(a=>(a.catalogResort||a.resort)===side).sort((a,b)=>(priority[a.id]??2)-(priority[b.id]??2));
-    p.innerHTML=heading('TRAIL MAP','双雪场',label('雪场地图'))+'<div class="map-regions">'+seg('mapRegion',[['wanlong',resort('wanlong')],['genting',resort('genting')]],side)+'</div><div class="map-layout"><div class="map-stage"><canvas id="large-map" aria-label="'+t('万龙与云顶雪道图，可拖动和缩放','Wanlong and Genting trail map. Drag or zoom.')+'"></canvas><span class="north">N ↑</span><span class="map-legend"><i></i>'+label('初级')+' <i></i>'+label('中级')+' <i></i>'+label('高级')+'</span><div class="map-zoom">'+button('zoom-out',glyph('minus'))+button('recenter',glyph('compass'))+button('zoom-in',glyph('plus'))+'</div></div><div class="route-list">'+routes.map(a=>'<button class="route-choice" data-choice="route" data-value="'+a.id+'" aria-pressed="'+(r.id===a.id&&(screen!=='summit'||!!summitChoice))+'"><b>'+label(a.name)+'</b><span>'+resort(a.resort)+(a.resort!==a.destination?' → '+resort(a.destination):'')+' · '+km(a.pisteDistance||a.length)+'</span></button>').join('')+'</div></div><div class="map-action" id="map-action"></div><div class="map-attribution">'+(isMiniTool?'© OpenStreetMap contributors · ODbL':'<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>')+' · Mapzen / USGS</div>';
+    const {ridden,total}=pisteProgress.totals(side);
+    const visited=t('已滑过','Skied'),progress='<p class="piste-progress">'+visited+' <b>'+ridden+' / '+total+'</b> '+t('条雪道','pistes')+'</p>';
+    const badge='<small class="piste-badge">'+glyph('check',12)+visited+'</small>';
+    p.innerHTML=heading('TRAIL MAP','双雪场',label('雪场地图'))+'<div class="map-regions">'+seg('mapRegion',[['wanlong',resort('wanlong')],['genting',resort('genting')]],side)+progress+'</div><div class="map-layout"><div class="map-stage"><canvas id="large-map" aria-label="'+t('万龙与云顶雪道图，可拖动和缩放','Wanlong and Genting trail map. Drag or zoom.')+'"></canvas><span class="north">N ↑</span><span class="map-legend"><i></i>'+label('初级')+' <i></i>'+label('中级')+' <i></i>'+label('高级')+' <i class="piste-ink"></i>'+visited+'</span><div class="map-zoom">'+button('zoom-out',glyph('minus'))+button('recenter',glyph('compass'))+button('zoom-in',glyph('plus'))+'</div></div><div class="route-list">'+routes.map(a=>'<button class="route-choice" data-choice="route" data-value="'+a.id+'" aria-pressed="'+(r.id===a.id&&(screen!=='summit'||!!summitChoice))+'"><b>'+label(a.name)+(pisteProgress.visited(a)?badge:'')+'</b><span>'+resort(a.resort)+(a.resort!==a.destination?' → '+resort(a.destination):'')+' · '+km(a.pisteDistance||a.length)+'</span></button>').join('')+'</div></div><div class="map-action" id="map-action"></div><div class="map-attribution">'+(isMiniTool?'© OpenStreetMap contributors · ODbL':'<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>')+' · Mapzen / USGS</div>';
     $$('.map-zoom button').forEach((b,i)=>b.setAttribute('aria-label',[t('缩小','Zoom out'),t('复位','Reset map'),t('放大','Zoom in')][i]));
-    large=new TrailMap($('#large-map'),data);large.select(screen==='summit'&&!summitChoice?null:r,inWorld()?world.sim:null);mapAction();
+    large=new TrailMap($('#large-map'),data,false,pisteProgress);large.select(screen==='summit'&&!summitChoice?null:r,inWorld()?world.sim:null);mapAction();
   }else if(page==='records'){
     const r=inWorld()?world.sim.route:selectedRoute();
     let records=read(recordKey,[]).slice().reverse();

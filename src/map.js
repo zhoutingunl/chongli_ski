@@ -29,8 +29,8 @@ function contours(data,box,step=56) {
 }
 
 export class TrailMap {
-  constructor(canvas,data,mini=false) {
-    this.el=canvas; this.ctx=canvas.getContext('2d'); this.data=data; this.mini=mini;
+  constructor(canvas,data,mini=false,progress=null) {
+    this.el=canvas; this.ctx=canvas.getContext('2d'); this.data=data; this.mini=mini;this.progress=progress;
     this.box=pisteBounds(data);
     this.lines=data.contourLines ||= contours(data,this.box);
     this.zoom=1; this.panX=0; this.panZ=0; this.points=new Map();
@@ -83,6 +83,15 @@ export class TrailMap {
       c.globalAlpha=mini?.38:.52;c.strokeStyle=mini?'#d5e1e3':(difficultyColor[t.difficulty]||'#b8caca');c.lineWidth=mini?.83:1.55;c.beginPath();line(t.points);c.stroke();
     }
     c.globalAlpha=1;
+    if(this.progress){
+      c.strokeStyle='#85e2cf';c.lineWidth=mini?1.6:2.35;c.beginPath();
+      for(const trail of this.data.trails){
+        for(const section of this.progress.sections.get(trail.id)||[]){
+          if(this.progress.completed.has(section.key))line(trail.points.slice(section.start,section.end+1));
+        }
+      }
+      c.stroke();
+    }
     if(this.route){
       c.strokeStyle='#f3ce8a';c.lineWidth=mini?1.75:3;
       const {points,primaryStartIndex,primaryEndIndex}=this.route;

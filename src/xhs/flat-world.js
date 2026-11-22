@@ -44,16 +44,16 @@ function drawRiderMarker(ctx,opts,sim,x,y,heading) {
   ctx.restore();
 }
 
-export function createFlatWorld(canvas,data,opts,onEvent) {
+export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainClimate()) {
   const ctx=canvas.getContext('2d');
   if(!ctx)throw new Error('Canvas 2D is unavailable');
   canvas.hidden=false;
-  const sim=new Descent(data,opts), navigation=createSkiNavigation(data), climate=createMountainClimate();
+  const sim=new Descent(data,opts), navigation=createSkiNavigation(data);
   const input={steer:0,trim:0,brake:false,boost:false,lookX:0,lookY:0};
   let station=null,ride=null,paused=false,active=false,photo=false,photoKind='rider';
-  let yaw=0,zoom=1,panX=0,panY=0,frame=0,last=0,clock=0,hudAge=0,snowMarks=[];
-  let conditions=climate.sample(opts.time,opts.weather,0);
-  const refreshClimate=()=>{conditions=climate.sample(opts.time,opts.weather,clock);};
+  let yaw=0,zoom=1,panX=0,panY=0,frame=0,last=0,hudAge=0,snowMarks=[];
+  let conditions=climate.sample(opts.time,opts.weather);
+  const refreshClimate=()=>{conditions=climate.sample(opts.time,opts.weather);};
   function gates(route,at,side,lift,end='top',summit=false){
     sim.start(route);Object.assign(sim,{mode:summit?'summit':'station',x:at.position[0],z:at.position[1],heading:at.heading,travelHeading:at.heading,trail:null});
     sim.y=sim.ground=sim.startY=data.height(sim.x,sim.z);
@@ -68,7 +68,7 @@ export function createFlatWorld(canvas,data,opts,onEvent) {
     canvas.hidden=false;active=true;paused=photo=false;last=0;yaw=0;zoom=1;panX=panY=0;snowMarks=[];
   }
   function start(route){
-    sim.start(navigation.safeRun(route));station=ride=null;resetView();draw();kick();
+    sim.start(navigation.safeRun(route));climate.startRun(opts.time);refreshClimate();station=ride=null;resetView();draw();kick();
   }
   function trailhead(route){
     const point=route.frame(0);
@@ -217,7 +217,7 @@ export function createFlatWorld(canvas,data,opts,onEvent) {
     if(last&&!paused&&!photo&&now-last<31){kick();return;}
     last=now;
     if(!paused&&!photo){
-      clock+=dt;yaw+=input.lookX*dt*1.75;
+      climate.advance(dt,opts.time,opts.weather,sim.mode==='run');yaw+=input.lookX*dt*1.75;
       if(ride)moveLift(dt);
       else if(sim.mode==='run'){
         sim.tick(dt,input);

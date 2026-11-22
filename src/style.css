@@ -178,3 +178,12 @@ html[lang=en] .start-content h1{font-family:var(--latin);font-size:clamp(42px,6.
 .map-regions{margin:0 0 .55rem}.map-regions .segments{display:inline-flex}
 
 @media (orientation:landscape) and (max-width:760px) and (max-height:460px){#station-card.turned .station-place,#station-card.turned #station-note{display:none}}
+
+.map-regions{display:flex;align-items:center;flex-wrap:wrap;gap:7px}
+.piste-progress{margin-left:auto;color:#d2e2df;font:13px var(--sans);align-self:center}
+.piste-progress b,.piste-badge{color:#a6f0de}
+.piste-badge{display:inline-flex;align-items:center;gap:3px;white-space:nowrap;margin-inline-start:.42em;font:11px var(--sans)}
+.map-legend i.piste-ink{background:#85e2cf}
+
+.weather-compact{display:none}
+@media(orientation:portrait){.weather-compact{display:block;margin-top:.25em;color:#fff0ca;font:12px var(--sans)}}

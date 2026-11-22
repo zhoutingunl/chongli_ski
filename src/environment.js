@@ -1,12 +1,11 @@
-// One clock drives weather, moving clouds, moonlight and the northern lights. Sampling a
-// fixed elapsed time is intentionally independent of the wall clock and of call order.
 export const timeOptions = [
   ['auto','自动'],['day','白天'],['evening','傍晚'],['sunset','日落'],
-  ['twilight','黄昏'],['night','夜晚'],['aurora','极光之夜'],['dawn','黎明']
+  ['twilight','黄昏'],['night','夜晚'],['aurora','极夜之光'],['dawn','黎明']
 ].map(([id,label])=>({id,label}));
 export const weatherOptions = [['auto','自动'],['clear','晴'],['light','小雪'],['heavy','大雪']].map(([id,label])=>({id,label}));
-export const DAY_CYCLE_SECONDS = 720;
-export const WEATHER_CYCLE_SECONDS = 384;
+export const AUTO_STAGE_SECONDS = 120;
+const stageFade = 7;
+const snowByWeather={clear:0,light:.38,heavy:1};
 const hourAt = {day:11.35, evening:15.95, sunset:16.87, twilight:17.64, night:21.6, aurora:23.4, dawn:6.43};
 const timeNames = Object.fromEntries(timeOptions.map(o=>[o.id,o.label]));
 const weatherNames = Object.fromEntries(weatherOptions.map(o=>[o.id,o.label]));
@@ -32,39 +31,21 @@ const palette = {
   latenight:[0x080f24,0x2d3d5a,0x314059,0xbcd5ff,0x8eaad7,0x3f506f, .53,.98,.00017,.91,.20, 1.0,0],
 };
 const keys = [[0,'latenight'],[3.9,'latenight'],[5.40,'predawn'],[6.43,'dawn'],[7.86,'morning'],[10.2,'day'],[13.3,'day'],[15.95,'evening'],[16.87,'sunset'],[17.64,'twilight'],[19.3,'night'],[22.4,'latenight'],[24,'latenight']];
-const weatherCurve = [[0,0],[63,0],[105,.38],[153,.38],[194,1],[233,1],[277,.38],[313,.38],[355,0],[384,0]];
 function sampleCurve(keys,point) {
   let i=1;
   while(i<keys.length-1 && keys[i][0]<point) i++;
   const a=keys[i-1],b=keys[i];
   return [a[1],b[1],smooth(a[0],b[0],point)];
 }
-function describeHour(h) {
-  if(h<5.25 || h>=19) return 'night';
-  if(h<7.35) return 'dawn';
-  if(h<15) return 'day';
-  if(h<16.56) return 'evening';
-  if(h<17.22) return 'sunset';
-  return 'twilight';
-}
 function direction(azimuth,altitude) {
   const horizontal=Math.cos(altitude);
   return [Math.sin(azimuth)*horizontal,Math.sin(altitude),Math.cos(azimuth)*horizontal];
 }
-function calculate(timeMode,weatherMode,elapsed) {
-  const total=9.3+elapsed*24/DAY_CYCLE_SECONDS;
-  const h=timeMode==='auto'?cycle(total,24):hourAt[timeMode];
+function calculate(h,resolvedTime,aurora,resolvedWeather,snowAmount,elapsed) {
   const [a,b,f]=sampleCurve(keys,h),p=palette[a],q=palette[b];
   const tone=i=>blendColor(p[i],q[i],f), value=i=>mix(p[i],q[i],f);
-  const [s0,s1,sf]=sampleCurve(weatherCurve,cycle(elapsed,WEATHER_CYCLE_SECONDS));
-  const snowAmount=weatherMode==='auto'?mix(s0,s1,sf):{clear:0,light:.38,heavy:1}[weatherMode];
-  const resolvedWeather=weatherMode==='auto'?(snowAmount<.13?'clear':snowAmount<.70?'light':'heavy'):weatherMode;
-  const nightAmount=value(11), solar=value(12);
-  // Aurora is a selectable alpine fantasy; a weaker display can also appear on some clear simulated nights.
-  const rareNight=timeMode==='auto' && cycle(Math.floor((total+3.0)/24),3)===2;
-  const autoAurora=rareNight ? smooth(0,.8,Math.max(0,(Math.cos((h-23.6)*Math.PI/6)-.26)))*.67 : 0;
-  const auroraAmount=(timeMode==='aurora'?1:autoAurora)*(1-.69*snowAmount);
-  const resolvedTime=timeMode==='auto'?(auroraAmount>.31?'aurora':describeHour(h)):timeMode;
+  const nightAmount=value(11),solar=value(12);
+  const auroraAmount=aurora*(1-.69*snowAmount);
   const overcast=smooth(0,1,snowAmount), haze=Math.pow(snowAmount,.78);
   const cloudBase=blendColor(0xa6b5bf,0x41516d,nightAmount);
   const snowHorizon=blendColor(0xe0e6e7,0x52637f,nightAmount);
@@ -92,15 +73,61 @@ function calculate(timeMode,weatherMode,elapsed) {
     lampAmount:smooth(.11,.72,nightAmount),cloudColor
   };
 }
-export function createMountainClimate() {
-  let prevTime,prevWeather,prevElapsed,result;
-  return {sample(timeMode='auto',weatherMode='auto',elapsedSeconds=0) {
-    if(!Object.prototype.hasOwnProperty.call(timeNames,timeMode)) timeMode='auto';
-    if(!Object.prototype.hasOwnProperty.call(weatherNames,weatherMode)) weatherMode='auto';
-    const t=Number.isFinite(elapsedSeconds)?Math.max(0,elapsedSeconds):0;
-    if(t!==prevElapsed || prevTime!==timeMode || prevWeather!==weatherMode) {
-      result=calculate(timeMode,weatherMode,t);prevTime=timeMode;prevWeather=weatherMode;prevElapsed=t;
+export function createMountainClimate(random=Math.random) {
+  const stages=Object.keys(hourAt), weather=Object.keys(snowByWeather);
+  let bag=[], elapsed=0, weatherAge=0, stageAge=0, startStage=0, started=false;
+  let previousTime,previousWeather,result;
+  function nextWeather(previous) {
+    if(!bag.length){
+      bag=weather.slice();
+      for(let i=bag.length-1;i>0;i--){
+        const j=Math.floor(random()*(i+1));
+        [bag[i],bag[j]]=[bag[j],bag[i]];
+      }
+      if(bag.at(-1)===previous)[bag[0],bag[bag.length-1]]=[bag[bag.length-1],bag[0]];
     }
-    return result;
-  }};
+    return bag.pop();
+  }
+  let from=nextWeather(),to=nextWeather(from),hold=18+random()*14,change=8+random()*6;
+  const stageIndex=()=>startStage+Math.floor(stageAge/AUTO_STAGE_SECONDS);
+  return {
+    startRun(timeMode){
+      if(timeMode!=='auto')return;
+      startStage=cycle(stageIndex()+Number(started),stages.length);
+      stageAge=0;started=true;result=null;
+    },
+    advance(dt,timeMode,weatherMode,riding){
+      if(!Number.isFinite(dt)||dt<=0)return;
+      elapsed+=dt;result=null;
+      if(riding&&timeMode==='auto'){
+        started=true;
+        stageAge+=dt;
+      }
+      if(weatherMode!=='auto')return;
+      weatherAge+=dt;
+      while(weatherAge>=hold+change){
+        weatherAge-=hold+change;
+        from=to;to=nextWeather(from);hold=18+random()*14;change=8+random()*6;
+      }
+    },
+    sample(timeMode='auto',weatherMode='auto'){
+      if(!Object.prototype.hasOwnProperty.call(hourAt,timeMode))timeMode='auto';
+      if(!Object.prototype.hasOwnProperty.call(snowByWeather,weatherMode))weatherMode='auto';
+      if(result&&timeMode===previousTime&&weatherMode===previousWeather)return result;
+      const index=stageIndex(), phase=stageAge%AUTO_STAGE_SECONDS;
+      // Blend on both sides of the boundary while the clock passes through midnight.
+      const earlier=phase<stageFade&&stageAge>=AUTO_STAGE_SECONDS;
+      const before=stages[cycle(index-Number(earlier),stages.length)];
+      const after=stages[cycle(index+1-Number(earlier),stages.length)];
+      const progress=earlier?smooth(-stageFade,stageFade,phase):smooth(AUTO_STAGE_SECONDS-stageFade,AUTO_STAGE_SECONDS+stageFade,phase);
+      const automatic=timeMode==='auto';
+      const h=automatic?cycle(hourAt[before]+cycle(hourAt[after]-hourAt[before],24)*progress,24):hourAt[timeMode];
+      const stage=automatic?stages[cycle(index,stages.length)]:timeMode;
+      const aurora=automatic?mix(Number(before==='aurora'),Number(after==='aurora'),progress):Number(stage==='aurora');
+      const snow=weatherMode==='auto'?mix(snowByWeather[from],snowByWeather[to],smooth(hold,hold+change,weatherAge)):snowByWeather[weatherMode];
+      const resolvedWeather=snow<.13?'clear':snow<.70?'light':'heavy';
+      previousTime=timeMode;previousWeather=weatherMode;
+      return result=calculate(h,stage,aurora,resolvedWeather,snow,elapsed);
+    }
+  };
 }

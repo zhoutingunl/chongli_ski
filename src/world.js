@@ -11,7 +11,7 @@ import {clamp,mixAngle} from './mountain.js';
 import {isMiniTool} from './platform.js';
 
 const up=new THREE.Vector3(0,1,0);
-export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
+export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate=createMountainClimate()) {
   const renderer=new THREE.WebGLRenderer({canvas:el,antialias:!isMiniTool,alpha:false,powerPreference:isMiniTool?'default':'high-performance',stencil:false});
   renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.02;
   renderer.shadowMap.enabled=!isMiniTool;renderer.shadowMap.type=THREE.PCFShadowMap;
@@ -58,7 +58,6 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
   let active=false,paused=false,photo=false,orbitYaw=0,orbitPitch=.10,orbitZoom=5.9,ride=null,clock=0,prev=0,lastUI=0,simLag=0,treesLag=1,camHeading=0,snap=true,frame=0,graphicsScale=1;
   let photoSite=null,station=null,baseTurn=null;
   const photoPan=new THREE.Vector3(),right=new THREE.Vector3(),forward=new THREE.Vector3();
-  const climate=createMountainClimate();
   let conditions,climateAge=1;
   const bodyOrigin=new THREE.Vector3(),lastOrigin=new THREE.Vector3(),bodyStep=new THREE.Vector3();
   const eyeOffset=new THREE.Vector3(),tipWorld=new THREE.Vector3(),sight=new THREE.Vector3(),orbitPivot=new THREE.Vector3();
@@ -107,7 +106,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
   }
   const observer=new ResizeObserver(resize);observer.observe(host);resize();
   function environment(){
-    conditions=climate.sample(opts.time,opts.weather,clock);
+    conditions=climate.sample(opts.time,opts.weather);
     const e=conditions;
     sky.apply(e);forest.setLight(e);surface.setLight(e);setResortNight(e.lampAmount);
     scene.fog.color.set(e.fog);scene.fog.density=e.density*(.69+.31*e.snowAmount);sun.color.set(e.sun);sun.intensity=e.light;
@@ -275,7 +274,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
     input.trim=input.steer=0;input.boost=input.brake=false;fx.reset();
   }
   function showScene(){updateAvatar(0);moveCamera(0);refreshLOD();kick();}
-  function start(route){route=navigation.safeRun(route);resetScene(route);details.setRoute(route);showScene();}
+  function start(route){route=navigation.safeRun(route);resetScene(route);climate.startRun(opts.time);environment();details.setRoute(route);showScene();}
   function point(xz,height){return new THREE.Vector3(xz[0],data.height(...xz)+height,xz[1]);}
   function stationPortrait(lift,end){
     const at=end==='top'?lift.meta.points.at(-1):lift.meta.points[0];
@@ -321,7 +320,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
     const route=station.trailhead&&!turn&&!facingFork?sim.route:navigation.departure(station.side,sim.x,sim.z,requested,preferred);
     if(!route)return null;
     const wasHead=opts.view==='first',oldPitch=headPitch,oldLookPitch=lookPitch;
-    resetScene(route);
+    resetScene(route);climate.startRun(opts.time);environment();
     if(!Number.isFinite(routeHeading))sim.freeHeading(requested);
     sim.speed=sim.maxSpeed=2.15;sim.push=.75;
     details.setRoute(route);camHeading=poseHeading;headPitch=oldPitch;
@@ -388,11 +387,11 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
   let adaptiveTime=0,adaptiveFrames=0;
   function loop(now){
     frame=0;if(!active)return;
-    if(isMiniTool&&document.hidden){prev=0;return;}
+    if(document.hidden){prev=0;return;}
     if(isMiniTool&&prev&&!paused&&!photo&&now-prev<31){kick();return;}
     const raw=prev?(now-prev)/1000:1/60;const dt=Math.min(Math.max(raw,0),.085);prev=now;
     if(!paused&&!photo){
-      clock+=dt;climateAge+=dt;
+      clock+=dt;climateAge+=dt;climate.advance(dt,opts.time,opts.weather,sim.mode==='run');
       if(climateAge>.15){environment();climateAge=0;}
       if(ride){
         ride.t=clamp(ride.t+dt*ride.dir*ride.lift.speed/ride.lift.length,.003,.997);

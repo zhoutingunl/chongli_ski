@@ -1,3 +1,4 @@
+import {placePisteLights} from './piste-lighting.js';
 import * as THREE from 'three';
 import {HeightField,clamp,randomGenerator} from './mountain.js';
 import {loadData,loadForestImage} from './platform.js';
@@ -341,14 +342,10 @@ function makePisteLighting(scene,data) {
   const b=data.bounds,size=1024,map=document.createElement('canvas');map.width=map.height=size;
   const c=map.getContext('2d'); c.fillStyle='#000';c.fillRect(0,0,size,size);c.globalCompositeOperation='lighter';
   const sx=size/(b.maxX-b.minX),sz=size/(b.maxZ-b.minZ);
-  const lights=[];
-  for(const route of data.routes) for(let s=45;s<route.length-15;s+=78) {
-    const p=route.frame(s),near=data.index.near(p.x,p.z),shoulder=clamp((near.trail?.width||35)*.53,13,31);
-    const side=route.resort==='genting'?-1:1,rx=-p.dz*side,rz=p.dx*side;
-    const x=p.x+rx*(shoulder+1.1),z=p.z+rz*(shoulder+1.1);
-    if(lights.some(o=>Math.abs(x-o.x)<48 && Math.abs(z-o.z)<48 && (x-o.x)**2+(z-o.z)**2<46*46)) continue;
-    const y=data.height(x,z),mast=8.1;
-    lights.push({x,y,z,rx,rz,mast});
+  const lights=placePisteLights(data);
+  for(const light of lights){
+    const {x,z,rx,rz,p,shoulder}=light;
+    light.y=data.height(x,z);light.mast=8.1;
     const cx=p.x+rx*(shoulder*.27)+p.dx*7,cz=p.z+rz*(shoulder*.27)+p.dz*7;
     c.save();c.translate((cx-b.minX)*sx,(cz-b.minZ)*sz);c.rotate(Math.atan2(p.dz*sz,p.dx*sx));c.scale((31+shoulder*.15)*sx,(20+shoulder*.18)*sz);
     const pool=c.createRadialGradient(0,0,0,0,0,1);pool.addColorStop(0,'#e8e8e8');pool.addColorStop(.22,'#cecece');pool.addColorStop(.57,'#737373');pool.addColorStop(.83,'#262626');pool.addColorStop(1,'#000');c.fillStyle=pool;c.fillRect(-1,-1,2,2);c.restore();

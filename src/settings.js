@@ -18,7 +18,7 @@ function optionTiles(kind,list,value){
   return '<div class="climate-grid">'+list.map(o=>'<button class="climate-tile" data-choice="'+kind+'" data-value="'+o.id+'" aria-pressed="'+(value===o.id)+'">'+glyph(icons[o.id],27)+'<span>'+label(o.label)+'</span></button>').join('')+'</div>';
 }
 export function environmentPanel(prefs){
-  return heading('TIME','时段')+optionTiles('time',timeOptions,prefs.time)+'<h3 class="panel-kicker weather-title">'+t('WEATHER · 天气','WEATHER')+'</h3>'+optionTiles('weather',weatherOptions,prefs.weather)+'<p class="panel-foot">'+t('自动时段随雪场时钟昼夜交替，自动天气随游戏时间变化。','Auto time follows the mountain clock. Auto weather changes as you explore.')+'</p>';
+  return heading('TIME','时段')+optionTiles('time',timeOptions,prefs.time)+'<h3 class="panel-kicker weather-title">'+t('WEATHER · 天气','WEATHER')+'</h3>'+optionTiles('weather',weatherOptions,prefs.weather)+'<p class="panel-foot">'+t('自动时段每次起滑进入下一时段，单趟每滑满两分钟也会顺序切换。自动天气会在晴、小雪和大雪之间随机过渡。','Auto time advances on each new run and after every two minutes of skiing. Auto weather shifts between clear skies, light snow and heavy snow.')+'</p>';
 }
 function pill(action,txt,active=false){
   return '<button class="setting-pill" data-act="'+action+'" aria-pressed="'+active+'">'+txt+'</button>';

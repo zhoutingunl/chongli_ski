@@ -1,3 +1,4 @@
+import {pisteVisitKey} from './piste-progress.js';
 import {clamp, mixAngle} from './mountain.js';
 import {createSkiNavigation} from './navigation.js';
 
@@ -39,6 +40,7 @@ export class Descent {
   start(route) {
     this.route = route; this.mode = 'run'; this.gear = this.opts.gear;
     this.junctions=this.navigation?.stationsOn(route)||[];
+    this.pisteVisits=new Map();
     this.passedJunctions=new Set();this.requestedTurn=null;
     this.handSteering=false;this.neutralTime=0;this.courseCheck=0;
     if(route.departedJunction)this.passedJunctions.add(route.departedJunction);
@@ -62,7 +64,7 @@ export class Descent {
   }
 
   surface() {
-    const near = this.data.index.near(this.x, this.z);
+    const near = this.pisteContact = this.data.index.near(this.x, this.z);
     const halfWidth = (near.trail?.width || 36) * .5;
     this.snowSoftness = near.trail ? .14 + .78 * smooth(near.distance / halfWidth, .63, 1.32) : .92;
     this.onTrail = !!near.trail && near.distance < halfWidth * 1.16;
@@ -404,6 +406,21 @@ export class Descent {
     this.maxSpeed = Math.max(this.maxSpeed,this.speed);
     this.travel += Math.hypot(this.x-oldX,this.z-oldZ,this.ground-oldGround);
     this.surface();
+    const contact=this.pisteContact, rawTrail=contact.trail;
+    if(rawTrail&&!this.airborne&&this.speed>1.2&&contact.distance<(rawTrail.width||36)*.48){
+      const a=rawTrail.points[contact.index],b=rawTrail.points[contact.index+1];
+      const dx=this.x-oldX,dz=this.z-oldZ,metres=Math.hypot(dx,dz);
+      const segmentLength=Math.hypot(b[0]-a[0],b[1]-a[1]);
+      const alignment=Math.abs(dx*(b[0]-a[0])+dz*(b[1]-a[1]));
+      if(metres>0&&alignment>.68*metres*segmentLength){
+        const trail=this.data.snowSection?.(rawTrail,contact.index)||rawTrail;
+        const key=pisteVisitKey(trail),visitId=rawTrail.id+'/'+key;
+        if(key){
+          const visit=this.pisteVisits.get(visitId)||{key,id:rawTrail.id,metres:0};
+          visit.metres+=metres;this.pisteVisits.set(visitId,visit);
+        }
+      }
+    }
     // Depth is measured vertically below the local snow surface. Leave rockered
     // tips exposed on the groomer and let a loaded edge cut into the softer verge.
     const softness = smooth(this.snowSoftness, .14, .92);
