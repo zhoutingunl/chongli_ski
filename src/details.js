@@ -261,7 +261,7 @@ function snowFan(scene,data,uniforms){
         float lit=.29+.51*max(0.,dot(n,keyDir))+.18*grains.r;
         vec3 c=mix(vec3(.34,.47,.60),vec3(.89,.94,.97),lit);
         float scatter=pow(max(0.,dot(normalize(wp-cameraPosition),keyDir)),4.);
-        c+=sunColor*solar*(.13+.50*scatter)*lit;
+        c+=sunColor*solar*(.17+1.49*scatter)*lit;
         gl_FragColor=vec4(c*mix(vec3(1.),vec3(.20,.29,.46),night),opacity);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -351,11 +351,16 @@ function snowParticles(scene,data,random,uniforms,updateScreen){
   const pos=new Float32Array(maxGrains*3),style=new Float32Array(maxGrains*4),geo=new THREE.BufferGeometry();
   geo.setAttribute('position',dynamic(pos,3));geo.setAttribute('grain',dynamic(style,4));geo.setDrawRange(0,0);
   const grainMat=new THREE.ShaderMaterial({uniforms,transparent:true,depthWrite:false,
-    vertexShader:`attribute vec4 grain;uniform float screen;varying vec4 v;void main(){vec4 eye=modelViewMatrix*vec4(position,1.);gl_Position=projectionMatrix*eye;
+    vertexShader:`attribute vec4 grain;uniform float screen;uniform vec3 keyDir;varying vec4 v;varying float scatter;
+      void main(){vec4 eye=modelViewMatrix*vec4(position,1.);gl_Position=projectionMatrix*eye;
+      scatter=pow(max(0.,dot(normalize(position-cameraPosition),keyDir)),5.);
       float px=grain.x*screen*.5*projectionMatrix[1][1]/max(.12,-eye.z);gl_PointSize=clamp(px,.65,15.);v=grain;v.y*=smoothstep(.15,1.05,px)*smoothstep(.24,.67,-eye.z);}`,
-    fragmentShader:`uniform float night;varying vec4 v;void main(){vec2 q=gl_PointCoord-.5;float s=sin(v.z),c=cos(v.z);q=mat2(c,-s,s,c)*q;
+    fragmentShader:`uniform float night,solar;uniform vec3 sunColor;varying vec4 v;varying float scatter;
+      void main(){vec2 q=gl_PointCoord-.5;float s=sin(v.z),c=cos(v.z);q=mat2(c,-s,s,c)*q;
       float d=max(abs(q.x*.86+q.y*.24),abs(q.y)*1.58+.40*abs(q.x));float a=(1.-smoothstep(.30,.47,d))*v.y;
-      if(a<.024)discard;gl_FragColor=vec4(mix(vec3(.88,.93,.96),vec3(.34,.45,.60),night)*(.82+.18*v.w),a);
+      if(a<.024)discard;
+      vec3 ice=mix(vec3(.61,.72,.87),vec3(.28,.38,.55),night)*(.71+.29*v.w);
+      gl_FragColor=vec4(ice+sunColor*solar*(.37+2.2*scatter)*(.55+.45*v.w),a);
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
     }`});
@@ -440,7 +445,7 @@ function powderWake(scene,data,random,uniforms,updateScreen){
         shape=vec4(puff.x,puff.y*fade,puff.z,puff.w);
         lit=.54+.46*pow(max(0.,dot(normalize(position-cameraPosition),keyDir)),3.);
       }`,
-    fragmentShader:`uniform sampler2D snowGrain;uniform float night;varying vec4 shape;varying float lit;
+    fragmentShader:`uniform sampler2D snowGrain;uniform float night,solar;uniform vec3 sunColor;varying vec4 shape;varying float lit;
       void main(){
         vec2 uv=gl_PointCoord-.5;
         float radial=length(uv*vec2(1.02,1.38)+vec2(0.,.10));
@@ -450,7 +455,7 @@ function powderWake(scene,data,random,uniforms,updateScreen){
         opacity*=smoothstep(.19,.65,density);
         if(opacity<.013)discard;
         float top=clamp((.47-uv.y)*.97+lit*.42+density*.28,0.,1.);
-        vec3 color=mix(vec3(.46,.57,.72),vec3(1.24,1.25,1.20),top);
+        vec3 color=mix(vec3(.33,.44,.65),vec3(.85,.90,1.03),top)+sunColor*solar*(.15+1.48*pow(lit,2.8))*top;
         gl_FragColor=vec4(color*mix(vec3(1.),vec3(.22,.32,.49),night),opacity);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>

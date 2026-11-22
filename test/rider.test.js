@@ -23,11 +23,11 @@ const snow = {height: (x, z) => Math.tan(radians) * z};
 
 // Let the chase-camera model settle on a 12° piste. Measure its visible
 // clothing in piste coordinates, and pole tips against the snow below them.
-function samplePose(rider, speed, edge, startTime) {
+function samplePose(rider, speed, edge, startTime, overrides={}) {
   rider.group.position.set(0, 0.004, 0);
   rider.group.rotation.x = -radians;
   const state = {mode: 'run', data: snow, x: 0, z: 0, slope, heading: 0, travelHeading: 0,
-    speed, edge, steer: edge, curve: edge * 0.68, pressure: Math.abs(edge)};
+    speed, edge, steer: edge, curve: edge * 0.68, pressure: Math.abs(edge), ...overrides};
   for (let frame = 1; frame <= 90; frame++) {
     state.elapsed = startTime + frame / 90;
     rider.update(state, 1 / 90, state.elapsed);
@@ -56,9 +56,8 @@ for (const [gender, label] of [['boy', '男孩'], ['girl', '女孩']]) {
     t.after(() => rider.dispose());
     const slow = samplePose(rider, 3, 0, 0);
     const fast = samplePose(rider, 24, 0, 1);
-    for (const pose of [slow, fast]) {
-      assert.ok(pose.hands.every(hand => Math.abs(hand.y - pose.hip.y) < 0.06));
-    }
+    assert.ok(slow.hands.every(hand => Math.abs(hand.y - slow.hip.y) < .06));
+    assert.ok(fast.hands.every(hand => hand.z < fast.hip.z - .12));
     assert.ok(fast.hip.y < slow.hip.y - 0.07);
     const lean = pose => Math.atan2(pose.hip.z - pose.head.z, pose.head.y - pose.hip.y);
     assert.ok(lean(fast) > lean(slow) + 15 * Math.PI / 180);
@@ -93,5 +92,19 @@ test('成人和儿童在不对称雪面上分别调整两块雪板和膝盖', t 
     assert.ok(Math.abs(left.rotation.x-right.rotation.x)>.005);
     const joints=['Left trouser leg lower joint','Right trouser leg lower joint'].map(name=>rider.group.getObjectByName(name).getWorldPosition(new Vector3()));
     assert.ok(Math.abs(joints[0].y-joints[1].y)>.004);
+  }
+});
+
+test('成人和儿童双板极速滑行时降低重心、收杖，刹车时回升并把一侧杖尖降到雪边', t => {
+  for(const gender of ['male','girl']){
+    const rider=createRider({gender,gear:'ski'});
+    t.after(()=>rider.dispose());
+    const fast=samplePose(rider,30,0,0), brake=samplePose(rider,30,0,1,{brake:1,skid:.25});
+    const lean=pose=>Math.atan2(pose.hip.z-pose.head.z,pose.head.y-pose.hip.y);
+    assert.ok(lean(fast)>lean(brake)+14*Math.PI/180);
+    assert.ok(fast.hip.y<brake.hip.y-.04);
+    for(const pole of fast.poles)assert.ok(pole.clearance>.25&&pole.trailing>.57);
+    const contact=Math.min(...brake.poles.map(pole=>pole.clearance));
+    assert.ok(contact>-.015&&contact<.11);
   }
 });

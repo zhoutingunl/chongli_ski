@@ -83,7 +83,7 @@ export function createSnowAir(scene,data) {
         float littleIce=smoothstep(.76,.96,grain(p*12.));
         float scatter=ink.w>.1?.93:1.;
         vec3 c=mix(vec3(.61,.74,.90),blue,.38)*mix(.94,.41,night);
-        c+=sun*solar*sunlight*scatter*(.14+1.15*sunFacing+.36*littleIce);
+        c+=sun*solar*sunlight*scatter*(.20+2.8*sunFacing+.56*littleIce);
         gl_FragColor=vec4(c,opacity);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -135,7 +135,7 @@ export function createSnowAir(scene,data) {
       uniforms.sun.value.setHex(weather.sun);uniforms.blue.value.setHex(weather.hemi);
       uniforms.solar.value=weather.sunAmount;uniforms.night.value=weather.nightAmount;
       uniforms.haze.value=weather.density;
-      uniforms.strength.value=clamp(.22+.34*w+.28*weather.snowAmount,0,.80);
+      uniforms.strength.value=clamp(.32+.37*w+.25*weather.snowAmount,0,.88);
       for(let i=0;i<count;i++) {
         let particle=positions[i];
         if(!particle||particle.age>=particle.life||Math.hypot(particle.x-camera.x,particle.z-camera.z)>144)

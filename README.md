@@ -92,6 +92,6 @@ node scripts/build-xiaohongshu.mjs ../chongli-ski-1.8.1.zip
 | --- | --- |
 | [双板接触](https://github.com/huiskylabs/cold-smoke/blob/7c9657b3d19d93d048a4152ccc3dbcc33b043778/src/08j_solver.js) | [雪具与角色](src/rider.js)分别用万龙云顶的地形约束两块板的板底，压坡时让踝、膝、髋随各脚的位置屈伸。 |
 | [转弯动作阶段](https://github.com/huiskylabs/cold-smoke/blob/7c9657b3d19d93d048a4152ccc3dbcc33b043778/src/06c_mocap.js) | [动作驱动](src/ski-kinematics.js)从实时侧向负载和换刃变化驱动现有骨架，儿童和成人使用各自的屈伸幅度。 |
-| [山脊风雪](https://github.com/huiskylabs/cold-smoke/blob/7c9657b3d19d93d048a4152ccc3dbcc33b043778/src/11b_wind.js)及[体积光](https://github.com/huiskylabs/cold-smoke/blob/7c9657b3d19d93d048a4152ccc3dbcc33b043778/src/15_shafts.js) | [贴地雪尘](src/snow-air.js)根据迎风坡、背风坡、地形和树冠遮挡改变亮度。桌面网页的高画质在设备支持时计算[林间光束](src/snow-light-shafts.js)，体积光以各轴四分之一分辨率计算，再按场景深度合成。 |
+| [山脊风雪](https://github.com/huiskylabs/cold-smoke/blob/7c9657b3d19d93d048a4152ccc3dbcc33b043778/src/11b_wind.js)及[体积光](https://github.com/huiskylabs/cold-smoke/blob/7c9657b3d19d93d048a4152ccc3dbcc33b043778/src/15_shafts.js) | [贴地雪尘](src/snow-air.js)根据迎风坡、背风坡、地形和树冠遮挡改变亮度。[光照合成](src/snow-light-shafts.js)依据地形遮住太阳的程度调整逆光辉光。支持的浏览器在自动和高画质下按场景深度合成林间光束，高画质的体积光以各轴四分之一分辨率计算。 |
 
 本项目自行实现上述效果，使用本仓库的地形、人物和几何模型。Cold Smoke 的动作捕捉素材、视频、纹理和模型均未收入本仓库。[上游动作素材及单独许可](https://github.com/huiskylabs/cold-smoke/blob/7c9657b3d19d93d048a4152ccc3dbcc33b043778/data/mocap/CREDITS.md)

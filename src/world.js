@@ -12,7 +12,7 @@ import {createTrailGuide} from './trail-guide.js';
 import {clamp,mixAngle} from './mountain.js';
 import {isMiniTool} from './platform.js';
 import {createSnowAir} from './snow-air.js';
-import {createSnowLightShafts} from './snow-light-shafts.js';
+import {createSnowLighting} from './snow-light-shafts.js';
 
 const up=new THREE.Vector3(0,1,0);
 export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate=createMountainClimate()) {
@@ -24,8 +24,10 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
   const scene=new THREE.Scene(),camera=new THREE.PerspectiveCamera(64,1,.09,55000);
   scene.fog=new THREE.FogExp2(0xc9d5db,.00011);
   const sun=new THREE.DirectionalLight(0xffe7cc,1.55),hemi=new THREE.HemisphereLight(0xe9f3ff,0x8d9aab,1.6);
-  sun.shadow.camera.left=sun.shadow.camera.bottom=-11;sun.shadow.camera.right=sun.shadow.camera.top=11;
-  sun.shadow.camera.near=3;sun.shadow.camera.far=78;sun.shadow.mapSize.set(512,512);sun.shadow.bias=-.00024;sun.shadow.normalBias=.025;
+  sun.shadow.camera.left=sun.shadow.camera.bottom=-67;sun.shadow.camera.right=sun.shadow.camera.top=67;
+  sun.shadow.camera.near=4;sun.shadow.camera.far=292;
+  sun.shadow.mapSize.set(1024,1024);sun.shadow.bias=-.00012;sun.shadow.normalBias=.087;
+  sun.shadow.intensity=.93;sun.shadow.radius=2.2;
   sun.castShadow=true;scene.add(sun,sun.target,hemi);
   const sky=createSky(scene),source=new THREE.Vector3();
   let forest,surface;
@@ -54,7 +56,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
   const details=courseDetails(scene,data,navigation);
   const trailGuide=createTrailGuide(scene,data,renderer);
   const snowAir=createSnowAir(scene,data),fx=makeSnowFX(scene,data,snowAir);
-  let renderShafts;
+  let renderLighting;
   let rider=createRider(opts);scene.add(rider.group);
   const sim=new Descent(data,opts,rider.dimensions);
   const yawQ=new THREE.Quaternion(),tiltQ=new THREE.Quaternion(),surfNorm=new THREE.Vector3(),want=new THREE.Vector3(),look=new THREE.Vector3(),target=new THREE.Vector3();
@@ -241,13 +243,14 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     if((first||mode==='follow'&&!ride)&&Math.abs(roll)>.0001)camera.rotateZ(roll);
     fov=snap?fov:camera.fov+(fov-camera.fov)*(1-Math.exp(-dt*7));
     if(Math.abs(camera.fov-fov)>.008){camera.fov=fov;camera.updateProjectionMatrix();}
-    sky.mesh.position.copy(camera.position);sun.target.position.set(p.x,p.y,p.z);
-    sun.position.copy(sun.target.position).addScaledVector(source,32);
+    sky.mesh.position.copy(camera.position);
+    sun.target.position.set(p.x,p.y,p.z).lerp(camera.position,.27);
+    sun.position.copy(sun.target.position).addScaledVector(source,143);
     snap=false;
   }
   function refreshLOD(){
     details.locate(camera.position.x,camera.position.z);
-    forest.locate(camera.position.x,camera.position.z,opts.quality);
+    forest.locate(camera.position.x,camera.position.z,opts.quality,sim.x,sim.z,sun.castShadow?160:0);
     const max=opts.quality==='lite'?1400:2400;
     for(const l of lifts){
       l.group.visible=l===ride?.lift||Math.hypot(l.center.x-camera.position.x,l.center.z-camera.position.z)<max+l.radius;
@@ -384,8 +387,8 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     treesLag+=dt;if(treesLag>.40){refreshLOD();treesLag=0;}
     trailGuide.update(sim,navigation,opts.language,camera);
     if(!paused) snowAir.update(dt,conditions,camera.position,opts.quality,isMiniTool);
-    if(!isMiniTool&&opts.quality==='high')renderShafts??=createSnowLightShafts(renderer)||false;
-    if(!isMiniTool&&opts.quality==='high'&&renderShafts)renderShafts(scene,camera,sun,conditions);
+    if(!isMiniTool&&opts.quality!=='lite')renderLighting??=createSnowLighting(renderer)||false;
+    if(!isMiniTool&&opts.quality!=='lite'&&renderLighting)renderLighting(scene,camera,sun,conditions,opts.quality,graphicsScale);
     else renderer.render(scene,camera);
     if(shaderFailure){active=false;onEvent('lost');return;}
     if(now-lastUI>95){onEvent('hud',sim);lastUI=now;}

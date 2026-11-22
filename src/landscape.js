@@ -135,13 +135,13 @@ const ridgeShadowGLSL=`
 `;
 function snowMaterial(uniforms,far) {
   const mat=new THREE.MeshLambertMaterial({color:0xffffff});
-  mat.customProgramCacheKey=()=>far?'distant-snow-v3':'near-snow-v4';
+  mat.customProgramCacheKey=()=>far?'distant-snow-v3':'near-snow-v5';
   mat.onBeforeCompile=s=>{
     Object.assign(s.uniforms,uniforms);
     s.vertexShader='varying vec3 vGround;\n'+s.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvGround=position;');
     s.fragmentShader=`varying vec3 vGround;
       uniform sampler2D trailMask,ortho,crystals,lampMap; uniform float pisteLights; uniform vec4 lowSun; uniform float hasOrtho; uniform vec4 terrainBounds;
-      uniform vec3 ridgeAir,hazeAir,horizonAir; uniform vec4 airSun; uniform float aerialStrength;
+      uniform vec3 ridgeAir,hazeAir,horizonAir; uniform vec4 airSun; uniform float aerialStrength; uniform vec3 solarTint;
       uniform vec3 shadowStarts[${shadowBones.length}]; uniform vec2 shadowEnds[${shadowBones.length}]; uniform vec4 shadowArea;
       uniform sampler2D solarHorizons; uniform vec4 sunHorizon;
       `+glNoise+atmosphereGLSL+(far?'':iceFacets+riderShadowGLSL+ridgeShadowGLSL)+s.fragmentShader.replace('#include <color_fragment>',far?`
@@ -205,6 +205,7 @@ function snowMaterial(uniforms,far) {
         -crossTrail*(teeth*flute*.24);
       vec2 iceGrid=p*6.4+vec2(7.13,18.2);
       float icePixel=facetFootprint(iceGrid);
+      float shimmerPixel=facetFootprint(iceGrid*.36);
       diffuseColor.rgb=max(vec3(.04),local);
     `);
     if(!far) s.fragmentShader=s.fragmentShader.replace('#include <normal_fragment_maps>',`
@@ -216,16 +217,22 @@ function snowMaterial(uniforms,far) {
     `).replace('#include <opaque_fragment>',`
       float silhouette=max(bodyShadow(vGround.xz),ridgeShadow(uv));
       outgoingLight-=reflectedLight.directDiffuse*silhouette;
-      if(lowSun.w>.001&&dist<45.&&icePixel<.81){
+      if(lowSun.w>.001&&dist<135.){
         vec3 eye=normalize(cameraPosition-vGround),h=normalize(eye+lowSun.xyz);
-        float crystal=iceReflection(iceGrid,icePixel,snowNormal,h);
-        float snowCover=max(course,smoothstep(.46,.76,luma)*hasOrtho*.62);
-        // Direct diffuse already contains the directional light's colour, slope
-        // incidence and scene shadow, so shaded snow cannot sparkle in sunlight.
-        vec3 sunlight=reflectedLight.directDiffuse/max(diffuseColor.rgb,vec3(.15));
-        float sheen=pow(max(0.,dot(snowNormal,h)),19.)*mix(.055,.112,course);
-        float weight=lowSun.w*snowCover*(1.-silhouette)*(1.-smoothstep(25.,45.,dist));
-        outgoingLight+=sunlight*weight*(7.1*crystal+sheen);
+        float snowCover=max(course,smoothstep(.40,.73,luma)*hasOrtho*.75);
+        float fine=iceReflection(iceGrid,icePixel,snowNormal,h);
+        float broadSpark=iceReflection(iceGrid*.36+vec2(5.2,3.1),shimmerPixel,snowNormal,h);
+        // Keep the bright strip attached to the slope, and let coarse ice
+        // grains flash within it as the view crosses the reflection angle.
+        float grazing=pow(1.-clamp(dot(slopeNormal,eye),0.,1.),2.1);
+        float shimmer=pow(max(0.,dot(snowNormal,h)),19.);
+        float strip=pow(max(0.,dot(slopeNormal,h)),31.);
+        vec3 sunlight=reflectedLight.directDiffuse/max(diffuseColor.rgb,vec3(.23));
+        float direct=max(sunlight.r,max(sunlight.g,sunlight.b))*(1.-silhouette);
+        float weight=lowSun.w*snowCover*(1.-smoothstep(80.,135.,dist));
+        float gloss=strip*(.055+.53*grazing)+.16*shimmer*grazing;
+        float crystals=13.2*fine*(1.-smoothstep(24.,55.,dist))+10.7*broadSpark*(1.-smoothstep(51.,107.,dist));
+        outgoingLight+=solarTint*direct*weight*(gloss+crystals);
       }
       if(pisteLights>.005){
         float pool=texture2D(lampMap,(vGround.xz-terrainBounds.xy)/terrainBounds.zw).r;
@@ -383,7 +390,7 @@ export async function buildSurface(scene,data) {
     terrainBounds:{value:new THREE.Vector4(b.minX,b.minZ,b.maxX-b.minX,b.maxZ-b.minZ)},
     ortho:{value:dataTexture(160,160,160)},hasOrtho:{value:0},
     ridgeAir:{value:new THREE.Color()},hazeAir:{value:new THREE.Color()},horizonAir:{value:new THREE.Color()},
-    airSun:{value:new THREE.Vector4()},aerialStrength:{value:0},
+    airSun:{value:new THREE.Vector4()},aerialStrength:{value:0},solarTint:{value:new THREE.Color()},
     solarHorizons:{value:dataTexture(0,0,0)},sunHorizon:{value:new THREE.Vector4()},
     shadowStarts:{value:shadowBones.map(()=>new THREE.Vector3())},
     shadowEnds:{value:shadowBones.map(()=>new THREE.Vector2())},shadowArea:{value:new THREE.Vector4()}
@@ -437,7 +444,7 @@ export async function buildSurface(scene,data) {
     uniforms.ridgeAir.value.set(env.fog).multiplyScalar(.70+.10*day);
     uniforms.hazeAir.value.set(env.fog).lerp(uniforms.ridgeAir.value,.20);
     uniforms.horizonAir.value.set(env.horizon).multiplyScalar(.88);
-    uniforms.airSun.value.set(...env.sunDir,env.sunAmount);
+    uniforms.airSun.value.set(...env.sunDir,env.sunAmount);uniforms.solarTint.value.set(env.sun);
     uniforms.aerialStrength.value=(.42+.58*day)*(1-.62*haze);
     const [x,y,z]=env.sunDir;
     const directions=[-1.36,-.45,.45,1.36];
@@ -458,7 +465,26 @@ async function readForest() {
 }
 export async function plantForest(scene,data) {
   const [atlas,cover]=await Promise.all([loadTexture(asset('art/treeline.webp'),THREE.SRGBColorSpace),readForest()]);
-  const uniforms={...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),atlas:{value:atlas},tint:{value:new THREE.Color(1,1,1)},lowSun:{value:new THREE.Vector4(0,1,0,0)}};
+  const uniforms={...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),atlas:{value:atlas},
+    tint:{value:new THREE.Color(1,1,1)},solarTint:{value:new THREE.Color()},lowSun:{value:new THREE.Vector4(0,1,0,0)}};
+  // Regular cards face the viewer. Shadow cards pivot towards the light,
+  // using the same crown cutout so shade follows the branches and trunks.
+  const treeDepth=new THREE.MeshDepthMaterial({side:THREE.DoubleSide});
+  treeDepth.onBeforeCompile=shader=>{
+    shader.uniforms.lowSun=uniforms.lowSun;shader.uniforms.treeAtlas=uniforms.atlas;
+    shader.vertexShader='attribute vec3 location;attribute vec4 form;uniform vec4 lowSun;varying vec3 crown;\n'+
+      shader.vertexShader.replace('#include <begin_vertex>',`
+        crown=vec3((uv.x+floor(form.z))/3.,1.-uv.y,form.z);
+        vec2 face=normalize(lowSun.xz+vec2(.0001));
+        vec3 transformed=location+vec3(face.y*position.x*form.x,(position.y+.5)*form.y,-face.x*position.x*form.x);
+      `);
+    shader.fragmentShader='uniform sampler2D treeAtlas;varying vec3 crown;\n'+shader.fragmentShader.replace('#include <map_fragment>',`
+      vec4 c=texture2D(treeAtlas,crown.xy);
+      float bare=step(.45,abs(crown.z-1.));
+      float lum=dot(c.rgb,vec3(.22,.68,.10));
+      if(c.a*(1.-bare*smoothstep(.24,.74,lum))<.37)discard;
+    `);
+  };
   const sm=new THREE.ShaderMaterial({uniforms,fog:true,side:THREE.DoubleSide,
     vertexShader:`#include <common>
       #include <fog_pars_vertex>
@@ -478,7 +504,7 @@ export async function plantForest(scene,data) {
         gl_Position=projectionMatrix*mvPosition;
         #include <fog_vertex>
       }`,
-    fragmentShader:`uniform sampler2D atlas;uniform vec3 tint;uniform vec4 lowSun;varying vec2 vUv;varying float vTint;varying float vSpecies;
+    fragmentShader:`uniform sampler2D atlas;uniform vec3 tint,solarTint;uniform vec4 lowSun;varying vec2 vUv;varying float vTint;varying float vSpecies;
       varying vec3 vTreeWorld;varying vec4 vBranch;
       #include <fog_pars_fragment>
       `+iceFacets+`
@@ -491,7 +517,7 @@ export async function plantForest(scene,data) {
         if(alpha<.34)discard;
         vec3 needles=mix(c.rgb,c.rgb*vec3(.68,.69,.72),bare);
         vec3 color=needles*tint*vTint*(.85+.15*(1.-vUv.y));
-        if(lowSun.w>.001&&vBranch.w<72.){
+        if(lowSun.w>.001){
           vec3 eye=normalize(cameraPosition-vTreeWorld);
           float edge=clamp(vBranch.z*2.35,-.94,.94);
           vec2 front=normalize(eye.xz+vec2(.0001));
@@ -500,9 +526,12 @@ export async function plantForest(scene,data) {
           float facing=smoothstep(-.20,.68,dot(cap,lowSun.xyz))
             *mix(.10,1.,smoothstep(-.66,.48,dot(radial,normalize(lowSun.xz))));
           float crown=1.-smoothstep(.71,.89,vUv.y);
-          float canopyShade=(1.-facing)*crown*lowSun.w*(1.-smoothstep(30.,72.,vBranch.w));
-          color*=1.-canopyShade*mix(.22,.11,bare);
-          if(vBranch.w<34.&&pixel<.81){
+          float frontLight=.21+.79*facing;
+          float warmth=lowSun.w*(.50+.50*crown);
+          color=mix(color,color*mix(vec3(.52,.66,.88),vec3(1.03,1.03,1.10)+solarTint*.74,frontLight),warmth);
+          float rim=pow(max(0.,dot(-eye,lowSun.xyz)),5.)*(1.-smoothstep(.18,.50,alpha))*.56;
+          color+=solarTint*lowSun.w*rim*lum*(.30+.7*crown);
+          if(vBranch.w<58.&&pixel<.81){
             // A light, neutral patch with a darker bough directly beneath it is
             // a snow cap. The open trunk and central bark stay excluded.
             vec4 below=texture2D(atlas,vUv+vec2(0.,.0055));
@@ -511,7 +540,7 @@ export async function plantForest(scene,data) {
             float branchSnow=smoothstep(.19,.54,lum)*(1.-smoothstep(.085,.22,chroma))
               *smoothstep(.035,.19,contrast)*smoothstep(.34,.85,min(c.a,below.a))*crown*smoothstep(.018,.070,abs(vBranch.z));
             float sparkle=iceReflection(vBranch.xy,pixel,cap,normalize(eye+lowSun.xyz));
-            color+=vec3(1.,.97,.89)*sparkle*branchSnow*facing*lowSun.w*mix(3.5,.85,bare)*(1.-smoothstep(19.,34.,vBranch.w));
+            color+=solarTint*sparkle*branchSnow*facing*lowSun.w*mix(10.,3.2,bare)*(1.-smoothstep(31.,58.,vBranch.w));
           }
         }
         gl_FragColor=vec4(color,1.);
@@ -550,7 +579,22 @@ export async function plantForest(scene,data) {
     g.setAttribute('location',new THREE.InstancedBufferAttribute(new Float32Array(loc),3));
     g.setAttribute('form',new THREE.InstancedBufferAttribute(new Float32Array(forms),4));g.instanceCount=loc.length/3;
     const center=new THREE.Vector3(x0+cell/2,data.height(x0+cell/2,z0+cell/2)+8,z0+cell/2);
-    g.boundingSphere=new THREE.Sphere(center,340);const m=new THREE.Mesh(g,sm);scene.add(m);chunks.push(m);
+    g.boundingSphere=new THREE.Sphere(center,340);
+    const m=new THREE.Mesh(g,sm);m.customDepthMaterial=treeDepth;scene.add(m);chunks.push(m);
   }
-  return {setLight(env){setSnowSun(uniforms.lowSun.value,env);uniforms.tint.value.set(env.treeTint??0xffffff);if(env.nightAmount)uniforms.tint.value.multiplyScalar(1-.33*env.nightAmount);},locate(x,z,quality){const d=quality==='lite'?1270:quality==='high'?2640:1920;for(const m of chunks){const c=m.geometry.boundingSphere.center;m.visible=(c.x-x)**2+(c.z-z)**2<d*d;}}};
+  return {
+    setLight(env) {
+      setSnowSun(uniforms.lowSun.value,env);
+      uniforms.solarTint.value.set(env.sun);
+      uniforms.tint.value.set(env.treeTint??0xffffff).multiplyScalar(1-.33*env.nightAmount);
+    },
+    locate(x,z,quality,sunX,sunZ,shadowRange) {
+      const d=quality==='lite'?1270:quality==='high'?2640:1920;
+      for(const mesh of chunks){
+        const center=mesh.geometry.boundingSphere.center;
+        mesh.visible=(center.x-x)**2+(center.z-z)**2<d*d;
+        mesh.castShadow=shadowRange>0&&(center.x-sunX)**2+(center.z-sunZ)**2<(340+shadowRange)**2;
+      }
+    }
+  };
 }
