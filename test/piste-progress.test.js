@@ -10,21 +10,22 @@ const data=prepareMountain(JSON.parse(readFileSync(new URL('../public/assets/geo
 
 test('滑上金龙会自动标记并可恢复记录，进入地图和起点时不会提前标记玉龙',()=>{
   const progress=createPisteProgress(data,[]);
+  const visited=(entry,tracker=progress)=>tracker.forRoute(entry).ridden===1;
   const sim=new Descent(data,{gear:'ski',assist:true});
   const route=data.routes.find(r=>r.id==='wanlong-gold');
   const gold=data.allRoutes.find(r=>r.id==='wanlong-piste-7');
   const jade=data.allRoutes.find(r=>r.id==='wanlong-piste-6');
   sim.start(route);
   assert.equal(progress.observe(sim.pisteVisits),false);
-  assert.equal(progress.visited(gold),false);
-  for(let i=0;i<1800&&!progress.visited(gold);i++){
+  assert.equal(visited(gold),false);
+  for(let i=0;i<1800&&!visited(gold);i++){
     sim.tick(1/90,{boost:true});progress.observe(sim.pisteVisits);
   }
-  assert.equal(progress.visited(gold),true);
-  assert.equal(progress.visited(jade),false);
-  assert.equal(progress.visited(route),false);
+  assert.equal(visited(gold),true);
+  assert.equal(visited(jade),false);
+  assert.deepEqual(progress.forRoute(route),{ridden:1,total:2});
   const restored=createPisteProgress(data,[...progress.completed]);
-  assert.equal(restored.visited(gold),true);
+  assert.equal(visited(gold,restored),true);
   assert.equal(restored.totals('wanlong').ridden,1);
 });
 

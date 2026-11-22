@@ -83,8 +83,16 @@ export class TrailMap {
       c.globalAlpha=mini?.38:.52;c.strokeStyle=mini?'#d5e1e3':(difficultyColor[t.difficulty]||'#b8caca');c.lineWidth=mini?.83:1.55;c.beginPath();line(t.points);c.stroke();
     }
     c.globalAlpha=1;
+    if(this.route){
+      c.strokeStyle='#f3ce8a';c.lineWidth=mini?1.75:3;
+      const {points,primaryStartIndex,primaryEndIndex}=this.route;
+      if(!mini&&Number.isInteger(primaryEndIndex)){
+        c.save();c.globalAlpha=.65;c.lineWidth=1.75;c.setLineDash([4,4]);c.beginPath();line(points);c.stroke();c.restore();
+        c.beginPath();line(points.slice(primaryStartIndex||0,primaryEndIndex+1));c.stroke();
+      }else{c.beginPath();line(points);c.stroke();}
+    }
     if(this.progress){
-      c.strokeStyle='#85e2cf';c.lineWidth=mini?1.6:2.35;c.beginPath();
+      c.strokeStyle='#85e2cf';c.lineWidth=mini?1.4:2.1;c.beginPath();
       for(const trail of this.data.trails){
         for(const section of this.progress.sections.get(trail.id)||[]){
           if(this.progress.completed.has(section.key))line(trail.points.slice(section.start,section.end+1));
@@ -93,12 +101,6 @@ export class TrailMap {
       c.stroke();
     }
     if(this.route){
-      c.strokeStyle='#f3ce8a';c.lineWidth=mini?1.75:3;
-      const {points,primaryStartIndex,primaryEndIndex}=this.route;
-      if(!mini&&Number.isInteger(primaryEndIndex)){
-        c.save();c.globalAlpha=.65;c.lineWidth=1.75;c.setLineDash([4,4]);c.beginPath();line(points);c.stroke();c.restore();
-        c.beginPath();line(points.slice(primaryStartIndex||0,primaryEndIndex+1));c.stroke();
-      }else{c.beginPath();line(points);c.stroke();}
       for(const point of [this.route.points[0],this.route.points.at(-1)]){
         c.fillStyle='#eed29c';c.beginPath();c.arc(px(point[0]),pz(point[1]),mini?2.4:4,0,Math.PI*2);c.fill();
       }

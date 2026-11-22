@@ -48,7 +48,10 @@ export function createPisteProgress(data,saved){
       }
       return changed;
     },
-    visited(route){return routeKeys.get(route.id)?.every(key=>completed.has(key))||false;},
+    forRoute(route){
+      const keys=routeKeys.get(route.id)||[];
+      return {ridden:keys.filter(key=>completed.has(key)).length,total:keys.length};
+    },
     totals(side){
       let ridden=0,total=0;
       for(const key of publicPistes)if(key.startsWith(side+'/')&&distance.has(key)){
