@@ -862,7 +862,36 @@ export function createSkiNavigation(data) {
     }
     return nearest?.site||null;
   }
-  const nav={signs,stationsOn,changeBranch,departure,summitHeading,stationExit,guidanceOn,guidance,safeRun,alignTravel,nearbyChoices,canonical:id=>network.routeFor(id)};
+  function recoveryLine(sim){
+    const foot=[sim.x,sim.z],candidates=[];
+    for(const line of network.lines.values()){
+      const hit=line.closest(...foot);
+      candidates.push({line,...hit});
+    }
+    candidates.sort((a,b)=>a.distance-b.distance);
+    // Search the snow near the projected foot. Bridges, building corners and trees
+    // can overlap a surveyed centreline, so keep a safe margin around the landing.
+    let best=null;
+    for(const {line,along,distance:gap} of candidates){
+      if(best&&gap>best.distance)break;
+      for(const offset of [0,-5,5,-10,10,-18,18,-30,30]){
+        const point=line.at(along+offset);
+        if(data.obstacles?.contact(point.x,point.z,2.2))continue;
+        const slope=data.height(point.x,point.z)-data.height(...pair(line.at(along+offset+10)));
+        const preferred=sim.route.originalId||sim.route.id;
+        const plan=safeRun(network.routeOnEdge(line,point.index,preferred,slope<-.6)||
+          network.routeOnEdge(line,point.index,preferred));
+        if(!plan)continue;
+        const join=plan.closest(point.x,point.z);
+        if(join.distance>3||plan.length-join.along<2)continue;
+        const frame=plan.frame(join.along),move=distance(foot,pair(frame));
+        if(data.obstacles?.contact(frame.x,frame.z,2.2))continue;
+        if(!best||move<best.distance)best={plan,along:join.along,frame,distance:move};
+      }
+    }
+    return best;
+  }
+  const nav={signs,stationsOn,changeBranch,departure,summitHeading,stationExit,guidanceOn,guidance,safeRun,alignTravel,nearbyChoices,recoveryLine,canonical:id=>network.routeFor(id)};
   navigators.set(data,nav);return nav;
 }
 

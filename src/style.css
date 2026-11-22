@@ -187,3 +187,5 @@ html[lang=en] .start-content h1{font-family:var(--latin);font-size:clamp(42px,6.
 
 .weather-compact{display:none}
 @media(orientation:portrait){.weather-compact{display:block;margin-top:.25em;color:#fff0ca;font:12px var(--sans)}}
+
+#recover-piste{background:#223743e6;color:#ffe6b4;border-color:#d9b675;min-height:38px;text-align:left}

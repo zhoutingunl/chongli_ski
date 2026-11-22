@@ -1,3 +1,4 @@
+import {atWanlongForecourt} from './lift-access.js';
 import {pisteVisitKey} from './piste-progress.js';
 import {clamp, mixAngle} from './mountain.js';
 import {createSkiNavigation} from './navigation.js';
@@ -41,6 +42,9 @@ export class Descent {
     this.route = route; this.mode = 'run'; this.gear = this.opts.gear;
     this.junctions=this.navigation?.stationsOn(route)||[];
     this.pisteVisits=new Map();
+    this.offPisteRest=this.runoutRest=this.treeHits=0;
+    this.lastTreeHit=-Infinity;
+    this.recoveryReady=false;
     this.passedJunctions=new Set();this.requestedTurn=null;
     this.handSteering=false;this.neutralTime=0;this.courseCheck=0;
     if(route.departedJunction)this.passedJunctions.add(route.departedJunction);
@@ -138,6 +142,25 @@ export class Descent {
       this.requestedTurn=null;this.passedJunctions.clear();
     }
     this.offset=offset;this.along=along;this.planIndex=f.index;this.route=route;
+  }
+
+  recoverToPiste(){
+    if(this.mode!=='run'||!this.recoveryReady||this.airborne)return false;
+    const target=this.navigation?.recoveryLine(this);
+    if(!target)return false;
+    const {plan,along,frame}=target;
+    this.x=frame.x;this.z=frame.z;this.y=this.ground=this.data.height(this.x,this.z);
+    this.heading=this.travelHeading=frame.angle;
+    this.joinLine(plan,along);
+    this.speed=this.offset=this.edgeSpeed=this.branchShiftX=this.branchShiftZ=0;
+    this.air=this.airHeight=this.upSpeed=this.verticalAlong=this.snowSink=0;
+    this.edge=this.edgeRate=this.skid=this.slipAngle=this.steer=this.brake=this.boost=this.trim=this.push=0;
+    this.press=this.pressure=this.curve=this.impact=this.landing=this.spray=this.bump=0;
+    this.requestedTurn=null;this.cancelJump();
+    this.handSteering=!this.opts.assist;this.neutralTime=0;this.courseCheck=.4;
+    this.offPisteRest=this.runoutRest=this.treeHits=0;this.lastTreeHit=-Infinity;this.recoveryReady=false;
+    this.surface();
+    return true;
   }
 
   junctionFor(routeId) {
@@ -361,9 +384,13 @@ export class Descent {
       this.freeAge+=dt;
       if(this.freeAge>.16){const q=this.route.closest(this.x,this.z);this.along=q.along;this.planIndex=this.route.at(q.along).index;this.freeAge=0;}
     }
-    if ((!assisted || Math.abs(this.offset)>9) && this.airHeight<1.4) {
+    if ((!assisted || Math.abs(this.offset)>9 || baseRange<110) && this.airHeight<1.4) {
       const hit=this.data.obstacles?.contact(this.x,this.z);
       if(hit){
+        if(hit.kind==='tree'&&this.elapsed-this.lastTreeHit>.20){
+          this.treeHits=this.elapsed-this.lastTreeHit<4?this.treeHits+1:1;
+          this.lastTreeHit=this.elapsed;
+        }
         this.x=hit.x;this.z=hit.z;this.speed*=.39;this.edgeSpeed=0;this.impact=Math.max(this.impact,.56);
         if(assisted){const f=trackFrame(this.route,this.along);this.offset=-(this.x-f.x)*f.dz+(this.z-f.z)*f.dx;}
         else {const inward=Math.min(0,fx*hit.nx+fz*hit.nz);this.travelHeading=Math.atan2(fx-1.28*inward*hit.nx,-(fz-1.28*inward*hit.nz));}
@@ -429,7 +456,16 @@ export class Descent {
       (board ? .87 : 1) * (this.dimensions?.scale ?? 1);
     const sinkTarget = this.airborne ? 0 : depth;
     this.snowSink = approach(this.snowSink, sinkTarget, this.airborne ? 30 : sinkTarget>this.snowSink ? 16 : 8, dt);
-    const atBase=assisted?this.route.length-this.along<=.32&&baseRange<56:remaining<45&&baseRange<=18.4;
+    const stopped=!this.airborne&&this.speed<.65;
+    const offPiste=!this.approach&&(!rawTrail||contact.distance>(rawTrail.width||36)*.58);
+    this.offPisteRest=stopped&&offPiste?this.offPisteRest+dt:0;
+    if(this.offPisteRest>=5||(stopped&&this.treeHits>=2&&this.elapsed-this.lastTreeHit<2))this.recoveryReady=true;
+    if(this.airborne||this.speed>1.35)this.recoveryReady=false;
+
+    const stoppedAtForecourt=stopped&&this.travel>25&&baseRange<=92&&atWanlongForecourt(this.data,this.route,this.x,this.z);
+    this.runoutRest=stoppedAtForecourt?this.runoutRest+dt:0;
+    const reachedEnd=assisted?this.route.length-this.along<=.32&&baseRange<56:remaining<45&&baseRange<=18.4;
+    const atBase=reachedEnd||this.runoutRest>1.2;
     if(atBase&&!this.airborne){
       this.mode='finished';this.speed=0;this.airborne=false;this.air=this.airHeight=0;this.y=this.ground;this.cancelJump();
       this.edge=this.edgeRate=this.edgeSpeed=this.steer=this.brake=this.boost=this.trim=0;

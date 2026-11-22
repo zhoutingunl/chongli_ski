@@ -1,3 +1,4 @@
+import {nearbyLiftStation} from '../lift-access.js';
 import {Descent} from '../simulation.js';
 import {createSkiNavigation} from '../navigation.js';
 import {createMountainClimate} from '../environment.js';
@@ -85,20 +86,7 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
   }
   function nearestStation(){
     if(station?.lift)return {lift:station.lift,end:station.end};
-    if(ride||!sim.route)return null;
-    const finished=sim.mode==='finished';
-    const mapped=finished&&data.lifts.find(l=>l.id===sim.route.finishLiftId);
-    if(mapped)return {lift:mapped,end:'bottom'};
-    let best=null,min=finished?Infinity:48;
-    for(const lift of data.lifts){
-      if(finished&&lift.resort!==sim.route.destination)continue;
-      for(const end of (finished?['bottom']:['bottom','top'])){
-        const [x,z]=lift.points[end==='top'?lift.points.length-1:0];
-        const distance=Math.hypot(x-sim.x,z-sim.z);
-        if(distance<min){min=distance;best={lift,end};}
-      }
-    }
-    return best;
+    return nearbyLiftStation(data,sim);
   }
   function beginRide(){
     const here=nearestStation();
@@ -239,6 +227,10 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
     flat:true,sim,input,start,stage,trailhead,pushOff,beginRide,leaveRide,
     get conditions(){return conditions;},
     get station(){return station;},
+    recoverToPiste(){
+      if(!sim.recoverToPiste())return false;
+      yaw=0;snowMarks=[];redraw();return true;
+    },
     get nearbyStation(){const near=nearestStation();return near?{name:near.lift.name,end:near.end}:null;},
     get liftInfo(){return ride?{name:ride.lift.name,resort:ride.lift.resort,dir:ride.dir,speed:ride.speed,
       progress:ride.dir>0?ride.along/ride.length:1-ride.along/ride.length}:null;},

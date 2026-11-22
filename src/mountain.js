@@ -88,13 +88,18 @@ export class ObstacleIndex {
       }
   }
   tree(x,z,r){this.insert(x-r,z-r,x+r,z+r,{x,z,r});}
-  contact(x,z){
-    const items=this.cells.get(Math.floor(x/this.size)+','+Math.floor(z/this.size));
-    if(!items)return null;
+  contact(x,z,clearance=0){
+    const lowX=Math.floor((x-clearance)/this.size),highX=Math.floor((x+clearance)/this.size);
+    const lowZ=Math.floor((z-clearance)/this.size),highZ=Math.floor((z+clearance)/this.size);
+    let items=this.cells.get(lowX+','+lowZ)||[];
+    if(lowX!==highX||lowZ!==highZ){
+      items=[];
+      for(let j=lowZ;j<=highZ;j++)for(let i=lowX;i<=highX;i++)items.push(...(this.cells.get(i+','+j)||[]));
+    }
     for(const item of items){
       if(!item.pts){
         const dx=x-item.x,dz=z-item.z,len=Math.hypot(dx,dz);
-        if(len<item.r){const nx=dx/(len||1),nz=dz/(len||1);return {x:item.x+nx*(item.r+.15),z:item.z+nz*(item.r+.15),nx,nz};}
+        if(len<item.r+clearance){const nx=len?dx/len:1,nz=len?dz/len:0;return {x:item.x+nx*(item.r+.15),z:item.z+nz*(item.r+.15),nx,nz,kind:'tree'};}
         continue;
       }
       const pts=item.pts;let inside=false,best=Infinity,px=x,pz=z;
@@ -104,7 +109,10 @@ export class ObstacleIndex {
         const t=clamp(((x-a[0])*dx+(z-a[1])*dz)/(dx*dx+dz*dz||1),0,1),ax=a[0]+t*dx,az=a[1]+t*dz,dd=(x-ax)**2+(z-az)**2;
         if(dd<best){best=dd;px=ax;pz=az;}
       }
-      if(inside){const len=Math.sqrt(best)||1,nx=(px-x)/len,nz=(pz-z)/len;return {x:px+nx*.41,z:pz+nz*.41,nx,nz};}
+      if(inside||best<clearance*clearance){
+        const len=Math.sqrt(best)||1, sign=inside?1:-1, nx=(px-x)*sign/len,nz=(pz-z)*sign/len;
+        return {x:px+nx*.41,z:pz+nz*.41,nx,nz,kind:'building'};
+      }
     }
     return null;
   }

@@ -50,6 +50,7 @@ export function controlsPanel(){
     [t('跳','Jump'),t('按住蓄力，松开起跳。','Hold to load your legs. Release to jump.'),t('空格','Space')],
     [t('加速','Tuck'),t('按住压低身体，双板在低速时会撑杖。','Hold to tuck. Skiers plant their poles at low speed.'),'W / ↑'],
     [t('刹车','Brake'),t('按住横板刹车，松开恢复滑行。','Hold to skid and brake. Release to glide.'),'S / ↓'],
+    [t('返回最近雪道','Return to nearest piste'),t('道外停满 5 秒，或连续撞树减速到停下时，可点按钮回到附近雪道。','After five seconds stopped off-piste or repeated tree impacts bring you to a stop, tap to return to a nearby piste.'),''],
     [t('雪场地图','Trail map'),t('地图可以手选雪道。经过索道站时点「上车」。','Choose a specific run on the map. Tap Board lift near a station.'),'M'],
     [t('机位','Camera'),t('右上角切换第一人称和外部机位，眼形图标轮换九种视角。','Use the top switch for first or third person, or the eye to cycle all nine views.'),'V / C'],
     [t('拍照','Photo'),t('暂停菜单中点「拍照」冻结雪场。拖动环顾，双指平移或缩放，再按快门存图。','Freeze the scene from the pause menu. Drag to look, pan or pinch with two fingers, then save.'),'WASD · Q / E']

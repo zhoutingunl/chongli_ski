@@ -645,7 +645,7 @@ function chair(b,resort,bubble) {
 const clamp01=t=>Math.max(0,Math.min(1,t));
 const trackHalfWidth=2.71;
 
-function prepareLine(points,heightAt) {
+function prepareLine(points,heightAt,validatedSupports) {
   const ground=[];
   for(const source of points) {
     const p=source.isVector3 ? source.clone() : Array.isArray(source) ? (source.length>2 ? V(...source) : V(source[0],heightAt?.(source[0],source[1])||0,source[1])) : V(source.x,source.y,source.z);
@@ -655,7 +655,7 @@ function prepareLine(points,heightAt) {
       // Insert missing supports on unusually long unsurveyed stretches (some OSM lines
       // contain just their terminal coordinates), following the same DEM as the skier.
       const horizontal=Math.hypot(p.x-prev.x,p.z-prev.z);
-      const sections=horizontal>230 ? Math.ceil(horizontal/160) : 1;
+      const sections=!validatedSupports&&horizontal>230 ? Math.ceil(horizontal/160) : 1;
       for(let i=1;i<sections;i++) {
         const q=prev.clone().lerp(p,i/sections);
         if(heightAt) q.y=heightAt(q.x,q.z);
@@ -885,8 +885,8 @@ function vehicleTemplate(style,resort,far) {
 
 // points follow the order of travel, normally from the lower station to the upper station.
 // position returned by seatAt and getRide is the passenger's eye position on the rising rope.
-export function createLift({points,resort='wanlong',type,kind,id='',name='',bubble=false,mixed=false,heightAt}) {
-  const line=prepareLine(points,heightAt),group=new THREE.Group();group.name=name||`${resort}-lift`;
+export function createLift({points,resort='wanlong',type,kind,id='',name='',bubble=false,mixed=false,heightAt,validatedSupports=false}) {
+  const line=prepareLine(points,heightAt,validatedSupports),group=new THREE.Group();group.name=name||`${resort}-lift`;
   const locateStructures=lineStructures(line,resort,group);
   group.add(wire(line));
   const mode=type||kind||'gondola';

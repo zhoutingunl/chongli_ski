@@ -153,6 +153,7 @@ function setupText(){
   $('#base-hall-text').textContent=t('看大厅与酒店','Look at the hall & hotel');
   $('#base-restart-text').textContent=t('重滑本线','Ski this run again');
   $('#base-lift-text').textContent=t('乘缆车上山','Ride lift up');
+  $('#recover-piste').textContent=t('返回最近雪道','Return to nearest piste');
   $('#steering>span').textContent=t('左侧转弯 · 右侧环顾','Steer left · look right');
   $('#steering').setAttribute('aria-label',t('左右拖动转弯','Drag to steer'));
   $('#keyboard-hint').innerHTML=t('方向键滑行 <i></i> 鼠标拖动环顾 <i></i> R 回正 <i></i> 空格蓄力跳','Arrows to ski <i></i> Drag to look <i></i> R to face forward <i></i> Hold Space to jump');
@@ -318,6 +319,7 @@ function paintHUD(){
   if(flag!=null)$('#next-flag').textContent=t('下一面旗 · ','Next flag · ')+Math.round(flag)+' m';
   const near=screen==='run'?world.nearbyStation:null;
   $('#near-lift').hidden=!near;
+  $('#recover-piste').hidden=screen!=='run'||!s.recoveryReady;
   if(near)$('#near-lift-label').textContent=label(near.name)+' · '+label('上车');
   if(lift){$('#lift-text').textContent=resort(lift.resort)+' · '+label(lift.name)+' · '+dir+' '+Math.round(lift.progress*100)+'%';$('[data-act="skip-lift"]').textContent=lift.dir>0?t('直达上站','Skip to upper station'):t('直达下站','Skip to lower station');}
   if(station){
@@ -544,6 +546,10 @@ function action(a){
   }
   if(a==='zoom-in'||a==='zoom-out'){large?.changeZoom(a==='zoom-in'?1.24:.82);return;}
   if(a==='recenter'){large?.reset();return;}
+  if(a==='recover-piste'&&screen==='run'){
+    if(!world.recoverToPiste()){announce(t('附近暂未找到安全落点','No clear spot on a nearby piste'));return;}
+    clearInputs();routeId=world.sim.route.id;paintHUD();return;
+  }
   if(a==='lift'){
     if(!world?.beginRide())return;
     screen='lift';page='';clearInputs();$('#overlay').hidden=true;world.pause(false);hudVisible(true);paintHUD();refreshMusic();return;

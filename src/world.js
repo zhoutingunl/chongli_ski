@@ -1,3 +1,5 @@
+import {nearbyLiftStation} from './lift-access.js';
+import {placeLiftSupports} from './lift-supports.js';
 import * as THREE from 'three';
 import {createRider} from './rider.js';
 import {createLandmark,createLift,setResortNight} from './resort.js';
@@ -38,10 +40,8 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
   }
   const lifts=[];
   for(const lift of data.lifts){
-    const points=lift.points.map(([x,z])=>new THREE.Vector3(x,data.height(x,z),z));
-    if(points.length===2){const end=points.pop(),start=points[0],n=Math.ceil(start.distanceTo(end)/122);
-      for(let i=1;i<n;i++){const t=i/n,x=start.x+(end.x-start.x)*t,z=start.z+(end.z-start.z)*t;points.push(new THREE.Vector3(x,data.height(x,z),z));} points.push(end);}
-    const obj=createLift({...lift,type:lift.kind,points,heightAt:(x,z)=>data.height(x,z)});
+    const points=placeLiftSupports(lift.points,data).map(([x,z])=>new THREE.Vector3(x,data.height(x,z),z));
+    const obj=createLift({...lift,type:lift.kind,points,validatedSupports:true,heightAt:data.height});
     scene.add(obj.group);
     const distance=points.reduce((sum,p,i)=>i?sum+p.distanceTo(points[i-1]):0,0);
     const center=points[0].clone().lerp(points.at(-1),.5);
@@ -336,26 +336,8 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
   }
   function nearestStation(){
     if(station?.lift)return {lift:station.lift,end:station.end};
-    if(ride||!sim.route)return null;
-    if(sim.mode==='finished'){
-      const side=sim.route.destination;
-      const mapped=lifts.find(l=>l.meta.id===sim.route.finishLiftId);
-      if(mapped)return {lift:mapped,end:'bottom'};
-      const summitLift=lifts.find(l=>l.meta.id===(side==='genting'?'w469393391':'w1368988315'));
-      const baseDistance=l=>Math.hypot(l.meta.points[0][0]-sim.x,l.meta.points[0][1]-sim.z);
-      if(baseDistance(summitLift)<140)return {lift:summitLift,end:'bottom'};
-      const sameResort=lifts.filter(l=>l.meta.resort===side);
-      return {lift:sameResort.reduce((a,b)=>baseDistance(a)<baseDistance(b)?a:b),end:'bottom'};
-    }
-    let nearest=null,min=48;
-    for(const lift of lifts){
-      for(const end of ['bottom','top']){
-        const [x,z]=end==='top'?lift.meta.points.at(-1):lift.meta.points[0];
-        const distance=Math.hypot(x-sim.x,z-sim.z);
-        if(distance<min){nearest={lift,end};min=distance;}
-      }
-    }
-    return nearest;
+    const nearby=nearbyLiftStation(data,sim);
+    return nearby&&{lift:lifts.find(lift=>lift.meta.id===nearby.lift.id),end:nearby.end};
   }
   function beginRide(){
     const here=nearestStation();if(!here)return false;
@@ -463,6 +445,11 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     get nextFlag(){return details.nextFlag(sim.along);},
     get conditions(){return conditions;},
     get station(){return station;},
+    recoverToPiste(){
+      if(!sim.recoverToPiste())return false;
+      resetLook();fx.reset();details.setRoute(sim.route);simLag=0;snap=true;treesLag=1;
+      showScene();return true;
+    },
     get nearbyStation(){const n=nearestStation();return n?{name:n.lift.meta.name,end:n.end}:null;},
     pause(b){paused=b;input.lookX=input.lookY=input.trim=input.steer=0;input.brake=input.boost=false;prev=0;kick();},
     stop(){active=false;paused=false;photo=false;ride=station=baseTurn=null;sim.pivotRate=0;if(frame)cancelAnimationFrame(frame);frame=0;sim.mode='idle';},
