@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {prepareMountain} from '../src/mountain.js';
 import {Descent} from '../src/simulation.js';
+import {AutomaticTurns} from '../src/automatic-turns.js';
 
 // A single planar piste isolates the snow physics from the surveyed junctions.
 function startRun({grade = 0, length = 900, lateral = 0, assist = false, gear = 'ski'} = {}) {
@@ -85,4 +86,60 @@ test('滑到山脚后计时和位移停止，重滑从原道口开始', () => {
   assert.equal(run.mode, 'run');
   assert.deepEqual([run.x, run.z], route.points[0]);
   assert.deepEqual([run.speed, run.elapsed, run.travel, run.airHeight], [0, 0, 0, 0]);
+});
+
+test('松手一段时间后，循线在直道上交替回转，手动刹车会立刻停用', ()=>{
+  const run=startRun({grade:.23,assist:true});
+  run.tick(2.57);
+  assert.equal(run.automatic.active,false);
+  run.tick(.9);
+  assert.ok(run.automatic.active&&run.automatic.amplitude>1);
+  const offsets=[];
+  for(let sample=0;sample<120;sample++){
+    run.tick(.1);offsets.push(run.offset);
+  }
+  assert.ok(Math.min(...offsets)<-1.2&&Math.max(...offsets)>1.2);
+  assert.ok(offsets.every(offset=>Math.abs(offset)<7));
+  run.tick(1/90,{brake:true});
+  assert.equal(run.automatic.active,false);
+  assert.equal(run.automatic.idle,0);
+  run.tick(2.57);
+  assert.equal(run.automatic.active,false);
+});
+
+test('弯道低速回转的幅度更大，高速和侧倾坡面会收窄，窄道和岔口有余量',()=>{
+  function amplitude(speed,bend,roll=0,width=18,clear=1){
+    const turns=new AutomaticTurns(),dt=1/90;
+    for(let step=0;step<540;step++){
+      turns.update({},speed,true,false,false,dt);
+      turns.line(speed,width,.18,roll,bend,clear,dt);
+    }
+    return turns.amplitude;
+  }
+  assert.ok(amplitude(6,.43)>amplitude(6,0)+2);
+  assert.ok(amplitude(21,.43)<amplitude(6,.43)*.5);
+  assert.ok(amplitude(6,.43,.28)<amplitude(6,.43)*.85);
+  assert.ok(amplitude(6,.43,0,9)<3.34);
+  assert.equal(amplitude(6,.43,0,18,0),0);
+});
+
+test('超过百公里时速进入俯身直滑，减速后恢复回转，计时赛沿用原循线',()=>{
+  const run=startRun({assist:true});
+  run.tick(3);
+  run.speed=31;
+  run.tick(.27);
+  assert.equal(run.automatic.sprint,true);
+  assert.ok(run.straightTuck>.8);
+  assert.equal(run.automatic.active,false);
+  run.speed=27.5;
+  run.tick(1/90);
+  assert.equal(run.automatic.sprint,true);
+  run.tick(.75);
+  assert.equal(run.automatic.sprint,false);
+  assert.equal(run.automatic.active,true);
+  assert.ok(run.automatic.amplitude>.9);
+  run.start(run.route,{timed:true});
+  run.tick(4);
+  assert.equal(run.automatic.active,false);
+  assert.equal(run.straightTuck,0);
 });

@@ -259,14 +259,14 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     }
     for(const g of landmarks)g.visible=Math.hypot(g.position.x-camera.position.x,g.position.z-camera.position.z)<(opts.quality==='lite'?1800:3400);
   }
-  function resetScene(route){
-    sim.start(route);station=null;ride=null;paused=false;active=true;resetLook();
+  function resetScene(route,options){
+    sim.start(route,options);station=null;ride=null;paused=false;active=true;resetLook();
     baseTurn=null;sim.pivotRate=0;
     simLag=0;snap=true;treesLag=1;lastUI=prev=0;
     input.trim=input.steer=0;input.boost=input.brake=false;fx.reset();snowAir.reset();
   }
   function showScene(){updateAvatar(0);moveCamera(0);refreshLOD();kick();}
-  function start(route){route=navigation.safeRun(route);resetScene(route);climate.startRun(opts.time);environment();details.setRoute(route);showScene();}
+  function start(route,options){route=navigation.safeRun(route);resetScene(route,options);climate.startRun(opts.time);environment();details.setRoute(route);showScene();}
   function point(xz,height){return new THREE.Vector3(xz[0],data.height(...xz)+height,xz[1]);}
   function stationPortrait(lift,end){
     const at=end==='top'?lift.meta.points.at(-1):lift.meta.points[0];

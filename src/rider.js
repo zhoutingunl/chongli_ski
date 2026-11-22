@@ -1615,7 +1615,7 @@ export function createRider(options = {}) {
       + (board ? wave*push*.12 : wave*push*.091);
     posed.chest = mix(posed.chest,chestTarget,ease(6.3));
     const chestYaw = posed.chest;
-    const tuck = boost*(.28+.72*fast);
+    const tuck = Math.max(boost*(.28+.72*fast),.79*(state.straightTuck||0));
     const bodyPitch = -.11-.205*fast-.108*steep-.120*fast*steep-.178*tuck-.125*charge-
       .072*land-.054*pressure+.030*hollow;
     const hipTwist = board ? trim*.106 + attack*.087 - release*.073 : 0;

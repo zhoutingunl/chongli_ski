@@ -1,4 +1,5 @@
 import {atWanlongForecourt} from './lift-access.js';
+import {AutomaticTurns} from './automatic-turns.js';
 import {pisteVisitKey} from './piste-progress.js';
 import {clamp, mixAngle} from './mountain.js';
 import {createSkiNavigation} from './navigation.js';
@@ -38,8 +39,8 @@ export class Descent {
     this.snowSink = 0; this.snowSoftness = .14;
   }
 
-  start(route) {
-    this.route = route; this.mode = 'run'; this.gear = this.opts.gear;
+  start(route,{timed=false}={}) {
+    this.timed=timed;this.automatic=new AutomaticTurns();this.straightTuck=0;this.route = route; this.mode = 'run'; this.gear = this.opts.gear;
     this.junctions=this.navigation?.stationsOn(route)||[];
     this.pisteVisits=new Map();
     this.feedback={landing:0,tree:0};
@@ -157,7 +158,7 @@ export class Descent {
     this.air=this.airHeight=this.upSpeed=this.verticalAlong=this.snowSink=0;
     this.edge=this.edgeRate=this.skid=this.slipAngle=this.steer=this.brake=this.boost=this.trim=this.push=0;
     this.press=this.pressure=this.curve=this.impact=this.landing=this.spray=this.bump=0;
-    this.requestedTurn=null;this.cancelJump();
+    this.requestedTurn=null;this.cancelJump();this.automatic=new AutomaticTurns();this.straightTuck=0;
     this.handSteering=!this.opts.assist;this.neutralTime=0;this.courseCheck=.4;
     this.offPisteRest=this.runoutRest=0;this.lastTreeHit=-Infinity;this.recoveryReady=false;
     this.surface();
@@ -297,7 +298,10 @@ export class Descent {
     const stroke = board ? Math.max(0,Math.sin((this.stride-.12)*TAU))**1.25 :
       Math.abs(Math.sin(this.stride*TAU))**1.45;
     const assistance = assisted && !airborne ? 1 - Math.max(this.brake, cut) : 0;
-    const tuck = this.boost * smooth(oldSpeed,3,11);
+    const canGlide=assisted&&!this.timed&&this.onTrail&&!!this.pisteContact?.trail&&!this.approach;
+    this.automatic.update(input,oldSpeed,canGlide,this.charging,airborne,dt);
+    this.straightTuck = this.automatic.tuck;
+    const tuck = Math.max(this.boost * smooth(oldSpeed,3,11),this.straightTuck);
     const gravity = G * Math.sin(theta);
     const end = this.route.points.at(-1);
     const remaining = Math.max(0,this.route.length-this.along);
@@ -336,10 +340,21 @@ export class Descent {
     const curvature = Math.sign(this.edge) * Math.pow(load,1.28) * grip / radius;
     if (assisted) {
       const width = clamp((this.trail?.width || 38)*.47,9,31);
-      const guide = (1-smooth(Math.abs(this.steer),.03,.61))*(1-this.brake)*smooth(this.along,0,20);
-      const phase = this.along/18, amplitude = guide*Math.min(2.1,width*.11);
-      const lane = amplitude*Math.sin(phase);
-      const laneVelocity = amplitude*Math.cos(phase)*planarSpeed/18;
+      let lane,laneVelocity,guidedArc;
+      if(this.timed) {
+        // Retain the original line and timing for the existing weekly board.
+        const guide=(1-smooth(Math.abs(this.steer),.03,.61))*(1-this.brake)*smooth(this.along,0,20);
+        const phase=this.along/18,amplitude=guide*Math.min(2.1,width*.11);
+        lane=amplitude*Math.sin(phase);
+        laneVelocity=amplitude*Math.cos(phase)*planarSpeed/18;
+        guidedArc=-lane*(planarSpeed/18)**2/G;
+      } else {
+        const here=trackFrame(this.route,this.along),ahead=trackFrame(this.route,this.along+Math.max(13,planarSpeed*.95));
+        const junction=this.activeJunction(32+planarSpeed*.62,2);
+        const clear=Math.min(smooth(remaining,24,61),junction?smooth(junction.along-this.along,9,32+planarSpeed*.62):1);
+        const wave=this.automatic.line(planarSpeed,width,grade,crossGrade,angleBetween(here.angle,ahead.angle),clear,dt);
+        lane=wave.offset;laneVelocity=wave.speed;guidedArc=wave.load;
+      }
       const recentre = (lane-this.offset)*(.24+.47*smooth(Math.abs(this.offset),width*.55,width*1.04));
       const lateral = clamp(this.steer*planarSpeed*.59 + laneVelocity + recentre,-planarSpeed*.74,planarSpeed*.74);
       const traction = airborne ? .06 : 1;
@@ -364,7 +379,6 @@ export class Descent {
       this.x = f.x - f.dz*this.offset+this.branchShiftX; this.z = f.z + f.dx*this.offset+this.branchShiftZ; this.planIndex = f.index;
       const look = this.route.frame(Math.min(this.route.length,this.along+Math.max(5,planarSpeed*.80)));
       const anticipate = clamp(angleBetween(f.angle,look.angle)*planarSpeed*.093,-.76,.76);
-      const guidedArc = -amplitude*Math.sin(phase)*planarSpeed**2/(18**2*G);
       this.guideLean = approach(this.guideLean,clamp(anticipate+guidedArc,-.80,.80),5.8,dt);
       if (Math.hypot(this.x-oldX,this.z-oldZ)>.0001) this.travelHeading = Math.atan2(this.x-oldX,-(this.z-oldZ));
     } else {

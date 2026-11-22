@@ -68,8 +68,8 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
   function resetView(){
     canvas.hidden=false;active=true;paused=false;last=0;yaw=0;zoom=1;panX=panY=0;snowMarks=[];
   }
-  function start(route){
-    sim.start(navigation.safeRun(route));climate.startRun(opts.time);refreshClimate();station=ride=null;resetView();draw();kick();
+  function start(route,options){
+    sim.start(navigation.safeRun(route),options);climate.startRun(opts.time);refreshClimate();station=ride=null;resetView();draw();kick();
   }
   function trailhead(route){
     const point=route.frame(0);

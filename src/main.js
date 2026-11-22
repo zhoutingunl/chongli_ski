@@ -250,10 +250,10 @@ async function begin(id,flat=false,atHead=false){
   }catch(e){console.error(e);openPanel('error');}
   finally{busy=false;$('#loading').hidden=true;}
 }
-function launch(route){
+function launch(route,options){
   challenge=null;
   discardMap();page='';$('#overlay').hidden=true;routeId=route.id;
-  recorded=false;screen='run';tray=false;clearInputs();tilt.calibrate();world.start(route);hudVisible(true);paintHUD();refreshMusic();
+  recorded=false;screen='run';tray=false;clearInputs();tilt.calibrate();world.start(route,options);hudVisible(true);paintHUD();refreshMusic();
 }
 function pushOff(direction,preferred=screen==='summit'?summitChoice||undefined:undefined,heading){
   if(!watching()||page||busy||!world)return false;
@@ -369,6 +369,7 @@ function openPanel(k){
 function closePanel(){
   if(page==='lost'){if(isMiniTool)begin(world?.sim.route?.id,true);else location.reload();return;}
   discardMap();page='';$('#overlay').hidden=true;world?.pause(false);if(screen==='run')tilt.calibrate();hudVisible(inWorld());paintHUD();focusBack?.focus?.({preventScroll:true});
+  if(clip?.waiting&&inWorld()&&!document.hidden){clip.waiting=false;showVideo(clip.url);}
 }
 function sourceText(){
   if(isMiniTool)return '<p class="credit-text">'+t('部分雪道按雪场图估绘。其余雪道、索道及建筑轮廓 © OpenStreetMap 贡献者（ODbL）。高程来源 Mapzen / AWS Terrain Tiles / USGS。冬季影像来自 Copernicus Sentinel-2，林地参考 ESA WorldCover。建筑材质采用 Poly Haven（CC0）。角色、地标与开场全景为游戏重建。','Some runs are traced from resort maps. Other pistes, lifts and building outlines © OpenStreetMap contributors (ODbL). Elevation: Mapzen / AWS Terrain Tiles / USGS. Winter imagery: Copernicus Sentinel-2. Forest cover: ESA WorldCover. Building materials: Poly Haven (CC0). Riders, landmarks and the opening panorama are game reconstructions.')+'</p>';
@@ -538,7 +539,7 @@ async function startChallenge(){
   if(!route?.primaryEndIndex)return;
   await begin(route.id,false,true);
   if(screen!=='trailhead'||world?.sim.route.id!==route.id)return;
-  launch(route);
+  launch(route,{timed:true});
   const finish=route.points[route.primaryEndIndex];
   challenge={board:currentBoard(),week:weekStart(),finish,along:route.distances[route.primaryEndIndex]};
 }
@@ -628,14 +629,14 @@ function paintRecordButton(){
   const status=$('#game-record'),control=$('#tray-record');
   const seconds=recording?Math.min(GAME_CLIP_SECONDS,Math.floor((performance.now()-recordStart)/1000)):0;
   status.hidden=!recording;
-  control.hidden=!recordable()&&!clip;
-  const label=recording?t('停止录像','Stop recording'):clip?t('查看录像','Watch recording'):t('开始录像','Start recording');
+  control.hidden=!recordable();
+  const label=recording?t('停止录像','Stop recording'):t('开始录像','Start recording');
   for(const item of [status,control]){
     item.setAttribute('aria-pressed',String(!!recording));
     item.ariaLabel=label;item.title=label;
   }
   status.querySelector('span').textContent=t('停止','Stop')+' 0:'+String(seconds).padStart(2,'0');
-  control.querySelector('span').textContent=recording?t('停止','Stop'):clip?t('回放','Watch'):t('录像','REC');
+  control.querySelector('span').textContent=recording?t('停止','Stop'):t('录像','REC');
 }
 const iphoneVideo=()=>!isMiniTool&&appleMobile();
 const embeddedAppleVideo=()=>iphoneVideo()&&/wxwork|micromessenger/i.test(navigator.userAgent);
@@ -660,8 +661,10 @@ function startVideo(){
         const name='chongli-'+timestamp+'.'+result.extension;
         const file=iphoneVideo()&&typeof File==='function'?new File([result.blob],name,{type:result.blob.type}):null;
         clip={...result,url:URL.createObjectURL(result.blob),name,file};
-        if(!page&&!document.hidden&&inWorld())showVideo(clip.url);
-        else announce(t('录像已生成，可打开预览','Recording ready to preview'));
+        if(inWorld()){
+          if(!page&&!document.hidden)showVideo(clip.url);
+          else clip.waiting=true;
+        }
       }else announce(t('未录到画面，请重试','No video captured. Try again.'));
       paintRecordButton();if(page)renderPanel(true);
     },{audio,mobile:iphoneVideo()||/Android|Mobile/i.test(navigator.userAgent),miniTool:isMiniTool,unlockCanvas:world.lockVideoCanvas()});
@@ -816,9 +819,7 @@ function action(a){
   if(a==='share')return share();
   if(a==='record'){
     if(recording){recording.stop();return;}
-    if(clip)showVideo(clip.url);
-    else startVideo();
-    return;
+    return startVideo();
   }
   if(a==='video-library')return showVideo();
   if(a==='close-video')return closeVideo();

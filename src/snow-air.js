@@ -24,14 +24,21 @@ export function sunThroughTerrain(height,canopy,x,y,z,dir) {
 export function createSnowAir(scene,data) {
   const random=randomGenerator(701327);
   const height=data.height, canopy=data.obstacles?.snowCanopy?.bind(data.obstacles);
-  const capacity=124, positions=[], centers=new Float32Array(capacity*4), shape=new Float32Array(capacity*4);
+  const capacity=124, positions=[], centers=new Float32Array(capacity*4), shape=new Float32Array(capacity*4), contours=new Float32Array(capacity*4);
   const shade=new Map(), ridge=[];
   let x0=Infinity,z0=Infinity,lookingForRidge=0,shadeTime=0,clock=0;
   const geometry=new THREE.InstancedBufferGeometry();
-  geometry.setAttribute('position',new THREE.Float32BufferAttribute([-1,-1,0, 1,-1,0, -1,1,0, 1,1,0],3));
-  geometry.setIndex([0,1,2,1,3,2]);
+  const strip=[],indices=[];
+  for(let column=0;column<5;column++){
+    const longitudinal=.5*column-1;
+    strip.push(longitudinal,-1,0,longitudinal,1,0);
+    if(column<4){const j=2*column;indices.push(j,j+2,j+1,j+2,j+3,j+1);}
+  }
+  geometry.setAttribute('position',new THREE.Float32BufferAttribute(strip,3));
+  geometry.setIndex(indices);
   geometry.setAttribute('plume',new THREE.InstancedBufferAttribute(centers,4).setUsage(THREE.DynamicDrawUsage));
   geometry.setAttribute('shape',new THREE.InstancedBufferAttribute(shape,4).setUsage(THREE.DynamicDrawUsage));
+  geometry.setAttribute('contour',new THREE.InstancedBufferAttribute(contours,4).setUsage(THREE.DynamicDrawUsage));
   const uniforms={
     time:{value:0}, wind:{value:new THREE.Vector2(windX,windZ)},
     sun:{value:new THREE.Color()}, blue:{value:new THREE.Color()}, ray:{value:new THREE.Vector3()},
@@ -40,7 +47,7 @@ export function createSnowAir(scene,data) {
   const material=new THREE.ShaderMaterial({uniforms,transparent:true,depthWrite:false,side:THREE.DoubleSide,forceSinglePass:true,
     vertexShader:`
       attribute vec4 plume;
-      attribute vec4 shape;
+      attribute vec4 shape,contour;
       uniform vec2 wind;
       varying vec2 uvP;
       varying vec3 vWorld;
@@ -53,8 +60,10 @@ export function createSnowAir(scene,data) {
         vec3 wide=cross(rayToEye,axis);
         if(length(wide)<.08)wide=vec3(-wind.y,.2,wind.x);
         wide=normalize(wide);
-        vec3 wp=plume.xyz+axis*position.x*shape.x+wide*position.y*shape.y;
-        ink=vec4(plume.w,fract(shape.w)*29.,distance(cameraPosition,wp),wp.y-plume.y);
+        float column=position.x;
+        float rel=column<-.75?contour.x:column<-.25?contour.y:column<.25?0.:column<.75?contour.z:contour.w;
+        vec3 wp=plume.xyz+vec3(wind.x*column*shape.x,rel,wind.y*column*shape.x)+wide*position.y*shape.y;
+        ink=vec4(plume.w,fract(shape.w)*29.,distance(cameraPosition,wp),pow(abs(dot(rayToEye,normalize(cross(axis,wide)))),.65));
         sunlight=floor(shape.w)/31.;
         vWorld=wp;
         gl_Position=projectionMatrix*viewMatrix*vec4(wp,1.);
@@ -72,18 +81,16 @@ export function createSnowAir(scene,data) {
         return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+1.),f.x),f.y);
       }
       void main(){
-        float band=uvP.y+sin(uvP.x*4.7+time*.85+ink.y)*.17;
-        vec2 p=vec2(uvP.x*3.8-time*.63+ink.y,band*9.+ink.y);
-        float noise=grain(p)*.56+grain(p*2.3)*.31+grain(p*5.2)*.13;
-        float edge=(1.-smoothstep(.31,1.,abs(uvP.x)))*(1.-smoothstep(.09,.93,abs(band)));
-        float opacity=edge*smoothstep(.22,.78,noise)*ink.x*strength;
-        opacity*=smoothstep(1.2,5.,ink.z)*(1.-smoothstep(66.,158.,ink.z))*exp(-ink.z*haze*.8);
-        if(opacity<.003)discard;
+        float billow=sin(uvP.x*5.2+time*.88+ink.y)*.18;
+        float band=uvP.y+billow;
+        vec2 p=vec2(uvP.x*3.1-time*.67+ink.y,band*2.75+ink.y);
+        float noise=grain(p)*.72+grain(p*2.8)*.28;
+        float edge=(1.-smoothstep(.06,1.,abs(uvP.x)))*(1.-smoothstep(.05,.94,abs(band)));
+        float opacity=edge*edge*smoothstep(.19,.81,noise)*ink.x*strength;
+        opacity*=smoothstep(1.2,5.,ink.z)*(1.-smoothstep(35.,101.,ink.z))*exp(-ink.z*haze*.8)*ink.w;
         float sunFacing=pow(max(0.,dot(normalize(vWorld-cameraPosition),ray)),5.);
-        float littleIce=smoothstep(.76,.96,grain(p*12.));
-        float scatter=ink.w>.1?.93:1.;
-        vec3 c=mix(vec3(.61,.74,.90),blue,.38)*mix(.94,.41,night);
-        c+=sun*solar*sunlight*scatter*(.20+2.8*sunFacing+.56*littleIce);
+        vec3 c=mix(vec3(.56,.69,.86),blue,.38)*mix(.94,.41,night);
+        c+=sun*solar*sunlight*(.13+1.6*sunFacing);
         gl_FragColor=vec4(c,opacity);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -115,7 +122,7 @@ export function createSnowAir(scene,data) {
     const z=crest?crest.z+(random()-.5)*11:camera.z+Math.sin(yaw)*distance;
     const life=1.9+random()*4.9;
     return {x,z,crest,life,age:scatter?random()*life:0,phase:random()*19,
-      length:1.6+random()**1.4*(crest?8.2:5.9),thickness:.095+random()*(crest?.34:.18),
+      length:1.6+random()**1.4*(crest?6.6:4.6),thickness:.125+random()*(crest?.38:.24),
       rate:(2.4+random()*2.7)*(.64+wind*1.6),light:0};
   }
   return {
@@ -145,15 +152,20 @@ export function createSnowAir(scene,data) {
         const step=dt*p.rate*(.63+.64*Math.sin(Math.PI*t)+w*.21), curl=.18*Math.sin(clock*1.6+p.phase);
         p.x+=step*(windX-windZ*curl); p.z+=step*(windZ+windX*curl);
         const rise=(p.crest?.21+p.crest.strength*.61:.11)*Math.sin(Math.PI*t);
-        const y=height(p.x,p.z)+.12+rise+p.thickness*.63;
-        const slope=clamp((height(p.x+windX*2,p.z+windZ*2)-height(p.x-windX*2,p.z-windZ*2))*.25,-.75,.75);
+        const ground=height(p.x,p.z),y=ground+.065+rise+p.thickness*.95;
+        const length=p.length*(.8+.49*t),wx=windX*length,wz=windZ*length;
+        const near=height(p.x-wx,p.z-wz)-ground,far=height(p.x+wx,p.z+wz)-ground;
+        const slope=clamp((far-near)/Math.max(1,2*length),-.87,.87);
         if((i+Math.floor(clock*22))%7===0)p.light=lightAt(p.x,y,p.z,weather);
         const alpha=Math.sin(Math.PI*t)**1.21*(p.crest?1.17:.85);
         const k=i*4;
         centers[k]=p.x;centers[k+1]=y;centers[k+2]=p.z;centers[k+3]=alpha;
-        shape[k]=p.length*(.8+.49*t);shape[k+1]=p.thickness;shape[k+2]=slope;shape[k+3]=Math.round(p.light*31)+p.phase/19;
+        shape[k]=length;shape[k+1]=p.thickness;shape[k+2]=slope;shape[k+3]=Math.round(p.light*31)+p.phase/19;
+        contours[k]=near;contours[k+1]=height(p.x-wx*.5,p.z-wz*.5)-ground;
+        contours[k+2]=height(p.x+wx*.5,p.z+wz*.5)-ground;contours[k+3]=far;
       }
-      geometry.instanceCount=count;geometry.attributes.plume.needsUpdate=geometry.attributes.shape.needsUpdate=true;
+      geometry.instanceCount=count;
+      geometry.attributes.plume.needsUpdate=geometry.attributes.shape.needsUpdate=geometry.attributes.contour.needsUpdate=true;
       mesh.visible=true;
     }
   };
