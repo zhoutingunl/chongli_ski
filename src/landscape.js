@@ -472,17 +472,23 @@ export async function plantForest(scene,data) {
   const treeDepth=new THREE.MeshDepthMaterial({side:THREE.DoubleSide});
   treeDepth.onBeforeCompile=shader=>{
     shader.uniforms.lowSun=uniforms.lowSun;shader.uniforms.treeAtlas=uniforms.atlas;
-    shader.vertexShader='attribute vec3 location;attribute vec4 form;uniform vec4 lowSun;varying vec3 crown;\n'+
+    shader.vertexShader='attribute vec3 location;attribute vec4 form;uniform vec4 lowSun;varying vec3 crown;varying vec2 shadowSeed;\n'+
       shader.vertexShader.replace('#include <begin_vertex>',`
         crown=vec3((uv.x+floor(form.z))/3.,1.-uv.y,form.z);
+        shadowSeed=location.xz*.071;
         vec2 face=normalize(lowSun.xz+vec2(.0001));
         vec3 transformed=location+vec3(face.y*position.x*form.x,(position.y+.5)*form.y,-face.x*position.x*form.x);
       `);
-    shader.fragmentShader='uniform sampler2D treeAtlas;varying vec3 crown;\n'+shader.fragmentShader.replace('#include <map_fragment>',`
+    shader.fragmentShader='uniform sampler2D treeAtlas;varying vec3 crown;varying vec2 shadowSeed;\n'+glNoise+shader.fragmentShader.replace('#include <map_fragment>',`
       vec4 c=texture2D(treeAtlas,crown.xy);
       float bare=step(.45,abs(crown.z-1.));
       float lum=dot(c.rgb,vec3(.22,.68,.10));
-      if(c.a*(1.-bare*smoothstep(.24,.74,lum))<.37)discard;
+      vec2 bough=vec2(fract(crown.x*3.),crown.y);
+      float width=abs(bough.x-.5);
+      float openings=noise21(bough*vec2(6.1,10.2)+shadowSeed);
+      float broken=(.28+.23*smoothstep(.27,.78,openings))*smoothstep(.035,.22,width);
+      float cutoff=.36+broken*(.70+.30*bare);
+      if(c.a*(1.-bare*smoothstep(.24,.74,lum))<cutoff)discard;
     `);
   };
   const sm=new THREE.ShaderMaterial({uniforms,fog:true,side:THREE.DoubleSide,

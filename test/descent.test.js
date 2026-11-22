@@ -143,3 +143,18 @@ test('超过百公里时速进入俯身直滑，减速后恢复回转，计时�
   assert.equal(run.automatic.active,false);
   assert.equal(run.straightTuck,0);
 });
+
+test('普通循线在接近 85 公里时速时仍有清晰的左右回转',()=>{
+  const run=startRun({grade:.32,assist:true});
+  run.speed=23.6;
+  run.tick(5);
+  const samples=[];
+  for(let i=0;i<120;i++){
+    run.tick(.10);
+    samples.push({offset:run.offset,speed:run.speed,heading:run.travelHeading});
+  }
+  assert.ok(samples.every(p=>p.speed>19&&p.speed<100/3.6&&Math.abs(p.offset)<7.2));
+  const range=key=>Math.max(...samples.map(sample=>sample[key]))-Math.min(...samples.map(sample=>sample[key]));
+  assert.ok(range('offset')>7.6);
+  assert.ok(range('heading')>25*Math.PI/180);
+});

@@ -45,6 +45,14 @@ export function createSnowLighting(renderer) {
       uniform mat4 sunMatrix,eyeToWorld;
       uniform vec3 source;
       uniform float air,phase;
+      float hash(vec2 p){
+        vec3 q=fract(vec3(p.xyx)*.1031);q+=dot(q,q.yzx+33.33);
+        return fract((q.x+q.y)*q.z);
+      }
+      float pockets(vec2 p){
+        vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
+        return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+1.),f.x),f.y);
+      }
       float lightAt(vec3 p){
         vec3 q=(sunMatrix*vec4(p,1.)).xyz;
         float edge=min(min(q.x,1.-q.x),min(q.y,1.-q.y));
@@ -55,20 +63,21 @@ export function createSnowLighting(renderer) {
         vec3 eye=eyePoint();
         float depth=length(eye);
         vec3 ray=normalize(mat3(eyeToWorld)*eye),origin=eyeToWorld[3].xyz;
-        float stride=max(0.,min(depth,87.)-1.6)/16.;
+        float stride=max(0.,min(depth,78.)-3.1)/16.;
+        float stratify=mix(.22,.78,hash(floor(gl_FragCoord.xy)));
         float lit=0.,blocked=0.;
         for(int i=0;i<16;i++){
-          float t=1.6+(float(i)+.5)*stride;
+          float t=3.1+(float(i)+stratify)*stride;
           vec3 p=origin+ray*t;
-          float drift=.64+.36*sin(p.x*.058-p.z*.027+p.y*.075+phase*.19);
-          float falloff=exp(-t*.023)*(.70+.30*drift);
+          float drift=pockets((p.xz+vec2(p.y*.46,-p.y*.25))*vec2(.074,.092)-vec2(.073,.036)*phase);
+          float falloff=exp(-t*.025)*(.53+.47*drift);
           float sunlight=lightAt(p);
           lit+=sunlight*falloff;
           blocked+=(1.-sunlight)*falloff;
         }
         float facing=.20+.80*pow(max(0.,dot(ray,source)),3.7);
         float contrast=smoothstep(.40,5.,blocked);
-        float light=min(.69,lit*stride*air*facing*(.28+.72*contrast));
+        float light=min(.46,lit*stride*air*facing*(.19+.81*contrast));
         gl_FragColor=vec4(light,min(1.,depth/112.),0.,1.);
       }`);
   const extract=pass({image,pixel:{value:new THREE.Vector2()},gate:{value:.74}},`
@@ -119,8 +128,8 @@ export function createSnowLighting(renderer) {
           +texture2D(bright,imageUV-vec2(0.,bloomStep.y)).rgb;
         return .33*core+.1675*side;
       }
-      float scattering(){
-        float depth=min(1.,length(eyePoint())/112.);
+      float scattering(float distance){
+        float depth=min(1.,distance/112.);
         vec2 p=imageUV*extent-.5,base=floor(p),f=fract(p);
         float light=0.,weight=0.;
         for(int j=0;j<2;j++)for(int i=0;i<2;i++){
@@ -143,7 +152,7 @@ export function createSnowLighting(renderer) {
         float lo=min(m,min(min(l,r),min(u,d))),hi=max(m,max(max(l,r),max(u,d)));
         if(hi-lo<.09*hi+.028)return c;
         vec3 edge=abs(l-r)>abs(u-d)? .5*(left+right):.5*(up+down);
-        return mix(c,edge,.24*clamp((hi-lo)/max(.10,hi),0.,1.));
+        return mix(c,edge,.13*clamp((hi-lo)/max(.10,hi),0.,1.));
       }
       void main(){
         vec3 c=texture2D(image,imageUV).rgb;
@@ -159,14 +168,17 @@ export function createSnowLighting(renderer) {
         float streak=exp(-abs(fromSun.y)*84.-abs(fromSun.x)*8.)*.040;
         vec3 flare=tint*visible*(glowBand+ghost+streak)*(.68+.56*sunset);
         vec3 light=glow*highlight()+flare;
-        if(beams>.5)light+=tint*scattering();
+        if(beams>.5){
+          float depth=length(eyePoint());
+          light+=tint*scattering(depth)*smoothstep(3.5,16.,depth);
+        }
         gl_FragColor=vec4(max(vec3(0.),c+light),1.);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }`,true);
 
   const point=new THREE.Vector3(),look=new THREE.Vector3();
-  return function render(sceneWorld,camera,sun,weather,quality,scale) {
+  return function render(sceneWorld,camera,sun,weather,quality,limited) {
     const strong=quality==='high';
     renderer.getDrawingBufferSize(size);
     const samples=strong?2:0;
@@ -178,7 +190,7 @@ export function createSnowLighting(renderer) {
     blend.uniforms.extent.value.set(volume.width,volume.height);
     blend.uniforms.bloomStep.value.set(1.6/bloom.width,1.6/bloom.height);
     blend.uniforms.pixelSize.value.set(1/size.x,1/size.y);
-    blend.uniforms.aa.value=strong?0:1;
+    blend.uniforms.aa.value=strong||limited?0:1;
     extract.uniforms.pixel.value.set(3.4/size.x,3.4/size.y);
 
     renderer.setRenderTarget(world);renderer.render(sceneWorld,camera);
@@ -194,8 +206,8 @@ export function createSnowLighting(renderer) {
     extract.uniforms.gate.value=weather.nightAmount>.50?.57:.82;
     draw(extract,bloom);
     draw(seeSun,daylight);
-    const strength=solar*(.016+.037*warming+.031*weather.snowAmount);
-    const shafts=strength>.012&&sun.castShadow&&sun.shadow.map&&(strong||scale>.77);
+    const strength=solar*(.014+.027*warming+.017*weather.snowAmount);
+    const shafts=strength>.012&&sun.castShadow&&sun.shadow.map&&(strong||!limited);
     if(shafts){
       integrate.uniforms.shadow.value=sun.shadow.map.depthTexture;
       integrate.uniforms.sunMatrix.value.copy(sun.shadow.matrix);
@@ -207,7 +219,7 @@ export function createSnowLighting(renderer) {
     blend.uniforms.tint.value.setHex(weather.sun);
     blend.uniforms.sunset.value=warming;
     blend.uniforms.saturation.value=1.02+.10*solar;
-    blend.uniforms.glow.value=.17+.13*solar+.09*warming;
+    blend.uniforms.glow.value=(.13+.09*solar+.056*warming)*(1-.53*weather.snowAmount);
     draw(blend,null);
   };
 }

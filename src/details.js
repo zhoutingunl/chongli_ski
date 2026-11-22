@@ -440,8 +440,8 @@ function powderWake(scene,data,random,uniforms,updateScreen){
         gl_Position=projectionMatrix*eye;
         float depth=-eye.z;
         float pixels=puff.x*screen*.5*projectionMatrix[1][1]/max(.1,depth);
-        gl_PointSize=clamp(pixels,1.,144.);
-        float fade=smoothstep(1.25,2.75,depth)*(1.-smoothstep(132.,202.,pixels));
+        gl_PointSize=clamp(pixels,1.,104.);
+        float fade=smoothstep(1.8,4.7,depth)*(1.-smoothstep(90.,154.,pixels));
         shape=vec4(puff.x,puff.y*fade,puff.z,puff.w);
         lit=.54+.46*pow(max(0.,dot(normalize(position-cameraPosition),keyDir)),3.);
       }`,
@@ -496,8 +496,8 @@ function powderWake(scene,data,random,uniforms,updateScreen){
       puff.y=Math.max(data.height(puff.x,puff.z)+.10,puff.y+dt*puff.lift*(1-1.23*age));
       const at=count*3,style=count*4;
       positions[at]=puff.x;positions[at+1]=puff.y;positions[at+2]=puff.z;
-      shapes[style]=puff.scale*(.46+age*(.91+puff.force*.79));
-      shapes[style+1]=puff.force*.79*smooth(0,.10,age)*(1-smooth(.29,1,age));
+      shapes[style]=puff.scale*(.38+age*(.72+puff.force*.64));
+      shapes[style+1]=puff.force*.66*smooth(0,.10,age)*(1-smooth(.24,1,age));
       shapes[style+2]=puff.seed;shapes[style+3]=age;
       live[count++]=puff;
     }
@@ -524,8 +524,8 @@ export function makeSnowFX(scene,data,snowAir){
     vertexShader:`attribute vec3 speck;uniform float screen;varying float opacity,scatter;uniform vec3 keyDir;
       void main(){vec4 eye=modelViewMatrix*vec4(position,1.);gl_Position=projectionMatrix*eye;
       scatter=pow(max(0.,dot(normalize(position),keyDir)),4.);
-      gl_PointSize=clamp(speck.x*screen*.5*projectionMatrix[1][1]/max(.1,-eye.z),.7,12.);
-      opacity=speck.z*smoothstep(.2,1.3,-eye.z)*(1.-smoothstep(17.,25.,-eye.z));}`,
+      gl_PointSize=clamp(speck.x*screen*.45*projectionMatrix[1][1]/max(.1,-eye.z),.65,8.);
+      opacity=speck.z*smoothstep(.65,2.3,-eye.z)*(1.-smoothstep(17.,25.,-eye.z));}`,
     fragmentShader:`uniform float night,snowSky;uniform vec3 sunColor;varying float opacity,scatter;void main(){vec2 p=gl_PointCoord-.5;
       float a=(1.-smoothstep(.2,.5,length(p*vec2(1.05,.88))))*opacity;
       gl_FragColor=vec4(mix(vec3(.87,.92,1.),vec3(.48,.59,.77),night)+sunColor*snowSky*(.10+.55*scatter),a);

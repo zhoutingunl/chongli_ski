@@ -27,7 +27,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
   sun.shadow.camera.left=sun.shadow.camera.bottom=-67;sun.shadow.camera.right=sun.shadow.camera.top=67;
   sun.shadow.camera.near=4;sun.shadow.camera.far=292;
   sun.shadow.mapSize.set(1024,1024);sun.shadow.bias=-.00012;sun.shadow.normalBias=.087;
-  sun.shadow.intensity=.93;sun.shadow.radius=2.2;
+  sun.shadow.intensity=.84;sun.shadow.radius=2.2;
   sun.castShadow=true;scene.add(sun,sun.target,hemi);
   const sky=createSky(scene),source=new THREE.Vector3();
   let forest,surface;
@@ -56,7 +56,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
   const details=courseDetails(scene,data,navigation);
   const trailGuide=createTrailGuide(scene,data,renderer);
   const snowAir=createSnowAir(scene,data),fx=makeSnowFX(scene,data,snowAir);
-  let renderLighting;
+  let renderLighting,lightingLimited=false;
   let rider=createRider(opts);scene.add(rider.group);
   const sim=new Descent(data,opts,rider.dimensions);
   const yawQ=new THREE.Quaternion(),tiltQ=new THREE.Quaternion(),surfNorm=new THREE.Vector3(),want=new THREE.Vector3(),look=new THREE.Vector3(),target=new THREE.Vector3();
@@ -140,7 +140,9 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     const tips=mode==='tips'&&!ride&&(!station||station.view==='wide');
     const cameraEase=snap?1:1-Math.exp(-dt*8);
     const pitchEase=snap?1:1-Math.exp(-dt*7.5);
-    camHeading=snap?travel:mixAngle(camHeading,travel,1-Math.exp(-dt*(first?6:4.8)));
+    const carveFraming=run&&mode==='far'&&!reducedMotion&&Math.abs(lookYaw)<.04 ? (p.automatic?.visibility||0) : 0;
+    const cameraHeading=carveFraming ? mixAngle(travel,p.guideHeading,.49*carveFraming) : travel;
+    camHeading=snap?cameraHeading:mixAngle(camHeading,cameraHeading,1-Math.exp(-dt*(first?6:4.8)));
     bodyOrigin.set(p.x,p.y,p.z);bodyStep.copy(bodyOrigin).sub(lastOrigin);lastOrigin.copy(bodyOrigin);
     if(!baseTurn&&!paused&&(input.lookX||input.lookY))panLook(input.lookX*dt*1.95,input.lookY*dt*1.38);
     let fov=61,bank=0,addPitch=0,heading=camHeading,lockEye=false;
@@ -197,7 +199,10 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
       // local to the rider, including during a rapid carve or a landing.
       heading=camHeading+lookYaw;
       const fx=Math.sin(heading),fz=-Math.cos(heading),rx=-fz,rz=fx;
-      const dx=(back,side)=>p.x-fx*back+rx*side,dz=(back,side)=>p.z-fz*back+rz*side;
+      // The distant camera keeps some of the piste in the same place in the
+      // frame. The skier can then be seen crossing it during linked turns.
+      const shift=clamp(p.offset ?? 0,-6,6)*.30*carveFraming;
+      const dx=(back,side)=>p.x-fx*back+rx*(side-shift),dz=(back,side)=>p.z-fz*back+rz*(side-shift);
       let back=4.6+fast*1.25,side=0,lift=1.82+fast*.22,lead=4.8+fast*.7,eye=1.35;
       if(mode==='low'){back=3.25;lift=.38;lead=3;eye=1.02;fov=70;}
       if(mode==='top'){back=1.65;lift=26;lead=.45;eye=0;fov=54;}
@@ -386,9 +391,9 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     moveCamera(dt);
     treesLag+=dt;if(treesLag>.40){refreshLOD();treesLag=0;}
     trailGuide.update(sim,navigation,opts.language,camera);
-    if(!paused) snowAir.update(dt,conditions,camera.position,opts.quality,isMiniTool);
+    if(!paused) snowAir.update(dt,conditions,camera.position,sim,opts.quality,isMiniTool);
     if(!isMiniTool&&opts.quality!=='lite')renderLighting??=createSnowLighting(renderer)||false;
-    if(!isMiniTool&&opts.quality!=='lite'&&renderLighting)renderLighting(scene,camera,sun,conditions,opts.quality,graphicsScale);
+    if(!isMiniTool&&opts.quality!=='lite'&&renderLighting)renderLighting(scene,camera,sun,conditions,opts.quality,lightingLimited);
     else renderer.render(scene,camera);
     if(shaderFailure){active=false;onEvent('lost');return;}
     if(now-lastUI>95){onEvent('hud',sim);lastUI=now;}
@@ -396,7 +401,8 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
       adaptiveTime+=raw;adaptiveFrames++;
       if(adaptiveFrames>=55){
         const slow=adaptiveTime/adaptiveFrames>.045;
-        if(slow&&graphicsScale>.68){graphicsScale=Math.max(.67,graphicsScale-.12);resize();}
+        if(slow&&!isMiniTool&&renderLighting&&!lightingLimited)lightingLimited=true;
+        else if(slow&&graphicsScale>.68){graphicsScale=Math.max(.67,graphicsScale-.12);resize();}
         else if(slow&&isMiniTool){active=false;onEvent('lost');}
         adaptiveTime=adaptiveFrames=0;
       }
@@ -453,7 +459,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     get nearbyStation(){const n=nearestStation();return n?{name:n.lift.meta.name,end:n.end}:null;},
     pause(b){paused=b;input.lookX=input.lookY=input.trim=input.steer=0;input.brake=input.boost=false;prev=0;kick();},
     stop(){active=false;paused=false;ride=station=baseTurn=null;sim.pivotRate=0;if(frame)cancelAnimationFrame(frame);frame=0;sim.mode='idle';},
-    environment(){environment();kick();},graphics(){graphicsScale=1;sun.castShadow=!isMiniTool&&opts.quality!=='lite';resize();treesLag=1;kick();},
+    environment(){environment();kick();},graphics(){graphicsScale=1;lightingLimited=false;sun.castShadow=!isMiniTool&&opts.quality!=='lite';resize();treesLag=1;kick();},
     changeRider(){
       const previousScale=rider.dimensions.scale;
       scene.remove(rider.group);rider.dispose();rider=createRider(opts);scene.add(rider.group);

@@ -63,7 +63,7 @@ export class Descent {
     this.guideLean = this.bankSwap = this.bump = this.lastGrade = this.force = 0;
     this.cutSide = 1; this.contactTime = 5; this.takeoffSpeed = this.verticalAlong = 0; this.flightCos = 1;
     const f = trackFrame(route, 0);
-    this.departureHeading=f.angle;
+    this.departureHeading=this.guideHeading=f.angle;
     this.x = f.x; this.z = f.z; this.heading = this.travelHeading = f.angle;
     this.y = this.ground = this.startY = this.data.height(this.x, this.z);
     this.surface();
@@ -355,7 +355,8 @@ export class Descent {
         const wave=this.automatic.line(planarSpeed,width,grade,crossGrade,angleBetween(here.angle,ahead.angle),clear,dt);
         lane=wave.offset;laneVelocity=wave.speed;guidedArc=wave.load;
       }
-      const recentre = (lane-this.offset)*(.24+.47*smooth(Math.abs(this.offset),width*.55,width*1.04));
+      const steeringGain = this.automatic.active ? .64 : .24;
+      const recentre = (lane-this.offset)*(steeringGain+.47*smooth(Math.abs(this.offset),width*.55,width*1.04));
       const lateral = clamp(this.steer*planarSpeed*.59 + laneVelocity + recentre,-planarSpeed*.74,planarSpeed*.74);
       const traction = airborne ? .06 : 1;
       const maxLat = (.90 + planarSpeed*planarSpeed / radius * .78) * traction;
@@ -378,7 +379,9 @@ export class Descent {
       const decay=Math.exp(-distance/13);this.branchShiftX*=decay;this.branchShiftZ*=decay;
       this.x = f.x - f.dz*this.offset+this.branchShiftX; this.z = f.z + f.dx*this.offset+this.branchShiftZ; this.planIndex = f.index;
       const look = this.route.frame(Math.min(this.route.length,this.along+Math.max(5,planarSpeed*.80)));
-      const anticipate = clamp(angleBetween(f.angle,look.angle)*planarSpeed*.093,-.76,.76);
+      this.guideHeading=f.angle;
+      const anticipateLimit=this.automatic.active?.48:.76;
+      const anticipate = clamp(angleBetween(f.angle,look.angle)*planarSpeed*.093,-anticipateLimit,anticipateLimit);
       this.guideLean = approach(this.guideLean,clamp(anticipate+guidedArc,-.80,.80),5.8,dt);
       if (Math.hypot(this.x-oldX,this.z-oldZ)>.0001) this.travelHeading = Math.atan2(this.x-oldX,-(this.z-oldZ));
     } else {
