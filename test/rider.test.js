@@ -77,3 +77,21 @@ for (const [gender, label] of [['boy', '男孩'], ['girl', '女孩']]) {
     }
   });
 }
+
+test('成人和儿童在不对称雪面上分别调整两块雪板和膝盖', t => {
+  const uneven={height:(x,z)=>0.12*z +
+    (x<0 ? .075*Math.max(0,1-2*Math.abs(z+.3)) : -.040*Math.max(0,1-2*Math.abs(z-.17)))};
+  for(const gender of ['male','girl']){
+    const rider=createRider({gender,gear:'ski'});
+    t.after(()=>rider.dispose());
+    rider.group.position.set(0,.004+uneven.height(0,0),0);
+    const state={mode:'run',data:uneven,x:0,z:0,heading:0,travelHeading:0,speed:5,slope:Math.atan(.12)*180/Math.PI};
+    rider.group.rotation.x=-Math.atan(.12);
+    for(let i=0;i<90;i++)rider.update(state,1/90,i/90);
+    const left=rider.group.getObjectByName('Left ski'), right=rider.group.getObjectByName('Right ski');
+    assert.ok(left.position.y>right.position.y+.02);
+    assert.ok(Math.abs(left.rotation.x-right.rotation.x)>.005);
+    const joints=['Left trouser leg lower joint','Right trouser leg lower joint'].map(name=>rider.group.getObjectByName(name).getWorldPosition(new Vector3()));
+    assert.ok(Math.abs(joints[0].y-joints[1].y)>.004);
+  }
+});

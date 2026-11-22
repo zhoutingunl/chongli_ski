@@ -541,7 +541,7 @@ export async function plantForest(scene,data) {
       if(special.some(o=>Math.abs(o.x-x)<o.r&&Math.abs(o.z-z)<o.r&&Math.hypot(x-o.x,z-o.z)<o.r))continue;
       const h=5+rand()**.83*10.5;
       const species=rand(),id=species<.53?0:species<.72?1:2;
-      data.obstacles?.tree(x,z,.39+h*.019);
+      data.obstacles?.tree(x,z,.39+h*.019,h);
       loc.push(x,data.height(x,z)-.25,z);forms.push(h*(id===2?.90:id===1?.91:.90)*(rand()>.5?1:-1),h,id,.83+rand()*.30);
     }
     if(!loc.length)continue;

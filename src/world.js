@@ -11,6 +11,8 @@ import {courseDetails,makeSnowFX} from './details.js';
 import {createTrailGuide} from './trail-guide.js';
 import {clamp,mixAngle} from './mountain.js';
 import {isMiniTool} from './platform.js';
+import {createSnowAir} from './snow-air.js';
+import {createSnowLightShafts} from './snow-light-shafts.js';
 
 const up=new THREE.Vector3(0,1,0);
 export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate=createMountainClimate()) {
@@ -51,7 +53,8 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
   const navigation=createSkiNavigation(data);
   const details=courseDetails(scene,data,navigation);
   const trailGuide=createTrailGuide(scene,data,renderer);
-  const fx=makeSnowFX(scene,data);
+  const snowAir=createSnowAir(scene,data),fx=makeSnowFX(scene,data,snowAir);
+  let renderShafts;
   let rider=createRider(opts);scene.add(rider.group);
   const sim=new Descent(data,opts,rider.dimensions);
   const yawQ=new THREE.Quaternion(),tiltQ=new THREE.Quaternion(),surfNorm=new THREE.Vector3(),want=new THREE.Vector3(),look=new THREE.Vector3(),target=new THREE.Vector3();
@@ -256,7 +259,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     sim.start(route);station=null;ride=null;paused=false;active=true;resetLook();
     baseTurn=null;sim.pivotRate=0;
     simLag=0;snap=true;treesLag=1;lastUI=prev=0;
-    input.trim=input.steer=0;input.boost=input.brake=false;fx.reset();
+    input.trim=input.steer=0;input.boost=input.brake=false;fx.reset();snowAir.reset();
   }
   function showScene(){updateAvatar(0);moveCamera(0);refreshLOD();kick();}
   function start(route){route=navigation.safeRun(route);resetScene(route);climate.startRun(opts.time);environment();details.setRoute(route);showScene();}
@@ -379,7 +382,10 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     moveCamera(dt);
     treesLag+=dt;if(treesLag>.40){refreshLOD();treesLag=0;}
     trailGuide.update(sim,navigation,opts.language,camera);
-    renderer.render(scene,camera);
+    if(!paused) snowAir.update(dt,conditions,camera.position,opts.quality,isMiniTool);
+    if(!isMiniTool&&opts.quality==='high')renderShafts??=createSnowLightShafts(renderer)||false;
+    if(!isMiniTool&&opts.quality==='high'&&renderShafts)renderShafts(scene,camera,sun,conditions);
+    else renderer.render(scene,camera);
     if(shaderFailure){active=false;onEvent('lost');return;}
     if(now-lastUI>95){onEvent('hud',sim);lastUI=now;}
     if(!paused&&raw>0&&opts.quality==='auto'){
@@ -432,7 +438,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     get station(){return station;},
     recoverToPiste(){
       if(!sim.recoverToPiste())return false;
-      resetLook();fx.reset();details.setRoute(sim.route);simLag=0;snap=true;treesLag=1;
+      resetLook();fx.reset();snowAir.reset();details.setRoute(sim.route);simLag=0;snap=true;treesLag=1;
       showScene();return true;
     },
     get nearbyStation(){const n=nearestStation();return n?{name:n.lift.meta.name,end:n.end}:null;},

@@ -87,7 +87,19 @@ export class ObstacleIndex {
         this.cells.get(key).push(item);
       }
   }
-  tree(x,z,r){this.insert(x-r,z-r,x+r,z+r,{x,z,r});}
+  tree(x,z,r,height=0){
+    const spread=Math.max(r,height*.22);
+    this.insert(x-spread,z-spread,x+spread,z+spread,{x,z,r,height});
+  }
+  snowCanopy(x,y,z){
+    const trees=this.cells.get(Math.floor(x/this.size)+','+Math.floor(z/this.size));
+    return trees?.some(tree=>{
+      if(!tree.height||y<.8||y>tree.height)return false;
+      const scale=y/tree.height;
+      const radius=tree.height*.21*(1-.94*scale);
+      return (x-tree.x)**2+(z-tree.z)**2<Math.max(radius,tree.r)**2;
+    })??false;
+  }
   contact(x,z,clearance=0){
     const lowX=Math.floor((x-clearance)/this.size),highX=Math.floor((x+clearance)/this.size);
     const lowZ=Math.floor((z-clearance)/this.size),highZ=Math.floor((z+clearance)/this.size);

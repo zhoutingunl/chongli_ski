@@ -250,7 +250,7 @@ function snowFan(scene,data,uniforms){
   geo.setAttribute('position',dynamic(positions,3));geo.setAttribute('parcel',dynamic(ink,4));geo.setIndex(new THREE.BufferAttribute(idx,1));geo.setDrawRange(0,0);
   const material=new THREE.ShaderMaterial({uniforms,transparent:true,depthWrite:false,side:THREE.DoubleSide,forceSinglePass:true,
     vertexShader:`attribute vec4 parcel;varying vec4 v;varying vec3 wp;void main(){v=parcel;wp=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
-    fragmentShader:`uniform sampler2D snowGrain;uniform float night;uniform vec3 keyDir;varying vec4 v;varying vec3 wp;
+    fragmentShader:`uniform sampler2D snowGrain;uniform float night,solar;uniform vec3 keyDir,sunColor;varying vec4 v;varying vec3 wp;
       void main(){vec3 grains=texture2D(snowGrain,vec2(v.y*.78,v.x*.98+v.y*.034)).rgb;
         float top=smoothstep(.36,1.,v.x);float pore=.185+.31*top+.41*v.z+top*.16*v.z;
         float mass=smoothstep(pore-.065,pore+.08,grains.r*.63+grains.b*.25+grains.g*.12);
@@ -259,7 +259,9 @@ function snowFan(scene,data,uniforms){
           smoothstep(0.,.14,v.x)*(1.-smoothstep(.70,.98,v.x));
         if(opacity<.025)discard;vec3 n=normalize(cross(dFdx(wp),dFdy(wp)));if(n.y<0.)n=-n;
         float lit=.29+.51*max(0.,dot(n,keyDir))+.18*grains.r;
-        vec3 c=mix(vec3(.34,.47,.60),vec3(.98,.97,.92),lit);
+        vec3 c=mix(vec3(.34,.47,.60),vec3(.89,.94,.97),lit);
+        float scatter=pow(max(0.,dot(normalize(wp-cameraPosition),keyDir)),4.);
+        c+=sunColor*solar*(.13+.50*scatter)*lit;
         gl_FragColor=vec4(c*mix(vec3(1.),vec3(.20,.29,.46),night),opacity);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -436,7 +438,7 @@ function powderWake(scene,data,random,uniforms,updateScreen){
         gl_PointSize=clamp(pixels,1.,144.);
         float fade=smoothstep(1.25,2.75,depth)*(1.-smoothstep(132.,202.,pixels));
         shape=vec4(puff.x,puff.y*fade,puff.z,puff.w);
-        lit=.65+.35*dot(normalize(cameraPosition-position),keyDir);
+        lit=.54+.46*pow(max(0.,dot(normalize(position-cameraPosition),keyDir)),3.);
       }`,
     fragmentShader:`uniform sampler2D snowGrain;uniform float night;varying vec4 shape;varying float lit;
       void main(){
@@ -500,9 +502,9 @@ function powderWake(scene,data,random,uniforms,updateScreen){
   return {update,clear(){live.length=0;previous=null;bank=0;cloud.visible=false;geo.setDrawRange(0,0);}};
 }
 
-export function makeSnowFX(scene,data){
+export function makeSnowFX(scene,data,snowAir){
   const random=randomGenerator(6127),screen={value:720},night={value:0},viewport=new THREE.Vector2();
-  const uniforms={screen,night,haze:{value:0},keyDir:{value:new THREE.Vector3(.36,.75,.55).normalize()},snowGrain:{value:powderGrain()}};
+  const uniforms={screen,night,solar:{value:0},snowSky:{value:0},sunColor:{value:new THREE.Color()},haze:{value:0},keyDir:{value:new THREE.Vector3(.36,.75,.55).normalize()},snowGrain:{value:powderGrain()}};
   const updateScreen=renderer=>{screen.value=renderer.getDrawingBufferSize(viewport).y;};
   const tracks=snowTracks(scene,data,uniforms),fan=snowFan(scene,data,uniforms),particles=snowParticles(scene,data,random,uniforms,updateScreen);
   const wake=powderWake(scene,data,randomGenerator(6419),uniforms,updateScreen);
@@ -513,14 +515,15 @@ export function makeSnowFX(scene,data){
   }
   const fg=new THREE.BufferGeometry();fg.setAttribute('position',new THREE.BufferAttribute(flakes,3).setUsage(THREE.DynamicDrawUsage));
   fg.setAttribute('speck',new THREE.BufferAttribute(specks,3));fg.setDrawRange(0,0);
-  const fallMat=new THREE.ShaderMaterial({transparent:true,depthWrite:false,uniforms:{screen,night},
-    vertexShader:`attribute vec3 speck;uniform float screen;varying float opacity;
+  const fallMat=new THREE.ShaderMaterial({transparent:true,depthWrite:false,uniforms,
+    vertexShader:`attribute vec3 speck;uniform float screen;varying float opacity,scatter;uniform vec3 keyDir;
       void main(){vec4 eye=modelViewMatrix*vec4(position,1.);gl_Position=projectionMatrix*eye;
+      scatter=pow(max(0.,dot(normalize(position),keyDir)),4.);
       gl_PointSize=clamp(speck.x*screen*.5*projectionMatrix[1][1]/max(.1,-eye.z),.7,12.);
       opacity=speck.z*smoothstep(.2,1.3,-eye.z)*(1.-smoothstep(17.,25.,-eye.z));}`,
-    fragmentShader:`uniform float night;varying float opacity;void main(){vec2 p=gl_PointCoord-.5;
+    fragmentShader:`uniform float night,snowSky;uniform vec3 sunColor;varying float opacity,scatter;void main(){vec2 p=gl_PointCoord-.5;
       float a=(1.-smoothstep(.2,.5,length(p*vec2(1.05,.88))))*opacity;
-      gl_FragColor=vec4(mix(vec3(.93,.96,1.),vec3(.48,.59,.77),night),a);
+      gl_FragColor=vec4(mix(vec3(.87,.92,1.),vec3(.48,.59,.77),night)+sunColor*snowSky*(.10+.55*scatter),a);
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
     }`});
@@ -550,6 +553,10 @@ export function makeSnowFX(scene,data){
     update(p,dt,weather,view,dimensions){
       night.value=weather?.nightAmount??0;uniforms.haze.value=scene.fog?.density??0;
       if(weather?.dir)uniforms.keyDir.value.fromArray(weather.dir);
+      const sunlight=weather?.sunAmount??0;
+      uniforms.solar.value=sunlight*(sunlight>.08 ? snowAir.sunAt(p.x,p.y+.7,p.z,weather) : 0);
+      uniforms.snowSky.value=sunlight*(sunlight>.08&&view ? snowAir.sunAt(view.x,view.y+1.1,view.z,weather) : 0);
+      if(weather?.sun)uniforms.sunColor.value.setHex(weather.sun);
       snowfall(dt,weather,view);
       if(p.mode!=='run'){
         if(movingSnow){tracks.lift();fan.clear();particles.clear();wake.clear();movingSnow=false;}wasAirborne=false;return;
