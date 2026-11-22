@@ -321,8 +321,19 @@ export class Descent {
       this.edgeSpeed += clamp((lateral-this.edgeSpeed) * dt * (1.60+grip*.55), -maxLat*dt, maxLat*dt);
       this.edgeSpeed = clamp(this.edgeSpeed, -planarSpeed*.75, planarSpeed*.75);
       this.offset += this.edgeSpeed * dt;
-      this.along = Math.min(this.route.length, this.along+Math.sqrt(Math.max(0,planarSpeed**2-this.edgeSpeed**2))*dt);
-      const f = trackFrame(this.route,this.along);
+      let stride = Math.min(this.route.length-this.along,Math.sqrt(Math.max(0,planarSpeed**2-this.edgeSpeed**2))*dt);
+      let f = trackFrame(this.route,this.along+stride);
+      // On rejoining from a traverse the boots can be well outside the centre
+      // of a bend. Its outer edge travels an extra radius × angle per step.
+      if(Math.abs(this.offset)>2 && stride>.0001){
+        const previous=trackFrame(this.route,this.along);
+        const extra=-this.offset*angleBetween(previous.angle,f.angle);
+        if(extra>stride*.02){
+          stride*=stride/(stride+extra);
+          f=trackFrame(this.route,this.along+stride);
+        }
+      }
+      this.along+=stride;
       const decay=Math.exp(-distance/13);this.branchShiftX*=decay;this.branchShiftZ*=decay;
       this.x = f.x - f.dz*this.offset+this.branchShiftX; this.z = f.z + f.dx*this.offset+this.branchShiftZ; this.planIndex = f.index;
       const look = this.route.frame(Math.min(this.route.length,this.along+Math.max(5,planarSpeed*.80)));

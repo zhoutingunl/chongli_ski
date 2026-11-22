@@ -24,12 +24,17 @@ function skiFor(run, seconds, input = {}) {
   }
 }
 
-function leaveSummit(heading, gear) {
-  const run = new Descent(mountain, {assist: true, gear});
-  run.start(navigation.departure('wanlong', ...summit.position, heading));
+function leaveSummit(heading, gear, side = 'wanlong', assist = true) {
+  const run = new Descent(mountain, {assist, gear});
+  run.start(navigation.departure(side, ...mountain.summitPlaces[side].position, heading));
   run.speed = 2.15;
   run.freeHeading(heading);
   return run;
+}
+
+function skiUntil(run, check, input, seconds) {
+  for (let frame = 0; frame < seconds * 60 && !check(); frame++) skiFor(run, 1 / 60, input);
+  assert.ok(check(), 'The skier should reach the requested position or entrance in time');
 }
 
 function placeOnRoute(route, along, speed) {
@@ -59,20 +64,66 @@ test('万龙山顶给出四个各自可达的道口', () => {
     new Set(['金龙道', '长龙道', '银龙道', '海龙道']));
 });
 
+for (const [side, name, outlet] of [
+  ['wanlong', '万龙', 'wanlong-long'], ['genting', '云顶', 'genting-valley']
+]) {
+  const {position: [x, z], heading, camera} = mountain.summitPlaces[side];
+  test(name + '的山顶镜头、雪板与下坡道口对齐，前方雪面连续下降', () => {
+    const view = Math.atan2(camera.target[0] - camera.position[0], camera.position[1] - camera.target[1]);
+    assert.ok(Math.cos(view - heading) > 0.999);
+    assert.ok(mountain.height(...camera.target) < mountain.height(...camera.position));
+    const route = navigation.departure(side, x, z, heading);
+    assert.equal(route.id, outlet);
+    for (const metres of [5, 15, 30]) {
+      const ahead = route.at(metres);
+      assert.ok(mountain.height(x, z) - mountain.height(ahead.x, ahead.z) > metres * 0.06);
+      assert.ok(mountain.height(x, z) - mountain.height(x + metres * Math.sin(heading),
+        z - metres * Math.cos(heading)) > metres * 0.06);
+    }
+    let previous = mountain.height(x, z);
+    for (let metres = 1; metres <= 30; metres++) {
+      const p = route.at(metres);
+      assert.equal(mountain.obstacles.contact(p.x, p.z), null);
+      const height = mountain.height(p.x, p.z);
+      assert.ok(height <= previous + 1e-6);
+      previous = height;
+    }
+  });
+  for (const gear of ['ski', 'board']) {
+    test(name + (gear === 'ski' ? '双板' : '单板') + '轻点前进后，开关循线辅助都能靠坡度加速', () => {
+      for (const assist of [true, false]) {
+        const run = leaveSummit(heading, gear, side, assist);
+        const start = run.ground;
+        skiFor(run, 2);
+        assert.ok(start - run.ground > 0.3 && run.speed > 2.75);
+        const firstSpeed = run.speed;
+        skiFor(run, 8);
+        assert.ok(start - run.ground > 2.5 && run.travel > 32);
+        assert.ok(run.speed > firstSpeed && run.speed * 3.6 > 18);
+        if (assist) assert.equal(run.route.id, outlet);
+      }
+    });
+  }
+}
+
 for (const [gear, label] of [['ski', '双板'], ['board', '单板']]) {
   for (const {heading, from, to, steer} of [
     {heading: summit.heading, from: long, to: gold, steer: -0.68},
     {heading: summit.heading - 0.70, from: gold, to: long, steer: 0.68}
   ]) {
     test(label + '从' + from.name + '出发后仍能转入' + to.name, () => {
-      for (const delay of [5, 11]) {
+      const otherHeading = navigation.summitHeading('wanlong', to.id);
+      const other = navigation.departure('wanlong', ...summit.position, otherHeading);
+      // The decision is spatial. Time to a mouth varies with downhill grade and equipment.
+      for (const fraction of [0.22, 0.50, 0.72]) {
         const run = leaveSummit(heading, gear);
-        skiFor(run, delay, {boost: true});
+        const distance = fraction * Math.min(run.approach.endDistance, other.approach.endDistance);
+        skiUntil(run, () => run.travel >= distance, {boost: true}, 10);
         assert.equal(run.route.id, from.id);
-        skiFor(run, 0.82, {steer, boost: true});
+        skiUntil(run, () => run.route.id === to.id, {steer, boost: true}, 3.5);
         skiFor(run, 4, {boost: true});
-        assert.equal(run.route.id, to.id, 'Turn after ' + delay + ' seconds');
-        assert.ok(run.elapsed > delay && run.travel > 8);
+        assert.equal(run.route.id, to.id, 'The selected line holds after releasing the key');
+        assert.ok(run.travel > distance + 8);
       }
     });
   }
@@ -80,12 +131,12 @@ for (const [gear, label] of [['ski', '双板'], ['board', '单板']]) {
 
 test('同一次滑行可以从长龙转金龙再回长龙', () => {
   const run = leaveSummit(summit.heading, 'ski');
-  skiFor(run, 5, {boost: true});
-  skiFor(run, 0.65, {steer: -0.68, boost: true});
-  skiFor(run, 3, {boost: true});
+  skiFor(run, 1.5);
+  skiUntil(run, () => run.route.id === gold.id, {steer: -0.68}, 3);
+  skiFor(run, 1.2);
   assert.equal(run.route.id, gold.id);
-  skiFor(run, 0.82, {steer: 0.68, boost: true});
-  skiFor(run, 4, {boost: true});
+  skiUntil(run, () => run.route.id === long.id, {steer: 0.68}, 3.5);
+  skiFor(run, 4);
   assert.equal(run.route.id, long.id);
 });
 

@@ -165,7 +165,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
       }
       fov=tips?76:station?71:72+(reducedMotion?2:15)*fast+Math.min(2,p.boost*fast*2);
       const grade=THREE.MathUtils.degToRad(p.slope||0);
-      let neutral=station?-.055:-.16-.70*grade;
+      let neutral=station?station.restPitch:-.16-.70*grade;
       if(tips)neutral=-.57-.68*grade;
       else if(run){
         rider.group.localToWorld(rider.tipPosition(tipWorld));
@@ -302,8 +302,10 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
     [sim.x,sim.z]=place.position;sim.heading=sim.travelHeading=place.heading;
     sim.ground=sim.startY=sim.y=data.height(sim.x,sim.z);
     sim.trail=null;sim.onTrail=false;
+    const ahead=data.height(sim.x+12*Math.sin(place.heading),sim.z-12*Math.cos(place.heading));
+    const restPitch=summit?-.08-clamp(Math.atan2(sim.ground-ahead,12),0,.4):-.055;
     station={side,lift,end,summit,eye:point(place.camera.position,place.camera.height),
-      target:point(place.camera.target,place.camera.targetHeight),fov:place.camera.fov||58};
+      target:point(place.camera.target,place.camera.targetHeight),fov:place.camera.fov||58,restPitch};
     station.homeEye=station.eye.clone();station.homeTarget=station.target.clone();station.view='wide';
     if(lift&&end==='bottom'&&!summit)parkFacing(place.heading);
     resetLook();showScene();
@@ -455,7 +457,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{}) {
         const dx=orbitPivot.x-sim.x,dz=orbitPivot.z-sim.z;
         lookYaw=wrap(Math.atan2(dx,-dz)-sim.heading);
         const eyeY=rider.group.localToWorld(rider.eyePosition(want)).y;
-        lookPitch=clamp(Math.atan2(orbitPivot.y-eyeY,Math.hypot(dx,dz))+.055,-pitchLimit,pitchLimit);
+        lookPitch=clamp(Math.atan2(orbitPivot.y-eyeY,Math.hypot(dx,dz))-station.restPitch,-pitchLimit,pitchLimit);
       }
       snap=true;treesLag=1;kick();
     },

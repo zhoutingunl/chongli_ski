@@ -262,27 +262,27 @@ def mapped_features(xml, terrain):
     hall = next(b for b in buildings if b['id'] == 'w1153883032')
     landmarks[3].update({'buildingId': hall['id'], 'footprint': hall['footprint']})
     routes = [itinerary(r, way_nodes, coordinates, terrain.source_height) for r in ITINERARIES]
-    # These are game viewpoints on open snow beside the mapped upper terminals.
-    # All horizontal coordinates use the terrain grid. Eye and target heights are
-    # above their respective snow surfaces. Heading zero faces north (-z).
-    summit_places = {
-        'wanlong': {
-            'position': [-308.0, -53.5], 'heading': 1.77,
-            'lodgeId': 'wanlong-lodge', 'liftId': 'w1564657050', 'stationEnd': 'top',
-            'camera': {'position': [-315.5, -55.0], 'height': 3.05,
-                       'target': [-297.5, -51.7], 'targetHeight': 1.36},
-        },
-        'genting': {
-            'position': [623.3, 359.5], 'heading': 5.1960,
-            'lodgeId': 'genting-lodge', 'liftId': 'w469393391', 'stationEnd': 'top',
-            'camera': {'position': [630.0, 363.0], 'height': 3.05,
-                       'target': [617.6, 356.5], 'targetHeight': 0.98},
-        },
-    }
     features = {'trails': trails, 'lifts': lifts, 'routes': routes, 'landmarks': landmarks,
-                'buildings': buildings, 'water': water, 'summitPlaces': summit_places}
+                'buildings': buildings, 'water': water, 'summitPlaces': summit_places()}
     add_piste_catalog(features, terrain.source_height)
     return features
+
+
+def summit_places():
+    # Open snow on the downhill lip of each unloading area. Keep the lookout
+    # camera on the boot bearing so forward means the same thing in every view.
+    def place(x, z, degrees, lodge, lift):
+        heading = math.radians(degrees)
+        def along(metres):
+            return [round(x + metres * math.sin(heading), 3),
+                    round(z - metres * math.cos(heading), 3)]
+        return {'position': [x, z], 'heading': heading, 'lodgeId': lodge,
+                'liftId': lift, 'stationEnd': 'top',
+                'camera': {'position': along(-6), 'height': 2.65,
+                           'target': along(8), 'targetHeight': 1.1}}
+
+    return {'wanlong': place(-219, -33, 55, 'wanlong-lodge', 'w1564657050'),
+            'genting': place(548, 383, 25, 'genting-lodge', 'w469393391')}
 
 
 def main():

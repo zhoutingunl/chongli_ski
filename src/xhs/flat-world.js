@@ -54,16 +54,15 @@ export function createFlatWorld(canvas,data,opts,onEvent) {
   let yaw=0,zoom=1,panX=0,panY=0,frame=0,last=0,clock=0,hudAge=0,snowMarks=[];
   let conditions=climate.sample(opts.time,opts.weather,0);
   const refreshClimate=()=>{conditions=climate.sample(opts.time,opts.weather,clock);};
-  function gates(route,at,side,lift,end='top'){
-    sim.start(route);Object.assign(sim,{mode:'station',x:at.position[0],z:at.position[1],heading:at.heading,travelHeading:at.heading,trail:null});
+  function gates(route,at,side,lift,end='top',summit=false){
+    sim.start(route);Object.assign(sim,{mode:summit?'summit':'station',x:at.position[0],z:at.position[1],heading:at.heading,travelHeading:at.heading,trail:null});
     sim.y=sim.ground=sim.startY=data.height(sim.x,sim.z);
-    station={side,lift,end,view:'wide'};ride=null;resetView();draw();kick();
+    station={side,lift,end,summit,view:'wide'};ride=null;resetView();draw();kick();
   }
   function stage(route){
     const place=data.summitPlaces[route.resort];
     const lift=data.lifts.find(l=>l.id===place.liftId);
-    gates(route,place,route.resort,lift,place.stationEnd);
-    station.summit=true;sim.mode='summit';
+    gates(route,place,route.resort,lift,place.stationEnd,true);
   }
   function resetView(){
     canvas.hidden=false;active=true;paused=photo=false;last=0;yaw=0;zoom=1;panX=panY=0;snowMarks=[];
@@ -149,7 +148,9 @@ export function createFlatWorld(canvas,data,opts,onEvent) {
     if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}
     const subject=photo?site(photoKind):station?.view==='lodge'?site('lodge'):null;
     const x=subject?.x??sim.x, z=subject?.z??sim.z;
-    const bearing=yaw, scale=Math.min(w,h)/((station?.view==='valley'?780:320)/zoom);
+    const headingUp=!photo&&(sim.mode==='summit'||sim.mode==='run');
+    const bearing=headingUp?-(sim.heading+yaw):yaw;
+    const scale=Math.min(w,h)/((station?.view==='valley'?780:320)/zoom);
     const co=Math.cos(bearing),si=Math.sin(bearing);
     const centerX=w*.5+panX,centerY=h*.49+panY;
     function position(px,pz){
@@ -171,7 +172,7 @@ export function createFlatWorld(canvas,data,opts,onEvent) {
       trace(trail.points,night?'#435873':'#c3d6dd',Math.max(2,trail.width*scale*.72));
       trace(trail.points,difficultyColor[trail.difficulty]||'#627f91',1.6);
     }
-    trace(sim.route.points,night?'#ffc77f':'#a45e23',2.7);
+    if(sim.mode!=='summit')trace(sim.route.points,night?'#ffc77f':'#a45e23',2.7);
     ctx.setLineDash([4,6]);
     for(const lift of data.lifts)trace(lift.points,night?'#adb8c8':'#678490',1);
     ctx.setLineDash([]);

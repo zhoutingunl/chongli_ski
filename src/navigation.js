@@ -64,17 +64,18 @@ function summitLinks(data) {
   const ridge = data.trails.find(t => t.id === 'w259702571').points;
   const [a,b] = flying;
   return {
-    sea:{via:ridge.slice(2,5),join:0},
-    silver:{via:[[a[0]+(b[0]-a[0])*.49,a[1]+(b[1]-a[1])*.49],b],join:0},
-    gold:{via:[[-287,-60],[-277,-54],[-248,-52.5]],join:0},
-    long:{via:[[-281,-43],[-268,-33],[-262.7,-18],[-224.7,-3.2]],join:0},
-    peony:{via:[[593,337],[576.8,322.2],[557,280.3],[511,285.8],[502.3,281.1],[491.3,207.4]],join:0},
-    // The 1-lift unloading apron lies east of Datura's first surveyed node.
-    // Join its forward reach instead of doubling back through the terminal.
-    datura:{via:[],join:2},
-    // The south side of lift 1 is open snow in the winter orthophoto and tree
-    // cover grid. Pass outside the lower face of its platform onto OSM Felwort.
-    felwort:{via:[[600,376.1],[583,376.5],[570.5,382.5]],join:1}
+    sea:{via:[[-246,-42.5],[-270,-42.5],[-282,-45],...ridge.slice(2,5)],join:0},
+    silver:{via:[[-232,-52],[-251,-49],[-264,-45.5],[-279,-48],[-295,-58],
+      [a[0]+(b[0]-a[0])*.49,a[1]+(b[1]-a[1])*.49],b],join:0},
+    gold:{via:[[-213,-49],[-204,-54]],join:0},
+    // Stay on the falling shoulder and merge with Long Dragon's first reach.
+    // Returning to its surveyed start would send a rider back up the crest.
+    long:{via:[[-204,-43],[-188,-43],[-166,-36]],join:1},
+    peony:{via:[[538,345],[539,311],[511,285.8],[502.3,281.1],[491.3,207.4]],join:0},
+    // The starting lip is just above the shared Datura/Felwort survey node.
+    // Follow each outlet forwards, on the west side of the lift 1 terminal.
+    datura:{via:[],join:1},
+    felwort:{via:[],join:1}
   };
 }
 
@@ -273,7 +274,7 @@ function makeSigns(data,byId,links,structures) {
       const opt=mouths[key],r=summitRoute(data,byId.get(opt.routeId),links,foot,structures);
       return optionOnRoute(opt,r,foot,0,13);
     });
-    const [x,z]=side==='wanlong'?[-306.5,-42.3]:[611,358.2];
+    const [x,z]=foot;
     signs.push({id:side+'-summit',type:'summit',resort:side,x,z,approach:place.heading,junctionPosition:foot,upstreamPosition:foot,options});
   }
   for(const def of forks){
@@ -621,13 +622,12 @@ export function createSkiNavigation(data) {
   }
   const apronLines=new Map();
   for(const [side,site] of summitGuides){
-    const marks={gold:[-298,-54.5],long:[-298.35,-50.6],silver:[-314.5,-60.4],sea:[-317.4,-54.05]};
     const foot=site.position;
     const lines=site.options.map(opt=>{
       const key=entryOf(opt.routeId),raw=entries.get(opt.routeId);
       const plan=stopOutsideTerminal(summitRoute(data,raw,links,foot,structures),structures,data);
       const f=plan.at(10.5);
-      opt.paintPosition=marks[key]||pair(f);
+      opt.paintPosition=pair(f);
       return {opt,key,plan};
     });
     apronLines.set(side,lines);
@@ -815,7 +815,6 @@ export function createSkiNavigation(data) {
 
   const upperZones={
     wanlong:[
-      {id:'east-apron',center:[-249,-38],keys:['gold','long'],marks:[[-240.6,-43.5],[-241.5,-31.4]]},
       {id:'west-apron',center:[-367,-82],keys:['silver','sea'],marks:[[-373.9,-89.2],[-375.2,-76.2]]}
     ]
   };

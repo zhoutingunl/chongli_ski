@@ -315,7 +315,9 @@ function paintHUD(){
   if(lift){$('#lift-text').textContent=resort(lift.resort)+' · '+label(lift.name)+' · '+dir+' '+Math.round(lift.progress*100)+'%';$('[data-act="skip-lift"]').textContent=lift.dir>0?t('直达上站','Skip to upper station'):t('直达下站','Skip to lower station');}
   if(station){
     $('#station-title').textContent=station.trailhead?label(r.name):station.summit?(station.side==='wanlong'?t('万龙山顶木屋 · 七索上站','Wanlong summit lodge · Lift 7'):t('金花阁 · 云顶一索上站','Jinhua Pavilion · Genting Lift 1')):resort(station.side)+' · '+label(liftStationName);
-    $('#station-note').textContent=t('按方向键起滑 · 拖动环顾','Press a direction to ski · drag to look');
+    $('#station-note').textContent=station.summit&&!world.looking?
+      t('点 ↑ 顺坡起滑 · 拖动环顾','Tap ↑ to ski downhill · drag to look'):
+      t('按方向键起滑 · 拖动环顾','Press a direction to ski · drag to look');
     $('#station-ride').textContent=station.end==='top'?t('乘索道下山','Ride lift down'):t('乘索道上行','Ride lift up');
   }
 }
