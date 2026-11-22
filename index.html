@@ -73,8 +73,8 @@
       <button class="dir-key dir-right" data-drive="right" aria-label="向右滑行"><span></span></button>
     </div>
     <div id="keyboard-hint">A / D 转弯 <i></i> W 加速 <i></i> S 刹车 <i></i> 空格 跳跃</div>
-    <div class="ride-actions"><div class="camera-tray"><button id="tray-toggle" class="tray-button" data-act="tray" aria-label="机位工具" aria-expanded="false" aria-controls="tray-tools"><span data-glyph="back"></span></button><div id="tray-tools" hidden><button class="tray-button" data-act="view" title="切换视角" aria-label="切换视角"></button></div></div><button class="control brake" data-hold="brake">刹车</button><button class="control boost" data-hold="boost">加速</button><button class="control jump" data-hold="jump" aria-label="按住蓄力，松开起跳">跳</button></div>
-    <div id="lift-strip" hidden><span data-glyph="lift"></span><span id="lift-text"></span><button data-act="skip-lift">直达山顶</button></div>
+    <div class="ride-actions"><div class="camera-tray"><button id="tray-toggle" class="tray-button" data-act="tray" aria-label="机位工具" aria-expanded="false" aria-controls="tray-tools"><span data-glyph="back"></span></button><div id="tray-tools" hidden><button class="tray-button" data-act="view" title="切换视角" aria-label="切换视角"></button><button id="tray-record" class="tray-button" data-act="record" hidden><i></i><span>录像</span></button></div></div><button class="control brake" data-hold="brake">刹车</button><button class="control boost" data-hold="boost">加速</button><button class="control jump" data-hold="jump" aria-label="按住蓄力，松开起跳">跳</button></div>
+    <div id="lift-strip" hidden><span data-glyph="lift"></span><span id="lift-text"></span><button class="lift-shortcut" data-act="skip-lift"><span></span><b aria-hidden="true">→</b></button></div>
   </section>
   <section id="video-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="video-title">
     <div class="video-sheet">
@@ -85,6 +85,7 @@
       <div class="video-actions">
         <button class="glass-button" data-act="close-video">返回</button>
         <button class="glass-button" data-act="new-video" hidden>录新片段</button>
+        <button class="glass-button" data-act="download-video" hidden>下载到文件</button>
         <button class="launch" data-act="save-video" hidden>保存到本地</button>
       </div>
     </div>

@@ -30,12 +30,15 @@ test('长龙道滑手停在山脚大厅边仍可乘一索，并在安全雪面�
   assert.equal(nearbyLiftStation(data,skierAt(-748,-1390))?.lift.id,undefined);
 });
 
-test('道外停车满五秒才提示，恢复落在雪道且不增加已滑距离',()=>{
+test('道外低速持续三秒才提示，恢复落在最近雪道且不增加已滑距离',()=>{
   const sim=skierAt(-350,-420);
   assert.equal(sim.onTrail,false);
-  sim.tick(4.85,{brake:true});
+  for(let step=0;step<269;step++){
+    sim.speed=1.2;
+    sim.tick(1/90);
+  }
   assert.equal(sim.recoveryReady,false);
-  sim.tick(.20,{brake:true});
+  sim.tick(1/90);
   assert.equal(sim.recoveryReady,true);
   const {travel,elapsed,pisteVisits}=sim;
   assert.equal(sim.recoverToPiste(),true);
@@ -46,16 +49,28 @@ test('道外停车满五秒才提示，恢复落在雪道且不增加已滑距�
   assert.deepEqual([sim.travel,sim.elapsed,sim.pisteVisits],[travel,elapsed,pisteVisits]);
 });
 
-test('短时间内连续撞树后停下，即使靠着道边也可提前返回',()=>{
-  const near=data.trails.find(t=>t.name==='金龙道').points[2];
-  const sim=skierAt(...near);
-  sim.data={...data,obstacles:{contact:(x,z)=>({x,z,nx:0,nz:0,kind:'tree'})}};
-  sim.speed=.4;
-  sim.tick(.21,{brake:true});
-  assert.equal(sim.recoveryReady,false);
-  sim.tick(.08,{brake:true});
-  assert.ok(sim.treeHits>=2);
+test('按加速、速度回到十公里每小时以上或进入雪道，返回按钮撤下并重新计时',()=>{
+  const sim=skierAt(-350,-420);
+  sim.tick(3,{brake:true});
   assert.equal(sim.recoveryReady,true);
+  sim.tick(1/90,{boost:true});
+  assert.equal(sim.recoveryReady,false);
+  sim.tick(2.99,{brake:true});
+  assert.equal(sim.recoveryReady,false);
+  sim.tick(.02,{brake:true});
+  assert.equal(sim.recoveryReady,true);
+  sim.speed=4;
+  sim.tick(1/90);
+  assert.equal(sim.recoveryReady,false);
+  sim.speed=1.2;
+  sim.tick(3,{brake:true});
+  assert.equal(sim.recoveryReady,true);
+  const trail=data.trails.find(t=>t.name==='金龙道');
+  [sim.x,sim.z]=trail.points[2];
+  sim.y=sim.ground=data.height(sim.x,sim.z);
+  sim.tick(1/90,{brake:true});
+  assert.equal(sim.onTrail,true);
+  assert.equal(sim.recoveryReady,false);
 });
 
 test('沿线支柱避开所有雪道净空，索道上下站保持原坐标',()=>{

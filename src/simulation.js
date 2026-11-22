@@ -43,7 +43,7 @@ export class Descent {
     this.junctions=this.navigation?.stationsOn(route)||[];
     this.pisteVisits=new Map();
     this.feedback={landing:0,tree:0};
-    this.offPisteRest=this.runoutRest=this.treeHits=0;
+    this.offPisteRest=this.runoutRest=0;
     this.lastTreeHit=-Infinity;
     this.recoveryReady=false;
     this.passedJunctions=new Set();this.requestedTurn=null;
@@ -159,7 +159,7 @@ export class Descent {
     this.press=this.pressure=this.curve=this.impact=this.landing=this.spray=this.bump=0;
     this.requestedTurn=null;this.cancelJump();
     this.handSteering=!this.opts.assist;this.neutralTime=0;this.courseCheck=.4;
-    this.offPisteRest=this.runoutRest=this.treeHits=0;this.lastTreeHit=-Infinity;this.recoveryReady=false;
+    this.offPisteRest=this.runoutRest=0;this.lastTreeHit=-Infinity;this.recoveryReady=false;
     this.surface();
     return true;
   }
@@ -389,7 +389,6 @@ export class Descent {
       const hit=this.data.obstacles?.contact(this.x,this.z);
       if(hit){
         if(hit.kind==='tree'&&this.elapsed-this.lastTreeHit>.20){
-          this.treeHits=this.elapsed-this.lastTreeHit<4?this.treeHits+1:1;
           this.lastTreeHit=this.elapsed;this.feedback.tree++;
         }
         this.x=hit.x;this.z=hit.z;this.speed*=.39;this.edgeSpeed=0;this.impact=Math.max(this.impact,.56);
@@ -459,10 +458,9 @@ export class Descent {
     const sinkTarget = this.airborne ? 0 : depth;
     this.snowSink = approach(this.snowSink, sinkTarget, this.airborne ? 30 : sinkTarget>this.snowSink ? 16 : 8, dt);
     const stopped=!this.airborne&&this.speed<.65;
-    const offPiste=!this.approach&&(!rawTrail||contact.distance>(rawTrail.width||36)*.58);
-    this.offPisteRest=stopped&&offPiste?this.offPisteRest+dt:0;
-    if(this.offPisteRest>=5||(stopped&&this.treeHits>=2&&this.elapsed-this.lastTreeHit<2))this.recoveryReady=true;
-    if(this.airborne||this.speed>1.35)this.recoveryReady=false;
+    const canRecover=!this.onTrail&&!this.airborne&&!input.boost&&this.speed<10/3.6;
+    this.offPisteRest=canRecover?this.offPisteRest+dt:0;
+    this.recoveryReady=this.offPisteRest>=3-1e-8;
 
     const stoppedAtForecourt=stopped&&this.travel>25&&baseRange<=92&&atWanlongForecourt(this.data,this.route,this.x,this.z);
     this.runoutRest=stoppedAtForecourt?this.runoutRest+dt:0;

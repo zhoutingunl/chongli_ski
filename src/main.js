@@ -2,7 +2,8 @@ import './style.css';
 import {glyph,emblem,viewNames,viewPicture} from './icons.js';
 import {loadMountain,clamp,resortName,formatTime,difficultyName} from './mountain.js';
 import {TrailMap} from './map.js';
-import {canRecordGame,recordGame,GAME_CLIP_SECONDS} from './game-recording.js';
+import {canRecordGame,recordGame,captureGameAudio,GAME_CLIP_SECONDS} from './game-recording.js';
+import {appleMobile,canShareVideo,shareVideoFile} from './web-video-export.js';
 import {GOLD_ROUTE_ID,weekStart,challengeBoard,challengeScore,mergeSkiProgress} from './ski-engagement.js';
 import {createPisteProgress} from './piste-progress.js';
 import {MountainSound} from './sound.js';
@@ -137,7 +138,7 @@ function setupText(){
   $('#gl').setAttribute('aria-label',t('崇礼三维滑雪场','3D Chongli ski area'));$('#hud').setAttribute('aria-label',t('滑行仪表','Skiing instruments'));
   $('.speed small').firstChild.textContent=t('落差 ','Drop ');
   paintRecordButton();
-  for(const [a,ic,txt] of [['fullscreen','expand',t('全屏显示','Fullscreen')],['pause','menu',t('暂停菜单','Pause menu')],['view','eye',label('切换视角')],['tray','back',label('机位工具')],['map','map',label('雪场地图')]]){
+  for(const [a,ic,txt] of [['fullscreen','expand',t('全屏显示','Fullscreen')],['pause','menu',t('暂停菜单','Pause menu')],['view','eye',label('切换视角')],['tray','back',t('机位和录像','Camera and recording')],['map','map',label('雪场地图')]]){
     const item=a==='fullscreen'?$('.top-tools [data-act="fullscreen"]'):a==='map'?$('.hud-tools [data-act="map"]'):$('#hud [data-act="'+a+'"]');
     item.innerHTML=glyph(ic,20);item.setAttribute('aria-label',txt);item.title=txt;
   }
@@ -210,7 +211,7 @@ function hudVisible(show){
     $('#base-actions [data-act="look-hall"]').hidden=!atHall;
     $('#base-lift-text').textContent=sim.route.finishKind==='training-runout'?t('前往最近索道','Go to nearest lift'):t('乘缆车上山','Ride lift up');
   }
-  $('#tray-tools').hidden=!tray;$('#tray-toggle').setAttribute('aria-expanded',String(tray));$('#near-lift').hidden=true;
+  paintCameraTray();$('#near-lift').hidden=true;
   if(watching()){
     const side=world.station.side,lodge=label(side==='wanlong'?'山顶木屋':'金花阁');
     const look=$('#look-choices');look.hidden=screen!=='summit';
@@ -335,7 +336,7 @@ function paintHUD(){
   $('#near-lift').hidden=!near;
   $('#recover-piste').hidden=screen!=='run'||!s.recoveryReady;
   if(near)$('#near-lift-label').textContent=label(near.name)+' · '+label('上车');
-  if(lift){$('#lift-text').textContent=resort(lift.resort)+' · '+label(lift.name)+' · '+dir+' '+Math.round(lift.progress*100)+'%';$('[data-act="skip-lift"]').textContent=lift.dir>0?t('直达上站','Skip to upper station'):t('直达下站','Skip to lower station');}
+  if(lift){$('#lift-text').textContent=resort(lift.resort)+' · '+label(lift.name)+' · '+dir+' '+Math.round(lift.progress*100)+'%';$('[data-act="skip-lift"] span').textContent=lift.dir>0?t('直达上站','Skip to upper station'):t('直达下站','Skip to lower station');}
   if(station){
     $('#station-title').textContent=station.trailhead?label(r.name):station.summit?(station.side==='wanlong'?t('万龙山顶木屋 · 七索上站','Wanlong summit lodge · Lift 7'):t('金花阁 · 云顶一索上站','Jinhua Pavilion · Genting Lift 1')):resort(station.side)+' · '+label(liftStationName);
     $('#station-note').textContent=station.summit&&!world.looking?
@@ -350,7 +351,7 @@ function navMarkup(){
   if(screen==='home')return '<span class="nav-label">'+t('红花梁 · 山顶','HONGHUALIANG')+'</span>'+button('close-panel',t('回到出发界面','Back to start'),'resume')+'<hr>'+item('map','雪场地图')+item('help','操作说明')+item('settings','设置')+item('records','排行榜')+nav('weekly',t('本周金龙道','Weekly Gold Dragon'))+(isMiniTool?button('video-library',t('本机录像','Saved recordings'),'nav-small'):'')+nav('sources',t('地形资料','Terrain data'),'nav-small');
   const resume=screen==='base'?t('回到山脚','Back to the base'):screen==='trailhead'?t('回到起点','Back to trailhead'):screen==='summit'?t('回到山顶','Back to summit'):screen==='station'?t('回到站台','Back to station'):screen==='lift'?t('继续乘坐','Continue ride'):t('继续滑','Resume descent');
   const results=screen==='base'?nav('finish',t('本趟成绩','Run stats')):'';
-  return '<span class="nav-label">'+t('PAUSED · 暂停','PAUSED')+'</span>'+button('close-panel',resume,'resume')+results+item('map','雪场地图')+(recordable()?button('record',t(clip?'查看录像':'录像',clip?'View recording':'Record')):'')+'<hr>'+item('environment','环境')+(world?.flat?'':item('view','视角'))+item('rider','角色')+item('records','排行榜')+nav('weekly',t('本周金龙道','Weekly Gold Dragon'))+(isMiniTool?button('video-library',t('本机录像','Saved recordings'),'nav-small'):'')+(shareAvailable()?button('share',label('分享'),'nav-small'):'')+'<hr>'+item('help','操作说明','nav-small')+item('settings','设置','nav-small')+button('restart',t('回到雪道起点','Return to trailhead'),'nav-small')+button('home',t('回到主界面','Main menu'),'nav-small');
+  return '<span class="nav-label">'+t('PAUSED · 暂停','PAUSED')+'</span>'+button('close-panel',resume,'resume')+results+item('map','雪场地图')+'<hr>'+item('environment','环境')+(world?.flat?'':item('view','视角'))+item('rider','角色')+item('records','排行榜')+nav('weekly',t('本周金龙道','Weekly Gold Dragon'))+(isMiniTool?button('video-library',t('本机录像','Saved recordings'),'nav-small'):'')+(shareAvailable()?button('share',label('分享'),'nav-small'):'')+'<hr>'+item('help','操作说明','nav-small')+item('settings','设置','nav-small')+button('restart',t('回到雪道起点','Return to trailhead'),'nav-small')+button('home',t('回到主界面','Main menu'),'nav-small');
 }
 function openPanel(k){
   recording?.stop();
@@ -409,7 +410,7 @@ function renderPanel(keep=false){
     const s=world.sim,r=s.route;
     const lift=data.lifts.find(l=>l.id===r.finishLiftId);
     const place=r.finishKind==='training-runout'?t('训练场减速区','Training runout'):lift?label(lift.name)+t('下站',' base station'):r.destination==='wanlong'?label('万龙雪具大厅')+' · '+label('龙宫酒店'):label('云顶滑雪大厅')+' · '+label('云顶大酒店');
-    p.innerHTML=heading('ARRIVAL',r.finishKind==='training-runout'?'终点':'山脚',t('抵达','Arrived at ')+resort(r.destination))+'<p class="finish-summary">'+label(r.name)+'</p><p class="credit-text">'+place+'</p><div class="metrics">'+[[t('滑行距离','Distance'),km(s.travel)],[t('本次用时','Time'),formatTime(s.elapsed)],[t('最高时速','Top speed'),Math.round(s.maxSpeed*3.6)+' km/h']].map(([k,v])=>'<div><small>'+k+'</small><b>'+v+'</b></div>').join('')+'</div><div class="finish-actions">'+button('lift',glyph('lift',20)+t('乘索道上山','Ride lift up'),'launch')+(recordable()?button('record',t(clip?'查看录像':'录像',clip?'View recording':'Record'),'quiet-button'):'')+button('restart',t('再滑一次','Another descent'),'quiet-button')+button('weekly',t('本周金龙道挑战','Weekly Gold Dragon'),'quiet-button')+followButton()+'</div>';
+    p.innerHTML=heading('ARRIVAL',r.finishKind==='training-runout'?'终点':'山脚',t('抵达','Arrived at ')+resort(r.destination))+'<p class="finish-summary">'+label(r.name)+'</p><p class="credit-text">'+place+'</p><div class="metrics">'+[[t('滑行距离','Distance'),km(s.travel)],[t('本次用时','Time'),formatTime(s.elapsed)],[t('最高时速','Top speed'),Math.round(s.maxSpeed*3.6)+' km/h']].map(([k,v])=>'<div><small>'+k+'</small><b>'+v+'</b></div>').join('')+'</div><div class="finish-actions">'+button('lift',glyph('lift',20)+t('乘索道上山','Ride lift up'),'launch')+button('restart',t('再滑一次','Another descent'),'quiet-button')+button('weekly',t('本周金龙道挑战','Weekly Gold Dragon'),'quiet-button')+followButton()+'</div>';
   }else if(page==='sources')p.innerHTML=heading('TERRAIN','资料',t('地形与影像','Terrain and imagery'))+sourceText();
   else{
     const lost=page==='lost',light=lost&&isMiniTool;
@@ -617,31 +618,54 @@ let cloudWriteUncertain=false;
 const videoDialog=()=>$('#video-dialog');
 const videoCanvas=()=>$(world?.flat?'#flat-view':'#gl');
 const recordable=()=>inWorld()&&canRecordGame(videoCanvas());
+function paintCameraTray(){
+  $('#tray-tools').hidden=!tray;
+  $('#tray-toggle').setAttribute('aria-expanded',String(tray));
+  paintRecordButton();
+}
+
 function paintRecordButton(){
-  const control=$('#game-record'),seconds=recording?Math.min(GAME_CLIP_SECONDS,Math.floor((performance.now()-recordStart)/1000)):0;
+  const status=$('#game-record'),control=$('#tray-record');
+  const seconds=recording?Math.min(GAME_CLIP_SECONDS,Math.floor((performance.now()-recordStart)/1000)):0;
+  status.hidden=!recording;
   control.hidden=!recordable()&&!clip;
-  control.setAttribute('aria-pressed',String(!!recording));
-  control.querySelector('span').textContent=recording?'0:'+String(seconds).padStart(2,'0'):clip?t('看录像','Watch'):t('录像','REC');
-  control.ariaLabel=recording?t('停止录像','Stop recording'):clip?t('查看录像','Watch recording'):t('开始录像','Start recording');
-  control.title=control.ariaLabel;
+  const label=recording?t('停止录像','Stop recording'):clip?t('查看录像','Watch recording'):t('开始录像','Start recording');
+  for(const item of [status,control]){
+    item.setAttribute('aria-pressed',String(!!recording));
+    item.ariaLabel=label;item.title=label;
+  }
+  status.querySelector('span').textContent=t('停止','Stop')+' 0:'+String(seconds).padStart(2,'0');
+  control.querySelector('span').textContent=recording?t('停止','Stop'):clip?t('回放','Watch'):t('录像','REC');
+}
+const iphoneVideo=()=>!isMiniTool&&appleMobile();
+const embeddedAppleVideo=()=>iphoneVideo()&&/wxwork|micromessenger/i.test(navigator.userAgent);
+function mobileVideoInstructions(){
+  return embeddedAppleVideo()
+    ?t('若企业微信无法下载到「文件」，请从右上角「⋯」在 Safari 中打开游戏，再录制并选择「存储视频」。','If this app cannot download the video to Files, open the game in Safari from the ⋯ menu, then record and choose Save Video.')
+    :t('可以先下载到「文件」，再打开视频，点分享 →「存储视频」。','Download to Files, then open the video and choose Share → Save Video.');
 }
 function startVideo(){
   if(page)closePanel();
   if(!recordable()||recording)return;
   recordStart=performance.now();
+  activateAudio();
+  let audio;
+  try{audio=captureGameAudio(sound.ctx,[prefs.music&&prefs.volume>0&&music.gain,prefs.sound&&sound.master]);}catch{}
   try{
     recording=recordGame(videoCanvas(),result=>{
       clearInterval(clockTimer);recording=null;
       if(result){
         if(clip)URL.revokeObjectURL(clip.url);
         const timestamp=new Date().toISOString().replace(/[^0-9]/g,'');
-        clip={...result,url:URL.createObjectURL(result.blob),name:'chongli-'+timestamp+'.'+result.extension};
+        const name='chongli-'+timestamp+'.'+result.extension;
+        const file=iphoneVideo()&&typeof File==='function'?new File([result.blob],name,{type:result.blob.type}):null;
+        clip={...result,url:URL.createObjectURL(result.blob),name,file};
         if(!page&&!document.hidden&&inWorld())showVideo(clip.url);
         else announce(t('录像已生成，可打开预览','Recording ready to preview'));
       }else announce(t('未录到画面，请重试','No video captured. Try again.'));
       paintRecordButton();if(page)renderPanel(true);
-    });
-    clockTimer=setInterval(paintRecordButton,250);paintRecordButton();
+    },{audio,mobile:iphoneVideo()||/Android|Mobile/i.test(navigator.userAgent),miniTool:isMiniTool,unlockCanvas:world.lockVideoCanvas()});
+    tray=false;paintCameraTray();clockTimer=setInterval(paintRecordButton,250);
   }catch{
     announce(t('当前设备无法录制游戏画面','Game recording is unavailable on this device'));
   }
@@ -671,8 +695,15 @@ function showVideo(url){
     if(!entries.length)$('#video-notice').textContent=t('这里会显示保存到本小工具的录像。','Recordings saved in this mini-tool appear here.');
   }
   const saveButton=$('[data-act="save-video"]');
-  saveButton.textContent=isMiniTool?t('保存到小工具','Save to mini-tool'):t('下载视频','Download video');
+  const photoShare=clipFile&&iphoneVideo()&&canShareVideo(clip.file),download=$('[data-act="download-video"]');
+  saveButton.textContent=isMiniTool?t('保存到小工具','Save to mini-tool'):
+    photoShare?t('存入相册','Save to Photos'):iphoneVideo()?t('下载到文件','Download to Files'):t('下载视频','Download video');
   saveButton.hidden=!clipFile||!videoSaveAvailable();
+  download.hidden=!photoShare;
+  download.textContent=t('下载到文件','Download to Files');
+  if(clipFile&&iphoneVideo())$('#video-notice').textContent=photoShare
+    ?t('在系统分享菜单中选择「存储视频」。','Choose Save Video in the system share sheet.')
+    :mobileVideoInstructions();
   saveButton.disabled=!!clip?.saving||!!clip?.saved;
   if(clipFile&&clip.saved)$('#video-notice').textContent=t('已保存到本小工具','Saved in this mini-tool');
   if(clipFile&&!videoSaveAvailable())$('#video-notice').textContent=t('当前客户端不支持保存录像。','This client cannot save recordings.');
@@ -685,23 +716,36 @@ function closeVideo(){
   const dialog=videoDialog(),player=dialog.querySelector('video');
   dialog.hidden=true;player.pause();player.removeAttribute('src');player.load();clipFile=false;
   if(!page)world?.pause(false);
-  if(clipFocus?.isConnected)clipFocus.focus({preventScroll:true});
+  const focus=clipFocus?.isConnected&&clipFocus.getClientRects().length?clipFocus:$('#tray-toggle');
+  focus.focus({preventScroll:true});
 }
-async function saveVideo(){
+async function saveVideo(downloadOnly=false){
   if(!clipFile||!clip||clip.saving||clip.saved)return;
-  const video=clip,control=$('[data-act="save-video"]');
-  video.saving=true;control.disabled=true;
-  $('#video-notice').textContent=t('正在保存…','Saving…');
+  const video=clip,control=$('[data-act="save-video"]'),download=$('[data-act="download-video"]');
+  const shareToPhotos=!downloadOnly&&iphoneVideo()&&canShareVideo(video.file);
+  video.saving=true;control.disabled=download.disabled=true;
+  $('#video-notice').textContent=shareToPhotos?t('正在打开系统分享…','Opening system share…'):t('正在导出…','Exporting…');
   try{
+    if(shareToPhotos){
+      await shareVideoFile(video.file);
+      if(clip===video&&clipFile)$('#video-notice').textContent=t('所选保存位置由系统分享菜单决定。','The system share sheet handles your selected destination.');
+      return;
+    }
     const path=await saveGameVideo(video.blob,video.name);
     if(path){
       video.saved=true;
       store(videoKey,[{path,name:video.name,when:new Date().toISOString()},...read(videoKey,[])]);
     }
-    if(clip===video&&clipFile)$('#video-notice').textContent=path?t('已保存到本小工具','Saved in this mini-tool'):t('已发起下载','Download started');
-  }catch{
-    if(clip===video&&clipFile)$('#video-notice').textContent=t('保存失败，可重试。','Could not save. Try again.');
-  }finally{video.saving=false;if(clip===video&&clipFile)control.disabled=!!video.saved;}
+    if(clip===video&&clipFile)$('#video-notice').textContent=path?t('已保存到本小工具','Saved in this mini-tool'):
+      iphoneVideo()?mobileVideoInstructions():t('已发起下载','Download started');
+  }catch(error){
+    if(clip===video&&clipFile)$('#video-notice').textContent=iphoneVideo()
+      ?(error?.name==='AbortError'?t('已关闭系统分享。','System share closed.'):t('系统分享暂不可用。','System share is unavailable.'))+' '+mobileVideoInstructions()
+      :t('保存失败，可重试。','Could not save. Try again.');
+  }finally{
+    video.saving=false;
+    if(clip===video&&clipFile){control.disabled=!!video.saved;download.disabled=false;}
+  }
 }
 
 function action(a){
@@ -720,7 +764,7 @@ function action(a){
   if(a==='calibrate'){tilt.calibrate();announce(t('保持当前握姿，正中位置已重设','Hold your phone steady. Centre position reset.'));return;}
   if(a==='close-panel')return closePanel();
   if(a==='pause')return openPanel('view');
-  if(a==='tray'){tray=!tray;$('#tray-tools').hidden=!tray;$('#tray-toggle').setAttribute('aria-expanded',String(tray));return;}
+  if(a==='tray'){tray=!tray;paintCameraTray();return;}
   if(a==='pov'){switchCamera(prefs.view==='first'?prefs.outsideView:'first');return;}
   if(a==='center-look'){world?.centerLook();if(watching())hudVisible(true);paintHUD();return;}
   if(a==='view'&&inWorld()&&!page){const vs=Object.keys(viewNames);switchCamera(vs[(vs.indexOf(prefs.view)+1)%vs.length]);announce(label(viewNames[prefs.view])+t('视角',' camera'));return;}
@@ -780,6 +824,7 @@ function action(a){
   if(a==='close-video')return closeVideo();
   if(a==='new-video'){closeVideo();return startVideo();}
   if(a==='save-video')return saveVideo();
+  if(a==='download-video')return saveVideo(true);
 }
 document.addEventListener('click',e=>{
   const b=e.target.closest('button');if(!b||busy||booting||b.disabled)return;

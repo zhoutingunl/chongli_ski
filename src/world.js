@@ -59,7 +59,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
   const sim=new Descent(data,opts,rider.dimensions);
   const yawQ=new THREE.Quaternion(),tiltQ=new THREE.Quaternion(),surfNorm=new THREE.Vector3(),want=new THREE.Vector3(),look=new THREE.Vector3(),target=new THREE.Vector3();
   let active=false,paused=false,ride=null,clock=0,prev=0,lastUI=0,simLag=0,treesLag=1,camHeading=0,snap=true,frame=0,graphicsScale=1;
-  let station=null,baseTurn=null;
+  let station=null,baseTurn=null,videoCanvasLocked=false;
   let conditions,climateAge=1;
   const bodyOrigin=new THREE.Vector3(),lastOrigin=new THREE.Vector3(),bodyStep=new THREE.Vector3();
   const eyeOffset=new THREE.Vector3(),tipWorld=new THREE.Vector3(),sight=new THREE.Vector3(),orbitPivot=new THREE.Vector3();
@@ -99,6 +99,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
   }
   const host=el.parentElement;
   function resize(){
+    if(videoCanvasLocked)return;
     const width=host.clientWidth||innerWidth,height=host.clientHeight||innerHeight;
     const maxDpr=opts.quality==='lite'?1:opts.quality==='high'?1.8:1.4;
     const pixelLimit=isMiniTool?Math.sqrt(2000000/(width*height)):Infinity;
@@ -388,7 +389,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     else renderer.render(scene,camera);
     if(shaderFailure){active=false;onEvent('lost');return;}
     if(now-lastUI>95){onEvent('hud',sim);lastUI=now;}
-    if(!paused&&raw>0&&opts.quality==='auto'){
+    if(!videoCanvasLocked&&!paused&&raw>0&&opts.quality==='auto'){
       adaptiveTime+=raw;adaptiveFrames++;
       if(adaptiveFrames>=55){
         const slow=adaptiveTime/adaptiveFrames>.045;
@@ -403,6 +404,11 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
   el.addEventListener('webglcontextlost',e=>{e.preventDefault();if(active){active=false;onEvent('lost');}});
   return {
     sim,input,start,stage,trailhead,pushOff,beginRide,leaveRide,
+    lockVideoCanvas(){
+      videoCanvasLocked=true;adaptiveTime=adaptiveFrames=0;
+      el.classList.add('video-frame-locked');
+      return ()=>{videoCanvasLocked=false;el.classList.remove('video-frame-locked');resize();};
+    },
     lookAroundStation(view){
       if(!station)return;
       station.view=view;const side=station.side;

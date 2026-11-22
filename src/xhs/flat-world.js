@@ -51,7 +51,7 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
   canvas.hidden=false;
   const sim=new Descent(data,opts), navigation=createSkiNavigation(data);
   const input={steer:0,trim:0,brake:false,boost:false,lookX:0,lookY:0};
-  let station=null,ride=null,paused=false,active=false;
+  let station=null,ride=null,paused=false,active=false,videoCanvasLocked=false;
   let yaw=0,zoom=1,panX=0,panY=0,frame=0,last=0,hudAge=0,snowMarks=[];
   let conditions=climate.sample(opts.time,opts.weather);
   const refreshClimate=()=>{conditions=climate.sample(opts.time,opts.weather);};
@@ -131,7 +131,7 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
   }
   function draw(){
     if(!active||!sim.route)return;
-    const w=canvas.clientWidth,h=canvas.clientHeight;
+    const w=videoCanvasLocked?canvas.width:canvas.clientWidth,h=videoCanvasLocked?canvas.height:canvas.clientHeight;
     if(!w||!h)return;
     if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}
     const subject=station?.view==='lodge'?site('lodge'):null;
@@ -225,6 +225,10 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
   window.addEventListener('resize',redraw);
   return {
     flat:true,sim,input,start,stage,trailhead,pushOff,beginRide,leaveRide,
+    lockVideoCanvas(){
+      videoCanvasLocked=true;canvas.classList.add('video-frame-locked');
+      return ()=>{videoCanvasLocked=false;canvas.classList.remove('video-frame-locked');redraw();};
+    },
     get conditions(){return conditions;},
     get station(){return station;},
     recoverToPiste(){
