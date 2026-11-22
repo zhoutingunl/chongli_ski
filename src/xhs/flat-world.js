@@ -51,7 +51,7 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
   canvas.hidden=false;
   const sim=new Descent(data,opts), navigation=createSkiNavigation(data);
   const input={steer:0,trim:0,brake:false,boost:false,lookX:0,lookY:0};
-  let station=null,ride=null,paused=false,active=false,photo=false,photoKind='rider';
+  let station=null,ride=null,paused=false,active=false;
   let yaw=0,zoom=1,panX=0,panY=0,frame=0,last=0,hudAge=0,snowMarks=[];
   let conditions=climate.sample(opts.time,opts.weather);
   const refreshClimate=()=>{conditions=climate.sample(opts.time,opts.weather);};
@@ -66,7 +66,7 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
     gates(route,place,route.resort,lift,place.stationEnd,true);
   }
   function resetView(){
-    canvas.hidden=false;active=true;paused=photo=false;last=0;yaw=0;zoom=1;panX=panY=0;snowMarks=[];
+    canvas.hidden=false;active=true;paused=false;last=0;yaw=0;zoom=1;panX=panY=0;snowMarks=[];
   }
   function start(route){
     sim.start(navigation.safeRun(route));climate.startRun(opts.time);refreshClimate();station=ride=null;resetView();draw();kick();
@@ -134,9 +134,9 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
     const w=canvas.clientWidth,h=canvas.clientHeight;
     if(!w||!h)return;
     if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}
-    const subject=photo?site(photoKind):station?.view==='lodge'?site('lodge'):null;
+    const subject=station?.view==='lodge'?site('lodge'):null;
     const x=subject?.x??sim.x, z=subject?.z??sim.z;
-    const headingUp=!photo&&(sim.mode==='summit'||sim.mode==='run');
+    const headingUp=(sim.mode==='summit'||sim.mode==='run');
     const bearing=headingUp?-(sim.heading+yaw):yaw;
     const scale=Math.min(w,h)/((station?.view==='valley'?780:320)/zoom);
     const co=Math.cos(bearing),si=Math.sin(bearing);
@@ -175,7 +175,7 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
     const [px,py]=position(sim.x,sim.z), heading=sim.heading+bearing;
     drawRiderMarker(ctx,opts,sim,px,py,heading);
     const marker=navigation.nearbyChoices(sim);
-    if(marker&&!photo){
+    if(marker){
       ctx.save();ctx.font='bold 13px sans-serif';ctx.textAlign='center';ctx.lineWidth=3;
       ctx.fillStyle=night?'#f9e5be':'#204857';ctx.strokeStyle=night?'#253044':'#f3f4e8';
       const placed=[];
@@ -202,9 +202,9 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
   function loop(now){
     frame=0;if(!active||document.hidden)return;
     const dt=last?Math.min(.085,(now-last)/1000):1/30;
-    if(last&&!paused&&!photo&&now-last<31){kick();return;}
+    if(last&&!paused&&now-last<31){kick();return;}
     last=now;
-    if(!paused&&!photo){
+    if(!paused){
       climate.advance(dt,opts.time,opts.weather,sim.mode==='run');yaw+=input.lookX*dt*1.75;
       if(ride)moveLift(dt);
       else if(sim.mode==='run'){
@@ -218,7 +218,7 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
     }
     hudAge+=dt;
     if(hudAge>.12){refreshClimate();hudAge=0;onEvent('hud',sim);}
-    draw();if(!paused&&!photo)kick();
+    draw();if(!paused)kick();
   }
   function kick(){if(active&&!frame&&!document.hidden)frame=requestAnimationFrame(loop);}
   function redraw(){draw();kick();}
@@ -248,12 +248,7 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
     lookAroundStation(name){if(station)station.view=name;redraw();},
     lookAtBaseHall(){const hall=site('hall');if(hall){yaw=-Math.atan2(hall.x-sim.x,sim.z-hall.z);redraw();}},
     centerLook(){yaw=0;zoom=1;panX=panY=0;if(station)station.view='wide';redraw();},
-    photo(value,kind='rider'){photo=value;photoKind=kind;if(!value)panX=panY=0;redraw();},
-    photoPlace(kind){photoKind=kind;panX=panY=0;redraw();},
-    orbit(dx,dy){yaw+=dx*.008;zoom=clamp(zoom*Math.exp(-dy*.003),.55,2.6);redraw();},
-    panPhoto(dx,dy,elevation){panX+=dx;panY+=dy+(elevation||0);redraw();},
-    zoom(factor){zoom=clamp(zoom/factor,.55,2.6);redraw();},
-    capture(){draw();return new Promise(resolve=>canvas.toBlob(resolve,'image/png'));}
+    orbit(dx,dy){yaw+=dx*.008;zoom=clamp(zoom*Math.exp(-dy*.003),.55,2.6);redraw();}
   };
 }
 

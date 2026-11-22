@@ -3,9 +3,7 @@ export {TiltSteering} from './tilt.js';
 export const isMiniTool = false;
 export const motionSupported = true;
 export const shareAvailable = () => true;
-export const albumAvailable = () => false;
-export const saveToAlbum = () => Promise.resolve(false);
-export const photoData = () => Promise.resolve(null);
+export const videoSaveAvailable = () => true;
 export const initializePlatform = () => undefined;
 
 export function read(key, fallback) {
@@ -45,11 +43,12 @@ export async function shareRoute(title, text, route) {
   finally { field.remove(); }
 }
 
-export function downloadPhoto(blob, name) {
+export async function saveGameVideo(blob,name) {
   const url = URL.createObjectURL(blob), link = document.createElement('a');
   link.href = url; link.download = name;
   document.body.append(link); link.click(); link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 20000);
+  return null;
 }
 
 export async function loadData(name) {
@@ -61,4 +60,15 @@ export async function loadData(name) {
 export async function loadForestImage(url) {
   const response = await fetch(url);
   return response.ok ? createImageBitmap(await response.blob()) : null;
+}
+
+export const engagementAvailable = () => false;
+export const authorFollow = async () => null;
+export const followStatus = async () => null;
+export const weeklyScores = async () => null;
+export const submitWeeklyScore = async () => null;
+export const cloudRead = async () => null;
+export const cloudWrite = async () => null;
+export function gameVibration(type){
+  if(typeof navigator.vibrate==='function')navigator.vibrate({light:15,medium:28,heavy:42}[type]);
 }

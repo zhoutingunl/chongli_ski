@@ -42,6 +42,7 @@ export class Descent {
     this.route = route; this.mode = 'run'; this.gear = this.opts.gear;
     this.junctions=this.navigation?.stationsOn(route)||[];
     this.pisteVisits=new Map();
+    this.feedback={landing:0,tree:0};
     this.offPisteRest=this.runoutRest=this.treeHits=0;
     this.lastTreeHit=-Infinity;
     this.recoveryReady=false;
@@ -389,7 +390,7 @@ export class Descent {
       if(hit){
         if(hit.kind==='tree'&&this.elapsed-this.lastTreeHit>.20){
           this.treeHits=this.elapsed-this.lastTreeHit<4?this.treeHits+1:1;
-          this.lastTreeHit=this.elapsed;
+          this.lastTreeHit=this.elapsed;this.feedback.tree++;
         }
         this.x=hit.x;this.z=hit.z;this.speed*=.39;this.edgeSpeed=0;this.impact=Math.max(this.impact,.56);
         if(assisted){const f=trackFrame(this.route,this.along);this.offset=-(this.x-f.x)*f.dz+(this.z-f.z)*f.dx;}
@@ -417,6 +418,7 @@ export class Descent {
       if (this.airHeight<=.002) {
         const hitSpeed = Math.max(0,this.verticalAlong-this.upSpeed);
         this.airborne=false;this.airHeight=0;this.upSpeed=0;this.y=this.ground;this.contactTime=0;
+        if(hitSpeed>1.25)this.feedback.landing++;
         this.impact=clamp((hitSpeed-.55)/3.7,.25,1.35);this.jumpCooldown=.25;
         this.speed*=1-Math.min(.10,hitSpeed*.009);
       }

@@ -2,7 +2,7 @@ let language='zh';
 export function setLanguage(value){language=value==='en'?'en':'zh';document.documentElement.lang=language==='en'?'en':'zh-CN';}
 export const t=(zh,en)=>language==='en'?en:zh;
 const labels={
-  '万龙':'Wanlong','云顶':'Genting','红花梁':'Honghualiang','山顶':'Summit','雪场地图':'Trail map','拍照':'Photo','环境':'Environment','视角':'Camera','角色':'Rider','排行榜':'Leaderboard','分享':'Share','操作说明':'Controls','设置':'Settings','机位工具':'Camera tools','切换视角':'Switch camera','关闭':'Close','返回':'Back',
+  '万龙':'Wanlong','云顶':'Genting','红花梁':'Honghualiang','山顶':'Summit','雪场地图':'Trail map','环境':'Environment','视角':'Camera','角色':'Rider','排行榜':'Leaderboard','分享':'Share','操作说明':'Controls','设置':'Settings','机位工具':'Camera tools','切换视角':'Switch camera','关闭':'Close','返回':'Back',
   '双板':'Skis','单板':'Snowboard','男士':'Man','女士':'Woman','男孩':'Boy','女孩':'Girl','赭红':'Rust','麦金':'Wheat','松绿':'Pine','冰蓝':'Glacier','雪灰':'Snow',
   '追尾':'Follow','第一人称':'First person','雪板尖':'Board tips','贴雪':'Snow level','俯瞰':'Overhead','左侧':'Left side','右侧':'Right side','正面':'Front','远摄':'Telephoto',
   '自动':'Auto','白天':'Day','傍晚':'Evening','日落':'Sunset','黄昏':'Twilight','夜晚':'Night','极夜之光':'Aurora','黎明':'Dawn','晴':'Clear','小雪':'Light snow','大雪':'Heavy snow',

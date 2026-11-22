@@ -3,7 +3,6 @@ export const motionSupported = false;
 export const shareAvailable = () => false;
 export const fullscreen = () => Promise.resolve(false);
 export const shareRoute = () => Promise.resolve('unavailable');
-export function downloadPhoto() {}
 
 // Touch is the input method in the tool. The native sensor reports angular
 // velocity, whereas the browser steering model needs an absolute tilt.
@@ -18,7 +17,7 @@ export class TiltSteering {
 const memory = new Map();
 const writable = new Set();
 const writes = new Map();
-let version, onStorageIssue;
+let version,userDataPath,onStorageIssue;
 
 const sdk = () => window.xhs?.miniTool;
 const launchInfo = () => window.xhs?.launchOptions?.miniToolEnv;
@@ -58,10 +57,12 @@ export async function initializePlatform(keys, storageIssue) {
   onStorageIssue = storageIssue;
   placeControls(launchInfo()?.windowInfo);
   version = clientVersion(launchInfo()?.buildVersion);
-  if (version === null && typeof sdk()?.getLaunchOptions === 'function') {
+  userDataPath=launchInfo()?.userDataPath;
+  if ((version===null||!userDataPath)&&typeof sdk()?.getLaunchOptions==='function') {
     try {
       const {miniToolEnv} = await deadline(sdk().getLaunchOptions(), 650);
-      version = clientVersion(miniToolEnv?.buildVersion);
+      version=clientVersion(miniToolEnv?.buildVersion)??version;
+      userDataPath=miniToolEnv?.userDataPath||userDataPath;
       placeControls(miniToolEnv?.windowInfo);
     } catch {}
   }
@@ -108,25 +109,31 @@ export function store(key, value) {
   settled.then(() => { if (writes.get(key) === settled) writes.delete(key); });
 }
 
-export const albumAvailable = () => allows(9420, 'saveImageToPhotosAlbum');
-export function photoData(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
-export async function saveToAlbum(data, bytes) {
-  if (!albumAvailable()) return false;
-  let filePath = data;
-  if (bytes > 320000 && typeof sdk().writeTempFile === 'function') {
-    const result = await deadline(sdk().writeTempFile({data}), 6000);
-    if (!result?.filePath) return false;
-    filePath = result.filePath;
+export const videoSaveAvailable = () => !!userDataPath && allows(9490,'writeFile','appendFile','getFileStorageInfo','unlink');
+export async function saveGameVideo(blob,name){
+  if(!videoSaveAvailable())throw new Error('Video storage is unavailable');
+  const api=sdk(),filePath=userDataPath+'/'+name;
+  const {writeChunkMaxBytes,limitBytes,usedBytes}=await deadline(api.getFileStorageInfo(),5000);
+  if(!Number.isSafeInteger(writeChunkMaxBytes)||writeChunkMaxBytes<4||
+    (limitBytes>0&&usedBytes+blob.size>limitBytes))throw new Error('Video storage is full');
+  const chunkSize=Math.min(192000,Math.floor(writeChunkMaxBytes/4)*3);
+  try{
+    for(let at=0;at<blob.size;at+=chunkSize){
+      const part=blob.slice(at,at+chunkSize);
+      const data=await new Promise((resolve,reject)=>{
+        const reader=new FileReader();
+        reader.onload=()=>resolve(String(reader.result).split(',')[1]);
+        reader.onerror=reject;reader.readAsDataURL(part);
+      });
+      const method=at?'appendFile':'writeFile';
+      const result=await api[method]({filePath,data,encoding:'base64'});
+      if(result?.writtenBytes!==part.size)throw new Error('Incomplete video write');
+    }
+    return filePath;
+  }catch(error){
+    await deadline(api.unlink({filePath}),2000).catch(()=>{});
+    throw error;
   }
-  const result = await deadline(sdk().saveImageToPhotosAlbum({filePath}), 30000);
-  return result?.errMsg === 'saveImageToPhotosAlbum:ok';
 }
 
 const dataScripts = new Map();
@@ -161,4 +168,40 @@ export function loadForestImage(url) {
     image.onerror = reject;
     image.src = url;
   });
+}
+
+const cloudCollection='ski_progress_v1';
+export function engagementAvailable(type){
+  if(type==='follow')return allows(9510,'getFollowStatus','followAuthor');
+  if(type==='weekly')return allows(9510,'submitScore','getRankList','getMyRank');
+  if(type==='cloud')return allows(9510,'queryCloudStorage','addCloudStorage','updateCloudStorage');
+  return false;
+}
+export const authorFollow=()=>sdk().followAuthor();
+export const followStatus=()=>deadline(sdk().getFollowStatus());
+export async function weeklyScores(board){
+  const [list,mine]=await deadline(Promise.all([
+    sdk().getRankList({board,period:'week'}),sdk().getMyRank({board,period:'week'})
+  ]),6000);
+  return {rows:list.data,mine};
+}
+export const submitWeeklyScore=(board,score)=>deadline(sdk().submitScore({board,score}),6000);
+export async function cloudRead(){
+  const api=sdk(),rows=[];
+  let cursor;
+  do{
+    const reply=await deadline(api.queryCloudStorage({collection:cloudCollection,limit:40,...(cursor?{cursor}:{})}),6500);
+    if(!Array.isArray(reply.items))throw new Error('Invalid cloud response');
+    rows.push(...reply.items);
+    cursor=reply.nextCursor;
+  }while(cursor);
+  return rows;
+}
+export async function cloudWrite(id,content){
+  const params={collection:cloudCollection,items:[id?{id,content}:{content}]}, api=sdk();
+  const result=await (id?api.updateCloudStorage(params):api.addCloudStorage(params));
+  return result?.data?.[0];
+}
+export function gameVibration(type){
+  if(allows(9500,'vibrateShort'))Promise.resolve().then(()=>sdk().vibrateShort({type})).catch(()=>{});
 }

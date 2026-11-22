@@ -53,7 +53,7 @@ export function controlsPanel(){
     [t('返回最近雪道','Return to nearest piste'),t('道外停满 5 秒，或连续撞树减速到停下时，可点按钮回到附近雪道。','After five seconds stopped off-piste or repeated tree impacts bring you to a stop, tap to return to a nearby piste.'),''],
     [t('雪场地图','Trail map'),t('地图可以手选雪道。经过索道站时点「上车」。','Choose a specific run on the map. Tap Board lift near a station.'),'M'],
     [t('机位','Camera'),t('右上角切换第一人称和外部机位，眼形图标轮换九种视角。','Use the top switch for first or third person, or the eye to cycle all nine views.'),'V / C'],
-    [t('拍照','Photo'),t('暂停菜单中点「拍照」冻结雪场。拖动环顾，双指平移或缩放，再按快门存图。','Freeze the scene from the pause menu. Drag to look, pan or pinch with two fingers, then save.'),'WASD · Q / E']
+    [t('录像','Record'),t('点右上角「录像」录制当前机位，最长 15 秒。再次点按钮可提前停止，录完可预览并保存。','Tap Record to capture up to 15 seconds from the current camera. Tap again to stop, then preview and save.'),'B']
   ];
   if(!motionSupported)controls.splice(4,1);
   return heading('CONTROLS','操作说明')+'<div class="controls-guide">'+controls.map(([title,body,key])=>'<div class="ctrl-row"><strong>'+title+'</strong><span>'+body+'</span><span>'+key+'</span></div>').join('')+'</div>';
