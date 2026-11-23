@@ -1,3 +1,4 @@
+import {cameraWindowMetres,easeCameraLane,turnCameraAtBend,usesCameraWindow} from './camera-window.js';
 import {nearbyLiftStation} from './lift-access.js';
 import {placeLiftSupports} from './lift-supports.js';
 import * as THREE from 'three';
@@ -63,15 +64,18 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
   let active=false,paused=false,ride=null,clock=0,prev=0,lastUI=0,simLag=0,treesLag=1,camHeading=0,snap=true,frame=0,graphicsScale=1;
   let station=null,baseTurn=null,videoCanvasLocked=false;
   let conditions,climateAge=1;
-  const bodyOrigin=new THREE.Vector3(),lastOrigin=new THREE.Vector3(),bodyStep=new THREE.Vector3();
+  const bodyOrigin=new THREE.Vector3(),lastRiderOrigin=new THREE.Vector3(),lastOrigin=new THREE.Vector3(),bodyStep=new THREE.Vector3();
+  const trackingOrigin=new THREE.Vector3();
+  let autoCamera=false,cameraLane=0,routeBearing=0;
   const eyeOffset=new THREE.Vector3(),tipWorld=new THREE.Vector3(),sight=new THREE.Vector3(),orbitPivot=new THREE.Vector3();
   const reducedMotion=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const pitchLimit=THREE.MathUtils.degToRad(85);
-  let lookYaw=0,lookPitch=0,headPitch=0,roll=0,baseBearing=0;
+  let lookYaw=0,lookPitch=0,headPitch=0,roll=0,baseBearing=0,lookMovedAt=-Infinity;
   const input={steer:0,trim:0,brake:false,boost:false,lookX:0,lookY:0};
   const wrap=angle=>Math.atan2(Math.sin(angle),Math.cos(angle));
-  function resetLook(){lookYaw=lookPitch=0;input.lookX=input.lookY=0;}
+  function resetLook(){lookYaw=lookPitch=0;lookMovedAt=-Infinity;input.lookX=input.lookY=0;}
   function panLook(yaw,pitch){
+    if(yaw||pitch)lookMovedAt=clock;
     if(baseTurn){baseTurn.target+=yaw;baseTurn.focus=null;}
     else lookYaw=wrap(lookYaw+yaw);
     lookPitch=clamp(lookPitch+pitch,-2.57,2.57);
@@ -140,11 +144,18 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     const tips=mode==='tips'&&!ride&&(!station||station.view==='wide');
     const cameraEase=snap?1:1-Math.exp(-dt*8);
     const pitchEase=snap?1:1-Math.exp(-dt*7.5);
-    const carveFraming=run&&mode==='far'&&!reducedMotion&&Math.abs(lookYaw)<.04 ? (p.automatic?.visibility||0) : 0;
-    const cameraHeading=carveFraming ? mixAngle(travel,p.guideHeading,.49*carveFraming) : travel;
-    camHeading=snap?cameraHeading:mixAngle(camHeading,cameraHeading,1-Math.exp(-dt*(first?6:4.8)));
-    bodyOrigin.set(p.x,p.y,p.z);bodyStep.copy(bodyOrigin).sub(lastOrigin);lastOrigin.copy(bodyOrigin);
     if(!baseTurn&&!paused&&(input.lookX||input.lookY))panLook(input.lookX*dt*1.95,input.lookY*dt*1.38);
+    const framed=!first&&!tips&&clock-lookMovedAt>.48&&usesCameraWindow(p,input);
+    if(framed){
+      if(!autoCamera||snap){
+        cameraLane=p.offset;
+        routeBearing=p.guideHeading;
+      }
+      routeBearing=turnCameraAtBend(routeBearing,p.guideHeading,.135);
+    }
+    const cameraHeading=framed?routeBearing:travel;
+    camHeading=snap?cameraHeading:mixAngle(camHeading,cameraHeading,1-Math.exp(-dt*(first?6:4.8)));
+    bodyOrigin.set(p.x,p.y,p.z);trackingOrigin.copy(bodyOrigin);
     let fov=61,bank=0,addPitch=0,heading=camHeading,lockEye=false;
     if(ride){
       const {position:eye,direction}=ride.lift.getRide(ride.t,ride.dir);
@@ -199,10 +210,6 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
       // local to the rider, including during a rapid carve or a landing.
       heading=camHeading+lookYaw;
       const fx=Math.sin(heading),fz=-Math.cos(heading),rx=-fz,rz=fx;
-      // The distant camera keeps some of the piste in the same place in the
-      // frame. The skier can then be seen crossing it during linked turns.
-      const shift=clamp(p.offset ?? 0,-6,6)*.30*carveFraming;
-      const dx=(back,side)=>p.x-fx*back+rx*(side-shift),dz=(back,side)=>p.z-fz*back+rz*(side-shift);
       let back=4.6+fast*1.25,side=0,lift=1.82+fast*.22,lead=4.8+fast*.7,eye=1.35;
       if(mode==='low'){back=3.25;lift=.38;lead=3;eye=1.02;fov=70;}
       if(mode==='top'){back=1.65;lift=26;lead=.45;eye=0;fov=54;}
@@ -212,19 +219,34 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
       if(mode==='follow'){
         back=3.55+fast*.62;lift=1.55+fast*.18;lead=3.8;eye=1.03;
         fov=57+(reducedMotion?1:4)*fast;
-        if(run&&!reducedMotion)bank=clamp((p.curve||0)*fast*.062+(p.edge||0)*fast*.016,-.048,.048);
+        if(run&&!framed&&!reducedMotion)bank=clamp((p.curve||0)*fast*.062+(p.edge||0)*fast*.016,-.048,.048);
       }
       if(mode!=='top'&&mode!=='far'){
         const framing=.40+.60*bodyScale;
         back*=framing;side*=framing;lead*=framing;lift*=framing;eye*=bodyScale;
       }
+      if(framed){
+        const depth=Math.hypot(back,side,lift);
+        cameraLane=easeCameraLane(cameraLane,p.offset,cameraWindowMetres(fov,camera.aspect,depth),dt);
+        const lateral=cameraLane-p.offset;
+        trackingOrigin.x+=Math.cos(p.guideHeading)*lateral;
+        trackingOrigin.z+=Math.sin(p.guideHeading)*lateral;
+        trackingOrigin.y=data.height(trackingOrigin.x,trackingOrigin.z);
+      }
+      const dx=(back,side)=>trackingOrigin.x-fx*back+rx*side,dz=(back,side)=>trackingOrigin.z-fz*back+rz*side;
       const x=dx(back,side),z=dz(back,side),aheadX=dx(-lead,0),aheadZ=dz(-lead,0);
-      want.set(x,Math.max(p.y+lift,data.height(x,z)+lift),z);
-      look.set(aheadX,p.y+eye+(data.height(aheadX,aheadZ)-p.ground)*.75,aheadZ);
+      const originGround=framed?trackingOrigin.y:p.ground;
+      want.set(x,Math.max(trackingOrigin.y+lift,data.height(x,z)+lift),z);
+      look.set(aheadX,trackingOrigin.y+eye+(data.height(aheadX,aheadZ)-originGround)*.75,aheadZ);
       baseBearing=wrap(Math.atan2(look.x-want.x,want.z-look.z)-lookYaw);
       addPitch=lookPitch;
-      if(!snap){camera.position.add(bodyStep);target.add(bodyStep);}
+      if(!snap){
+        if(framed===autoCamera)bodyStep.copy(trackingOrigin).sub(lastOrigin);
+        else bodyStep.copy(bodyOrigin).sub(lastRiderOrigin);
+        camera.position.add(bodyStep);target.add(bodyStep);
+      }
     }
+    autoCamera=framed;lastOrigin.copy(trackingOrigin);lastRiderOrigin.copy(bodyOrigin);
     if(snap||lockEye||baseTurn){camera.position.copy(want);target.copy(look);}
     else{camera.position.lerp(want,cameraEase);target.lerp(look,cameraEase);}
     if(!ride)camera.position.y=Math.max(camera.position.y,data.height(camera.position.x,camera.position.z)+.15);

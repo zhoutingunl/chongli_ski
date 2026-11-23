@@ -14,7 +14,6 @@ export class AutomaticTurns {
     this.phase=0;
     this.amplitude=0;
     this.radius=8;
-    this.visibility=0;
     this.sprint=false;
     this.tuck=0;
   }
@@ -25,10 +24,7 @@ export class AutomaticTurns {
     this.sprint=available&&!controlling&&(speed>sprintSpeed||this.sprint&&speed>=releaseSpeed);
     this.tuck=ease(this.tuck,this.sprint&&!airborne?1:0,controlling?22:9,dt);
     this.active=available&&!airborne&&!this.sprint&&this.idle>=2.6;
-    if(!available){
-      this.amplitude=ease(this.amplitude,0,15,dt);
-      this.visibility=ease(this.visibility,0,9,dt);
-    }
+    if(!available)this.amplitude=ease(this.amplitude,0,15,dt);
   }
 
   line(speed,halfWidth,grade,crossGrade,routeTurn,clear,dt){
@@ -43,7 +39,6 @@ export class AutomaticTurns {
     // radius so that the turn does not demand more edge grip than the skier has.
     const radius=4.6+.54*speed+(1.45+2.9*bend)*slow;
     this.radius=ease(this.radius,Math.max(radius,speed*Math.sqrt(this.amplitude/8.3)),3.6,dt);
-    this.visibility=ease(this.visibility,this.active?smooth(.40,3.2,this.amplitude):0,5.8,dt);
     this.phase=(this.phase+speed*dt/this.radius)%tau;
     const arc=this.amplitude*Math.sin(this.phase);
     return {

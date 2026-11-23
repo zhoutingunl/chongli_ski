@@ -61,3 +61,44 @@ test('自动天气每趟内包含晴、小雪、大雪，并随随机源改变�
   }
   assert.notDeepEqual(watch(3),watch(740));
 });
+
+test('每个自动时段恰有八十秒晴，其余四十秒为小雪或大雪',()=>{
+  const stages=['day','evening','sunset','twilight','night','aurora','dawn'];
+  for(let seed of [3,740,1101]){
+    const climate=createMountainClimate(()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/2**32;});
+    climate.startRun('auto');
+    for(const stage of stages){
+      const counts={clear:0,light:0,heavy:0};
+      for(let step=0;step<AUTO_STAGE_SECONDS*2;step++){
+        const weather=climate.sample('auto','auto');
+        assert.equal(weather.resolvedTime,stage);
+        counts[weather.resolvedWeather]++;
+        if(weather.resolvedWeather==='clear')assert.equal(weather.snowAmount,0);
+        climate.advance(.5,'auto','auto',true);
+      }
+      assert.equal(counts.clear,160);
+      assert.equal(counts.light+counts.heavy,80);
+      assert.ok(counts.light>0&&counts.heavy>0);
+    }
+  }
+});
+
+test('手选时段时每两分钟也按八十秒和四十秒分配，停在站台不会消耗当前天气',()=>{
+  const climate=createMountainClimate(()=>.57);
+  climate.startRun('sunset');
+  climate.advance(45,'sunset','auto',true);
+  const weather=climate.sample('sunset','auto');
+  assert.equal(weather.resolvedWeather,'light');
+  climate.advance(120,'sunset','auto',false);
+  assert.equal(climate.sample('sunset','auto').snowAmount,weather.snowAmount);
+  assert.equal(climate.sample('sunset','heavy').snowAmount,1);
+  climate.startRun('sunset');
+  let clear=0;
+  for(let i=0;i<120;i++){
+    const resolved=climate.sample('sunset','auto');
+    assert.equal(resolved.resolvedTime,'sunset');
+    clear+=Number(resolved.resolvedWeather==='clear');
+    climate.advance(1,'sunset','auto',true);
+  }
+  assert.equal(clear,80);
+});

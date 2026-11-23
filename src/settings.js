@@ -18,7 +18,7 @@ function optionTiles(kind,list,value){
   return '<div class="climate-grid">'+list.map(o=>'<button class="climate-tile" data-choice="'+kind+'" data-value="'+o.id+'" aria-pressed="'+(value===o.id)+'">'+glyph(icons[o.id],27)+'<span>'+label(o.label)+'</span></button>').join('')+'</div>';
 }
 export function environmentPanel(prefs){
-  return heading('TIME','时段')+optionTiles('time',timeOptions,prefs.time)+'<h3 class="panel-kicker weather-title">'+t('WEATHER · 天气','WEATHER')+'</h3>'+optionTiles('weather',weatherOptions,prefs.weather)+'<p class="panel-foot">'+t('自动时段每次起滑进入下一时段，单趟每滑满两分钟也会顺序切换。自动天气会在晴、小雪和大雪之间随机过渡。','Auto time advances on each new run and after every two minutes of skiing. Auto weather shifts between clear skies, light snow and heavy snow.')+'</p>';
+  return heading('TIME','时段')+optionTiles('time',timeOptions,prefs.time)+'<h3 class="panel-kicker weather-title">'+t('WEATHER · 天气','WEATHER')+'</h3>'+optionTiles('weather',weatherOptions,prefs.weather)+'<p class="panel-foot">'+t('自动时段每次起滑进入下一时段，单趟每滑满两分钟也会顺序切换。自动天气每两分钟有 80 秒晴天，另外 40 秒在小雪和大雪之间变化。','Auto time advances on each new run and after every two minutes of skiing. Auto weather has 80 seconds of clear skies in each two-minute cycle. Light and heavy snow share the other 40 seconds.')+'</p>';
 }
 function pill(action,txt,active=false){
   return '<button class="setting-pill" data-act="'+action+'" aria-pressed="'+active+'">'+txt+'</button>';

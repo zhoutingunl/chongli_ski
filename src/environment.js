@@ -5,6 +5,8 @@ export const timeOptions = [
 export const weatherOptions = [['auto','自动'],['clear','晴'],['light','小雪'],['heavy','大雪']].map(([id,label])=>({id,label}));
 export const AUTO_STAGE_SECONDS = 120;
 const stageFade = 7;
+const snowWindow=AUTO_STAGE_SECONDS/3;
+const weatherFade=8;
 const snowByWeather={clear:0,light:.38,heavy:1};
 const hourAt = {day:11.35, evening:15.95, sunset:16.87, twilight:17.64, night:21.6, aurora:23.4, dawn:6.43};
 const timeNames = Object.fromEntries(timeOptions.map(o=>[o.id,o.label]));
@@ -73,41 +75,43 @@ function calculate(h,resolvedTime,aurora,resolvedWeather,snowAmount,elapsed) {
     lampAmount:smooth(.11,.72,nightAmount),cloudColor
   };
 }
+function newWeatherPlan(random) {
+  return {
+    onset:12+52*random(),
+    change:14+12*random(),
+    heavyFirst:random()<.5
+  };
+}
+
+function scheduledSnow(plan,phase) {
+  const time=phase-plan.onset;
+  if(time<0||time>=snowWindow)return 0;
+  const order=smooth(plan.change-4,plan.change+4,time);
+  const level=plan.heavyFirst?mix(1,.38,order):mix(.38,1,order);
+  const amount=smooth(0,weatherFade,time)*(1-smooth(snowWindow-weatherFade,snowWindow,time));
+  return level*amount;
+}
+
 export function createMountainClimate(random=Math.random) {
-  const stages=Object.keys(hourAt), weather=Object.keys(snowByWeather);
-  let bag=[], elapsed=0, weatherAge=0, stageAge=0, startStage=0, started=false;
-  let previousTime,previousWeather,result;
-  function nextWeather(previous) {
-    if(!bag.length){
-      bag=weather.slice();
-      for(let i=bag.length-1;i>0;i--){
-        const j=Math.floor(random()*(i+1));
-        [bag[i],bag[j]]=[bag[j],bag[i]];
-      }
-      if(bag.at(-1)===previous)[bag[0],bag[bag.length-1]]=[bag[bag.length-1],bag[0]];
-    }
-    return bag.pop();
-  }
-  let from=nextWeather(),to=nextWeather(from),hold=18+random()*14,change=8+random()*6;
+  const stages=Object.keys(hourAt);
+  let elapsed=0, weatherAge=0, stageAge=0, startStage=0, started=false;
+  let previousTime,previousWeather,result,weatherSlot=-1,weatherPlan;
   const stageIndex=()=>startStage+Math.floor(stageAge/AUTO_STAGE_SECONDS);
   return {
     startRun(timeMode){
+      weatherAge=0;weatherSlot=-1;result=null;
       if(timeMode!=='auto')return;
       startStage=cycle(stageIndex()+Number(started),stages.length);
-      stageAge=0;started=true;result=null;
+      stageAge=0;started=true;
     },
-    advance(dt,timeMode,weatherMode,riding){
+    advance(dt,timeMode,_weatherMode,riding){
       if(!Number.isFinite(dt)||dt<=0)return;
       elapsed+=dt;result=null;
-      if(riding&&timeMode==='auto'){
+      if(!riding)return;
+      weatherAge+=dt;
+      if(timeMode==='auto'){
         started=true;
         stageAge+=dt;
-      }
-      if(weatherMode!=='auto')return;
-      weatherAge+=dt;
-      while(weatherAge>=hold+change){
-        weatherAge-=hold+change;
-        from=to;to=nextWeather(from);hold=18+random()*14;change=8+random()*6;
       }
     },
     sample(timeMode='auto',weatherMode='auto'){
@@ -124,8 +128,19 @@ export function createMountainClimate(random=Math.random) {
       const h=automatic?cycle(hourAt[before]+cycle(hourAt[after]-hourAt[before],24)*progress,24):hourAt[timeMode];
       const stage=automatic?stages[cycle(index,stages.length)]:timeMode;
       const aurora=automatic?mix(Number(before==='aurora'),Number(after==='aurora'),progress):Number(stage==='aurora');
-      const snow=weatherMode==='auto'?mix(snowByWeather[from],snowByWeather[to],smooth(hold,hold+change,weatherAge)):snowByWeather[weatherMode];
-      const resolvedWeather=snow<.13?'clear':snow<.70?'light':'heavy';
+      let snow=snowByWeather[weatherMode],resolvedWeather=weatherMode;
+      if(weatherMode==='auto'){
+        const age=automatic?stageAge:weatherAge;
+        const slot=Math.floor(age/AUTO_STAGE_SECONDS);
+        if(slot!==weatherSlot){
+          weatherSlot=slot;
+          weatherPlan=newWeatherPlan(random);
+        }
+        const weatherPhase=age%AUTO_STAGE_SECONDS;
+        snow=scheduledSnow(weatherPlan,weatherPhase);
+        const inSnow=weatherPhase>=weatherPlan.onset&&weatherPhase<weatherPlan.onset+snowWindow;
+        resolvedWeather=inSnow?(snow<.70?'light':'heavy'):'clear';
+      }
       previousTime=timeMode;previousWeather=weatherMode;
       return result=calculate(h,stage,aurora,resolvedWeather,snow,elapsed);
     }

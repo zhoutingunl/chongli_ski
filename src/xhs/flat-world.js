@@ -1,3 +1,4 @@
+import {keepInWindow,turnCameraAtBend,usesCameraWindow} from '../camera-window.js';
 import {nearbyLiftStation} from '../lift-access.js';
 import {Descent} from '../simulation.js';
 import {createSkiNavigation} from '../navigation.js';
@@ -53,6 +54,7 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
   const input={steer:0,trim:0,brake:false,boost:false,lookX:0,lookY:0};
   let station=null,ride=null,paused=false,active=false,videoCanvasLocked=false;
   let yaw=0,zoom=1,panX=0,panY=0,frame=0,last=0,hudAge=0,snowMarks=[];
+  let autoCamera=false,cameraLane=0,routeBearing=0,orbitMovedAt=-Infinity;
   let conditions=climate.sample(opts.time,opts.weather);
   const refreshClimate=()=>{conditions=climate.sample(opts.time,opts.weather);};
   function gates(route,at,side,lift,end='top',summit=false){
@@ -66,7 +68,7 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
     gates(route,place,route.resort,lift,place.stationEnd,true);
   }
   function resetView(){
-    canvas.hidden=false;active=true;paused=false;last=0;yaw=0;zoom=1;panX=panY=0;snowMarks=[];
+    canvas.hidden=false;active=true;paused=false;last=0;yaw=0;zoom=1;panX=panY=0;snowMarks=[];autoCamera=false;orbitMovedAt=-Infinity;
   }
   function start(route,options){
     sim.start(navigation.safeRun(route),options);climate.startRun(opts.time);refreshClimate();station=ride=null;resetView();draw();kick();
@@ -135,10 +137,20 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
     if(!w||!h)return;
     if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}
     const subject=station?.view==='lodge'?site('lodge'):null;
-    const x=subject?.x??sim.x, z=subject?.z??sim.z;
-    const headingUp=(sim.mode==='summit'||sim.mode==='run');
-    const bearing=headingUp?-(sim.heading+yaw):yaw;
     const scale=Math.min(w,h)/((station?.view==='valley'?780:320)/zoom);
+    const framed=performance.now()-orbitMovedAt>480&&usesCameraWindow(sim,input);
+    if(framed){
+      if(!autoCamera){cameraLane=sim.offset;routeBearing=sim.guideHeading;}
+      cameraLane=keepInWindow(cameraLane,sim.offset,w*.24/scale);
+      routeBearing=turnCameraAtBend(routeBearing,sim.guideHeading,.135);
+    }
+    autoCamera=framed;
+    const lateral=framed?cameraLane-sim.offset:0;
+    const x=subject?.x??sim.x+Math.cos(sim.guideHeading)*lateral;
+    const z=subject?.z??sim.z+Math.sin(sim.guideHeading)*lateral;
+    const headingUp=(sim.mode==='summit'||sim.mode==='run');
+    const forward=(framed?routeBearing:sim.heading)+yaw;
+    const bearing=headingUp?-forward:yaw;
     const co=Math.cos(bearing),si=Math.sin(bearing);
     const centerX=w*.5+panX,centerY=h*.49+panY;
     function position(px,pz){
@@ -182,7 +194,7 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
       for(const opt of marker.options){
         const anchor=opt.paintPosition||opt.position;
         if(!anchor)continue;
-        const [ax,ay]=position(...anchor),forward=sim.heading+yaw;
+        const [ax,ay]=position(...anchor);
         const view=Math.atan2(anchor[0]-sim.x,sim.z-anchor[1]);
         if(Math.cos(view-forward)<.28||ax<8||ax>w-8||ay<10||ay>h-16)continue;
         const text=label(opt.name),width=ctx.measureText(text).width;
@@ -205,7 +217,8 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
     if(last&&!paused&&now-last<31){kick();return;}
     last=now;
     if(!paused){
-      climate.advance(dt,opts.time,opts.weather,sim.mode==='run');yaw+=input.lookX*dt*1.75;
+      climate.advance(dt,opts.time,opts.weather,sim.mode==='run');
+      if(input.lookX){orbitMovedAt=performance.now();yaw+=input.lookX*dt*1.75;}
       if(ride)moveLift(dt);
       else if(sim.mode==='run'){
         sim.tick(dt,input);
@@ -240,7 +253,7 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
       progress:ride.dir>0?ride.along/ride.length:1-ride.along/ride.length}:null;},
     get nextFlag(){return null;},
     get looking(){return Math.abs(yaw)>.03||Math.abs(zoom-1)>.03||station?.view!=='wide'&&!!station;},
-    get facing(){return sim.heading+yaw;},
+    get facing(){return (autoCamera?routeBearing:sim.heading)+yaw;},
     pushTowardsView(){sim.freeHeading(this.facing);yaw=0;redraw();},
     summitHeading(route){return station?.summit?navigation.summitHeading(station.side,route):undefined;},
     pause(value){paused=value;last=0;redraw();},
@@ -251,8 +264,8 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
     cameraChanged:redraw,
     lookAroundStation(name){if(station)station.view=name;redraw();},
     lookAtBaseHall(){const hall=site('hall');if(hall){yaw=-Math.atan2(hall.x-sim.x,sim.z-hall.z);redraw();}},
-    centerLook(){yaw=0;zoom=1;panX=panY=0;if(station)station.view='wide';redraw();},
-    orbit(dx,dy){yaw+=dx*.008;zoom=clamp(zoom*Math.exp(-dy*.003),.55,2.6);redraw();}
+    centerLook(){orbitMovedAt=-Infinity;yaw=0;zoom=1;panX=panY=0;if(station)station.view='wide';redraw();},
+    orbit(dx,dy){if(dx||dy)orbitMovedAt=performance.now();yaw+=dx*.008;zoom=clamp(zoom*Math.exp(-dy*.003),.55,2.6);redraw();}
   };
 }
 
