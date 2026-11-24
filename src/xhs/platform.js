@@ -1,8 +1,6 @@
 export const isMiniTool = true;
 export const motionSupported = false;
-export const shareAvailable = () => false;
 export const fullscreen = () => Promise.resolve(false);
-export const shareRoute = () => Promise.resolve('unavailable');
 
 // Touch is the input method in the tool. The native sensor reports angular
 // velocity, whereas the browser steering model needs an absolute tilt.
@@ -109,10 +107,25 @@ export function store(key, value) {
   settled.then(() => { if (writes.get(key) === settled) writes.delete(key); });
 }
 
-export const videoSaveAvailable = () => !!userDataPath && allows(9490,'writeFile','appendFile','getFileStorageInfo','unlink');
+const canWriteClip=()=>!!userDataPath&&allows(9490,'writeFile','appendFile','getFileStorageInfo','unlink');
+export const videoSaveAvailable=()=>canWriteClip()||allows(9490,'writeTempFile','saveFile');
+async function tempVideo(blob){
+  const data=await new Promise((resolve,reject)=>{
+    const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(blob);
+  });
+  const {filePath}=await sdk().writeTempFile({data});
+  if(!filePath)throw Error('Temporary video unavailable');
+  return filePath;
+}
 export async function saveGameVideo(blob,name){
   if(!videoSaveAvailable())throw new Error('Video storage is unavailable');
-  const api=sdk(),filePath=userDataPath+'/'+name;
+  const api=sdk();
+  if(!canWriteClip()){
+    const {savedFilePath}=await api.saveFile({tempFilePath:await tempVideo(blob)});
+    if(!savedFilePath)throw Error('Video save unconfirmed');
+    return savedFilePath;
+  }
+  const filePath=userDataPath+'/'+name;
   const {writeChunkMaxBytes,limitBytes,usedBytes}=await deadline(api.getFileStorageInfo(),5000);
   if(!Number.isSafeInteger(writeChunkMaxBytes)||writeChunkMaxBytes<4||
     (limitBytes>0&&usedBytes+blob.size>limitBytes))throw new Error('Video storage is full');
@@ -172,20 +185,17 @@ export function loadForestImage(url) {
 
 const cloudCollection='ski_progress_v1';
 export function engagementAvailable(type){
-  if(type==='follow')return allows(9510,'getFollowStatus','followAuthor');
-  if(type==='weekly')return allows(9510,'submitScore','getRankList','getMyRank');
+  if(type==='ranking')return allows(9510,'submitScore','getRankList','getMyRank');
   if(type==='cloud')return allows(9510,'queryCloudStorage','addCloudStorage','updateCloudStorage');
   return false;
 }
-export const authorFollow=()=>sdk().followAuthor();
-export const followStatus=()=>deadline(sdk().getFollowStatus());
-export async function weeklyScores(board){
+export async function publicRanks(board){
   const [list,mine]=await deadline(Promise.all([
-    sdk().getRankList({board,period:'week'}),sdk().getMyRank({board,period:'week'})
+    sdk().getRankList({board,period:'all'}),sdk().getMyRank({board,period:'all'})
   ]),6000);
   return {rows:list.data,mine};
 }
-export const submitWeeklyScore=(board,score)=>deadline(sdk().submitScore({board,score}),6000);
+export const submitRankScore=(board,score)=>deadline(sdk().submitScore({board,score}),6000);
 export async function cloudRead(){
   const api=sdk(),rows=[];
   let cursor;
@@ -204,4 +214,29 @@ export async function cloudWrite(id,content){
 }
 export function gameVibration(type){
   if(allows(9500,'vibrateShort'))Promise.resolve().then(()=>sdk().vibrateShort({type})).catch(()=>{});
+}
+
+export function photoActions(){
+  const direct=allows(9530,'share'),note=typeof sdk()?.postNote==='function';
+  return {share:direct?'image':note?'note':null,note:direct&&note,save:typeof sdk()?.saveImageToPhotosAlbum==='function'};
+}
+export async function sharePhoto(image,file,asNote=false){
+  if(!asNote&&photoActions().share==='image')return sdk().share({type:'image',image_resource:image});
+  return sdk().postNote({pageType:'photo_publish',mediaInfo:{image_resources:[{url:image}]}});
+}
+export async function savePhoto(image){
+  const api=sdk();
+  const path=image.length>1000000&&typeof api.writeTempFile==='function'?(await api.writeTempFile({data:image})).filePath:image;
+  return api.saveImageToPhotosAlbum({filePath:path});
+}
+
+export const canPublishVideo=video=>!!video&&typeof sdk()?.postNote==='function'&&
+  (!!video.path||videoSaveAvailable()||typeof sdk()?.writeTempFile==='function');
+export async function publishVideo(video){
+  let path=video.path;
+  if(!path&&video.blob&&typeof sdk()?.writeTempFile==='function'){
+    path=await tempVideo(video.blob);
+  }
+  if(!path)throw Error('Video file unavailable');
+  return sdk().postNote({pageType:'video_publish',mediaInfo:{video_resources:{video_url:path}}});
 }

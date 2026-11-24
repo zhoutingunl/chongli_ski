@@ -23,6 +23,7 @@ export function getRiderDimensions({gear = 'ski', gender = 'male'} = {}) {
   const stanceScale = scale * (isChild ? (board ? .900 : .985) : 1);
   return Object.freeze({
     isChild, scale, lengthScale, widthScale, stanceScale,
+    mass: isChild ? (gender==='boy' ? 22 : 21) : gender==='female' ? 63 : 76,
     deckLength: (board ? 1.585 : 1.753) * lengthScale,
     deckWidth: (board ? .288 : .127) * widthScale,
     waistWidth: (board ? .250 : .079) * widthScale,
@@ -927,8 +928,10 @@ function readPiste(snow, state, speed, active) {
   snow.sin = Math.sin(dir); snow.cos = Math.cos(dir);
   const height = (dx, dz) => snow.map.height(snow.x + dx, snow.z + dz);
   snow.ground = height(0, 0);
-  snow.across = (height(2*snow.cos, 2*snow.sin) - height(-2*snow.cos, -2*snow.sin)) * .25;
-  snow.back = (height(-2*snow.sin, 2*snow.cos) - height(2*snow.sin, -2*snow.cos)) * .25;
+  const rough=state.snowTerrain?.kind&&state.snowTerrain.kind!=='groomed';
+  const span=rough?.67:2, lateral=span*snow.cos, forward=span*snow.sin;
+  snow.across=(height(lateral,forward)-height(-lateral,-forward))/(2*span);
+  snow.back=(height(-forward,lateral)-height(forward,-lateral))/(2*span);
   snow.vertical = 1 / Math.hypot(1, snow.across, snow.back);
 
   // At a hollow the slope under the skis is flattening and the legs absorb
@@ -937,7 +940,7 @@ function readPiste(snow, state, speed, active) {
   const dx = Math.sin(travel)*sample, dz = -Math.cos(travel)*sample;
   const approach = Math.atan2(height(-dx,-dz)-snow.ground, sample);
   const departure = Math.atan2(snow.ground-height(dx,dz), sample);
-  snow.normalLoad = clamp((approach-departure)*speed*speed/(9.81*sample), -.82, 1.28);
+  snow.normalLoad = clamp(rough ? state.groundLoad || 0 : (approach-departure)*speed*speed/(9.81*sample), -.82, 1.45);
 }
 
 // Remove the common DEM tangent already applied by world.js. Only residual
@@ -1084,16 +1087,14 @@ export function createRider(options = {}) {
     // Only the board layers stretch. The separately sized boots and bindings
     // sit on its footbeds and keep their own shape.
     if (junior) for (const mesh of node.children) mesh.scale.set(deckWidth,1,deckLength);
-    if (!board || junior) {
-      const sections=profile.map(([z,width,top])=>{
-        const nose=THREE.MathUtils.smoothstep(-z,.18,board ? .75 : .90);
-        const tail=THREE.MathUtils.smoothstep(z,.18,.73),bindingZ=.275*stance/deckLength;
-        return {z:z*deckLength,half:width*.5*deckWidth,base:top-(board ? .0105 : .013),
-          frontFlex:-.021*nose+.008*tail,rearFlex:-.016*tail+.012*nose,
-          twist:board ? 1-2*THREE.MathUtils.smoothstep(z,-bindingZ,bindingZ) : 0};
-      });
-      baseSections.set(node,sections);
-    }
+    const sections=profile.map(([z,width,top])=>{
+      const nose=THREE.MathUtils.smoothstep(-z,.18,board ? .75 : .90);
+      const tail=THREE.MathUtils.smoothstep(z,.18,.73),bindingZ=.275*stance/deckLength;
+      return {z:z*deckLength,half:width*.5*deckWidth,base:top-(board ? .0105 : .013),
+        frontFlex:-.021*nose+.008*tail,rearFlex:-.016*tail+.012*nose,
+        twist:board ? 1-2*THREE.MathUtils.smoothstep(z,-bindingZ,bindingZ) : 0};
+    });
+    baseSections.set(node,sections);
     return node;
   }
   const deck = board ? plankModel('Snowboard',0) : null;
@@ -1531,7 +1532,8 @@ export function createRider(options = {}) {
     const swap = drive ? state.bankSwap || 0 : 0;
     readPiste(snow,state,speed,(drive || junior || !board) && !inFlight);
     groundMatrix=null;
-    if ((!board || junior) && snow.available) {
+    const onRelief=state.snowTerrain?.kind&&state.snowTerrain.kind!=='groomed';
+    if ((!board || junior || onRelief) && snow.available) {
       snowSink=state.snowSink || 0;
       rig.updateWorldMatrix(true,false);
       const m=rig.matrixWorld.elements;
@@ -1649,7 +1651,7 @@ export function createRider(options = {}) {
       deck.rotation.set(boardPitch+centrePitch,gearYaw,roll,'YXZ');
       deck.position.set(0,.002+Math.abs(Math.sin(roll))*.116*deckWidth+boardLift+contactLift+centreRelief,0);
       deckFlex(noseLoad,tailLoad,twist);
-      if (junior && !inFlight) deck.position.y+=.0015-runningClearance(deck,noseLoad,tailLoad,twist);
+      if ((junior || groundMatrix) && !inFlight) deck.position.y+=.0015-runningClearance(deck,noseLoad,tailLoad,twist);
     }
 
     for (const limb of limbs) {

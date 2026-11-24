@@ -281,8 +281,19 @@ def summit_places():
                 'camera': {'position': along(-6), 'height': 2.65,
                            'target': along(8), 'targetHeight': 1.1}}
 
-    return {'wanlong': place(-219, -33, 55, 'wanlong-lodge', 'w1564657050'),
-            'genting': place(548, 383, 25, 'genting-lodge', 'w469393391')}
+    # The crest at this DEM vertex falls away on every side. The flower outlets
+    # skirt the adjacent saddle and terminals before joining their surveyed ways.
+    genting = place(448, 64, 2.51, 'genting-lodge', 'w469393393')
+    genting['upperLiftIds'] = ['w469393393', 'w469393391']
+    genting['outlets'] = {
+        'peony': {'trailId': 'w878706035', 'via': [], 'join': 2},
+        'datura': {'trailId': 'w771168506', 'via': [
+            [464, 76], [488, 184], [520, 184], [548, 220], [572, 320]], 'join': 1},
+        'felwort': {'trailId': 'w771168509', 'via': [
+            [456, 88], [488, 184], [520, 184], [548, 220], [580, 320],
+            [604, 344], [608, 352], [608, 480], [613.94, 492.04]], 'join': 3},
+    }
+    return {'wanlong': place(-219, -33, 55, 'wanlong-lodge', 'w1564657050'), 'genting': genting}
 
 
 def main():

@@ -6,12 +6,29 @@ export const formatTime = seconds => Math.floor(seconds / 60) + '′ ' + String(
 export const difficultyName = {easy:'初级', intermediate:'中级', advanced:'高级', expert:'专家'};
 export const difficultyColor = {easy:'#8fc79d', intermediate:'#84b9e2', advanced:'#e49c85', expert:'#c49eb8'};
 import {loadData} from './platform.js';
+import {createSnowTerrain} from './snow-terrain.js';
 
 export class HeightField {
   constructor({bounds, dem}) {
     Object.assign(this, {bounds, ...dem});
     this.dx = (bounds.maxX - bounds.minX) / (this.cols - 1);
     this.dz = (bounds.maxZ - bounds.minZ) / (this.rows - 1);
+  }
+  // Shared by the coarse DEM and every level of nearby snow detail.
+  get vertexNormals() {
+    if(this.normals)return this.normals;
+    const {cols,rows,dx,dz,heights}=this;
+    const normals=new Float32Array(rows*cols*3);
+    for(let row=0;row<rows;row++)for(let col=0;col<cols;col++){
+      const left=Math.max(0,col-1),right=Math.min(cols-1,col+1);
+      const top=Math.max(0,row-1),bottom=Math.min(rows-1,row+1);
+      const nx=(heights[row*cols+left]-heights[row*cols+right])/((right-left)*dx);
+      const nz=(heights[top*cols+col]-heights[bottom*cols+col])/((bottom-top)*dz);
+      const length=Math.hypot(nx,1,nz),at=3*(row*cols+col);
+      normals[at]=nx/length;normals[at+1]=1/length;normals[at+2]=nz/length;
+    }
+    this.normals=normals;
+    return normals;
   }
   height(x, z) {
     const u = clamp((x - this.bounds.minX) / this.dx, 0, this.cols - 1.000001);
@@ -139,6 +156,9 @@ export class SkiRoute {
     this.length=this.distances.at(-1);
     this.startHeight=mountain.height(...p[0]);
     this.endHeight=mountain.height(...p.at(-1));
+    // A catalogue piste can have a long shared exit down to the lift.
+    const head=p[this.primaryStartIndex]||p[0],foot=p[this.primaryEndIndex]||p.at(-1);
+    this.pisteDrop=Math.max(0,Math.round(mountain.height(...head)-mountain.height(...foot)));
   }
   at(distance) {
     distance=clamp(distance,0,this.length);
@@ -169,6 +189,16 @@ let pending;
 export function prepareMountain(raw){
   const field=new HeightField(raw);
   const data={...raw,field,height:field.height.bind(field),index:new TrailIndex(raw.trails),obstacles:new ObstacleIndex(raw.buildings)};
+  if(raw.summitPlaces?.wanlong && raw.summitPlaces?.genting){
+    const {position,outlets={}}=raw.summitPlaces.genting;
+    data.aprons=Object.values(outlets).map(({trailId,via,join})=>{
+      const trail=data.trails.find(t=>t.id===trailId);
+      return {width:22,points:[position,...via,trail.points[join]]};
+    });
+    data.apronIndex=new TrailIndex(data.aprons);
+    data.snowTerrain=createSnowTerrain(data.height,data.index,data.trails,data.apronIndex);
+    data.height=data.snowTerrain.height;
+  }
   data.routes=raw.routes.map(r=>new SkiRoute(r,data));
   const catalogue=new Map((raw.trailCatalog||[]).map(p=>[p.routeId,p]));
   data.pisteRoutes=(raw.pisteRoutes||[]).map(r=>new SkiRoute({...r,catalogResort:catalogue.get(r.id)?.resort||r.resort},data));

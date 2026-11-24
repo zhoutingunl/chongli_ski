@@ -1,3 +1,4 @@
+import {createTerrainDetail} from './terrain-detail.js';
 import {placePisteLights} from './piste-lighting.js';
 import * as THREE from 'three';
 import {HeightField,clamp,randomGenerator} from './mountain.js';
@@ -52,7 +53,7 @@ function prepareTrailMask(data) {
   const b=data.bounds, sx=size/(b.maxX-b.minX),sz=size/(b.maxZ-b.minZ);
   const toPix=([x,z])=>[(x-b.minX)*sx,(z-b.minZ)*sz];
   c.lineCap='round';c.lineJoin='round';
-  for(const trail of data.trails){
+  for(const trail of [...(data.aprons||[]),...data.trails]){
     const points=trail.points;
     for(let i=1;i<points.length;i++){
       const a=toPix(points[i-1]),d=toPix(points[i]),dx=d[0]-a[0],dz=d[1]-a[1],l=Math.hypot(dx,dz)||1;
@@ -68,8 +69,9 @@ function prepareTrailMask(data) {
   }
   const t=new THREE.CanvasTexture(el);t.flipY=false;t.colorSpace=THREE.NoColorSpace;t.anisotropy=4;return t;
 }
-function addTerrainTiles(scene,field,material,innerBounds=null) {
-  const {cols,rows,dx,dz,bounds:b,heights:h}=field, tile=52;
+export function addTerrainTiles(scene,field,material,innerBounds=null) {
+  const {cols,rows,dx,dz,bounds:b,heights:h,vertexNormals}=field, tile=52;
+  const tilesAcross=Math.ceil((cols-1)/tile), patches=[];
   for(let r=0;r<rows-1;r+=tile)for(let c=0;c<cols-1;c+=tile){
     const endR=Math.min(rows-1,r+tile),endC=Math.min(cols-1,c+tile),stride=endC-c+1;
     const positions=[],normals=[],indices=[];
@@ -78,9 +80,7 @@ function addTerrainTiles(scene,field,material,innerBounds=null) {
       let y=h[gi];
       if(innerBounds&&x>=innerBounds.minX-dx&&x<=innerBounds.maxX+dx&&z>=innerBounds.minZ-dz&&z<=innerBounds.maxZ+dz)y-=34;
       positions.push(x,y,z);
-      const i0=Math.max(0,i-1),i1=Math.min(cols-1,i+1),j0=Math.max(0,j-1),j1=Math.min(rows-1,j+1);
-      const nx=(h[j*cols+i0]-h[j*cols+i1])/((i1-i0)*dx),nz=(h[j0*cols+i]-h[j1*cols+i])/((j1-j0)*dz),length=Math.hypot(nx,1,nz);
-      normals.push(nx/length,1/length,nz/length);
+      normals.push(vertexNormals[gi*3],vertexNormals[gi*3+1],vertexNormals[gi*3+2]);
       if(j===endR||i===endC)continue;
       if(innerBounds&&x>innerBounds.minX+dx&&x<innerBounds.maxX-2*dx&&z>innerBounds.minZ+dz&&z<innerBounds.maxZ-2*dz)continue;
       const a=(j-r)*stride+i-c;indices.push(a,a+stride,a+1,a+1,a+stride,a+stride+1);
@@ -88,7 +88,20 @@ function addTerrainTiles(scene,field,material,innerBounds=null) {
     if(!indices.length)continue;
     const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geo.setAttribute('normal',new THREE.Float32BufferAttribute(normals,3));geo.setIndex(indices);geo.computeBoundingSphere();
     const patch=new THREE.Mesh(geo,material);patch.receiveShadow=!innerBounds;scene.add(patch);
+    if(!innerBounds){
+      geo.index.setUsage(THREE.DynamicDrawUsage);
+      patches[(r/tile)*tilesAcross+c/tile]={index:geo.index,stride};
+    }
   }
+  // Exchange whole triangles. Discarding fragments at the moving rectangle
+  // discarded neighbouring MSAA samples too, leaving dotted gaps on the slope.
+  return (c,r,covered)=>{
+    const {index,stride}=patches[Math.floor(r/tile)*tilesAcross+Math.floor(c/tile)];
+    const i=c%tile,j=r%tile,a=j*stride+i,offset=6*(j*(stride-1)+i);
+    if(covered)index.array.fill(a,offset,offset+6);
+    else index.array.set([a,a+stride,a+1,a+1,a+stride,a+stride+1],offset);
+    index.addUpdateRange(offset,6);index.needsUpdate=true;
+  };
 }
 const atmosphereGLSL=`
   vec3 aerialSnow(vec3 radiance,vec3 point,vec3 eye){
@@ -133,13 +146,15 @@ const ridgeShadowGLSL=`
     return sunHorizon.w*smoothstep(sunHorizon.z-.035,sunHorizon.z+.060,horizon);
   }
 `;
-function snowMaterial(uniforms,far) {
+function snowMaterial(uniforms,far,refined=false) {
   const mat=new THREE.MeshLambertMaterial({color:0xffffff});
-  mat.customProgramCacheKey=()=>far?'distant-snow-v3':'near-snow-v5';
+  mat.customProgramCacheKey=()=>far?'distant-snow-v3':refined?'terrain-snow-v1':'near-snow-v6';
   mat.onBeforeCompile=s=>{
     Object.assign(s.uniforms,uniforms);
     s.vertexShader='varying vec3 vGround;\n'+s.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvGround=position;');
+    if(refined)s.vertexShader='attribute vec3 snowRelief; varying vec3 vSnowRelief;\n'+s.vertexShader.replace('vGround=position;', 'vGround=position; vSnowRelief=snowRelief;');
     s.fragmentShader=`varying vec3 vGround;
+      ${refined?'varying vec3 vSnowRelief;':''}
       uniform sampler2D trailMask,ortho,crystals,lampMap; uniform float pisteLights; uniform vec4 lowSun; uniform float hasOrtho; uniform vec4 terrainBounds;
       uniform vec3 ridgeAir,hazeAir,horizonAir; uniform vec4 airSun; uniform float aerialStrength; uniform vec3 solarTint;
       uniform vec3 shadowStarts[${shadowBones.length}]; uniform vec2 shadowEnds[${shadowBones.length}]; uniform vec4 shadowArea;
@@ -155,6 +170,7 @@ function snowMaterial(uniforms,far) {
       diffuseColor.rgb=mix(bank,photograph,hasOrtho*.89);
     `:`
       vec2 p=vGround.xz;
+      ${refined?'vec3 sculpt=vSnowRelief;':'vec3 sculpt=vec3(0.);'}
       vec2 uv=(p-terrainBounds.xy)/terrainBounds.zw;
       float dist=length(cameraPosition-vGround);
       vec4 m=texture2D(trailMask,uv);
@@ -170,7 +186,7 @@ function snowMaterial(uniforms,far) {
       vec3 strip=m.rgb/max(m.a,.05);
       vec2 groove=normalize(strip.gb*2.-1.+vec2(.0001)),crossTrail=vec2(-groove.y,groove.x);
       float slow=noise21(p*.009)*.58+noise21(p*.033)*.29+noise21(p*.14)*.13;
-      float course=smoothstep(.17,.94,m.a+(slow-.5)*.15);
+      float course=smoothstep(.17,.94,m.a+(slow-.5)*.15)*(1.-sculpt.x);
       vec3 nativeColor=texture2D(ortho,uv).rgb;
       float luma=dot(nativeColor,vec3(.24,.58,.18));
       vec3 snowy=mix(vec3(.64,.72,.83),vec3(.86,.90,.93),slow);
@@ -181,28 +197,28 @@ function snowMaterial(uniforms,far) {
       float distanceBlend=smoothstep(110.,1050.,dist);
       float imageWeight=mix(mix(.22,.87,distanceBlend),mix(.065,.47,distanceBlend),course);
       local=mix(local,actual,hasOrtho*imageWeight);
+      local=mix(local,snowy*.96,sculpt.x*.67);
+      local=mix(local,vec3(.25,.39,.55),sculpt.y*.82);
       float across=(strip.r-.5)*64.;
       float winds=noise21(p*.21+vec2(4.3,1.7));
       float phase=across*78.+(winds-.5)*1.25;
-      float detail=1.-smoothstep(14.,72.,dist);
+      float detail=1.-smoothstep(5.,28.,dist);
       float grooming=mix(.38,.86,smoothstep(.26,.69,noise21(p*.108+vec2(18.,-7.))));
-      float teeth=course*detail*grooming*(1.-smoothstep(.80,2.85,fwidth(phase)));
+      float pisteFinish=course*(1.-sculpt.z);
+      float teeth=pisteFinish*detail*grooming*(1.-smoothstep(.80,2.85,fwidth(phase)));
       float ridge=sin(phase),flute=cos(phase)*(.85-.23*ridge);
-      float trackPhase=across*1.49+slow*.52;
-      float seam=smoothstep(.955,.998,cos(trackPhase))*(1.-smoothstep(.07,.62,fwidth(trackPhase)));
       float grain=(noise21(p*7.6)-.5)*(1.-smoothstep(8.,30.,dist));
       vec2 relief=texture2D(crystals,p*.47).rg*2.-1.16;
       vec2 broad=texture2D(crystals,p*.081+vec2(.12,.34)).rg*2.-1.16;
       float windSculpt=noise21(vec2(.097*p.x+.047*p.y,.32*p.y-.15*p.x))-.5;
       float facets=dot(relief*.64+broad*.36,normalize(lowSun.xz));
-      local*=1.+facets*mix(.26,.13,course)*(1.-smoothstep(24.,130.,dist));
+      local*=1.+facets*mix(.26,.13,pisteFinish)*(1.-smoothstep(24.,130.,dist));
       local+=(winds-.5)*vec3(.052,.046,.035)*(1.-smoothstep(14.,110.,dist));
-      local+=teeth*(ridge*.039-.016*(1.-ridge))*vec3(1.,.89,.68);
-      local-=course*seam*detail*vec3(.037,.030,.019);
+      local+=teeth*(ridge*.021-.009*(1.-ridge))*vec3(1.,.89,.68);
       local+=grain*.037;
-      local+=vec3(.083,.100,.126)*windSculpt*mix(1.,.26,course)*(1.-smoothstep(35.,190.,dist));
-      vec2 snowSlope=(relief*mix(.58,.35,course)+broad*mix(.50,.28,course))*(1.-smoothstep(28.,105.,dist))
-        -crossTrail*(teeth*flute*.24);
+      local+=vec3(.083,.100,.126)*windSculpt*mix(1.,.26,pisteFinish)*(1.-smoothstep(35.,190.,dist));
+      vec2 snowSlope=(relief*mix(.58,.35,pisteFinish)+broad*mix(.50,.28,pisteFinish))*(1.-smoothstep(28.,105.,dist))
+        -crossTrail*(teeth*flute*.105);
       vec2 iceGrid=p*6.4+vec2(7.13,18.2);
       float icePixel=facetFootprint(iceGrid);
       float shimmerPixel=facetFootprint(iceGrid*.36);
@@ -219,7 +235,7 @@ function snowMaterial(uniforms,far) {
       outgoingLight-=reflectedLight.directDiffuse*silhouette;
       if(lowSun.w>.001&&dist<135.){
         vec3 eye=normalize(cameraPosition-vGround),h=normalize(eye+lowSun.xyz);
-        float snowCover=max(course,smoothstep(.40,.73,luma)*hasOrtho*.75);
+        float snowCover=max(max(course,sculpt.x*.76),smoothstep(.40,.73,luma)*hasOrtho*.75);
         float fine=iceReflection(iceGrid,icePixel,snowNormal,h);
         float broadSpark=iceReflection(iceGrid*.36+vec2(5.2,3.1),shimmerPixel,snowNormal,h);
         // Keep the bright strip attached to the slope, and let coarse ice
@@ -230,8 +246,8 @@ function snowMaterial(uniforms,far) {
         vec3 sunlight=reflectedLight.directDiffuse/max(diffuseColor.rgb,vec3(.23));
         float direct=max(sunlight.r,max(sunlight.g,sunlight.b))*(1.-silhouette);
         float weight=lowSun.w*snowCover*(1.-smoothstep(80.,135.,dist));
-        float gloss=strip*(.055+.53*grazing)+.16*shimmer*grazing;
-        float crystals=13.2*fine*(1.-smoothstep(24.,55.,dist))+10.7*broadSpark*(1.-smoothstep(51.,107.,dist));
+        float gloss=strip*(.058+.62*grazing)+.18*shimmer*grazing;
+        float crystals=16.3*fine*(1.-smoothstep(24.,55.,dist))+12.4*broadSpark*(1.-smoothstep(51.,107.,dist));
         outgoingLight+=solarTint*direct*weight*(gloss+crystals);
       }
       if(pisteLights>.005){
@@ -395,7 +411,9 @@ export async function buildSurface(scene,data) {
     shadowStarts:{value:shadowBones.map(()=>new THREE.Vector3())},
     shadowEnds:{value:shadowBones.map(()=>new THREE.Vector2())},shadowArea:{value:new THREE.Vector4()}
   };
-  addTerrainTiles(scene,data.field,snowMaterial(uniforms,false));
+  const coverCell=addTerrainTiles(scene,data.field,snowMaterial(uniforms,false));
+  const detail=data.snowTerrain&&createTerrainDetail(scene,data.field,data.snowTerrain,
+    snowMaterial(uniforms,false,true),coverCell);
   let hasSolarHorizons=false;
   await Promise.all([
     loadTexture(asset('art/snow-normal.webp')).then(t=>{t.wrapS=t.wrapT=THREE.RepeatWrapping;uniforms.crystals.value=t;}),
@@ -438,7 +456,7 @@ export async function buildSurface(scene,data) {
     }
     area.set(root.x,root.z,span+.45,strength*(span>10?.58:.82));
   }
-  return {setRiderShadow,setLight(env){
+  return {setRiderShadow,detail,locate:detail?.locate,setLight(env){
     setSnowSun(uniforms.lowSun.value,env);uniforms.pisteLights.value=env.lampAmount||0;fixtures.setLight(env);
     const day=1-env.nightAmount,haze=env.snowAmount;
     uniforms.ridgeAir.value.set(env.fog).multiplyScalar(.70+.10*day);
@@ -477,7 +495,8 @@ export async function plantForest(scene,data) {
         crown=vec3((uv.x+floor(form.z))/3.,1.-uv.y,form.z);
         shadowSeed=location.xz*.071;
         vec2 face=normalize(lowSun.xz+vec2(.0001));
-        vec3 transformed=location+vec3(face.y*position.x*form.x,(position.y+.5)*form.y,-face.x*position.x*form.x);
+        float castHeight=form.y*mix(.60,1.,smoothstep(.10,.54,lowSun.y));
+        vec3 transformed=location+vec3(face.y*position.x*form.x,(position.y+.5)*castHeight,-face.x*position.x*form.x);
       `);
     shader.fragmentShader='uniform sampler2D treeAtlas;varying vec3 crown;varying vec2 shadowSeed;\n'+glNoise+shader.fragmentShader.replace('#include <map_fragment>',`
       vec4 c=texture2D(treeAtlas,crown.xy);
@@ -573,6 +592,8 @@ export async function plantForest(scene,data) {
       if(rand()>Math.max(0,coverValue-.055)*.94)continue;
       const near=data.index.near(x,z);
       if(near.distance<(near.trail?.width||32)*.5+1.3 || nearCable(x,z))continue;
+      const apron=data.apronIndex?.near(x,z);
+      if(apron?.trail && apron.distance<apron.trail.width*.5+2)continue;
       if(special.some(o=>Math.abs(o.x-x)<o.r&&Math.abs(o.z-z)<o.r&&Math.hypot(x-o.x,z-o.z)<o.r))continue;
       const h=5+rand()**.83*10.5;
       const species=rand(),id=species<.53?0:species<.72?1:2;

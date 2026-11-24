@@ -1,6 +1,8 @@
+import {snowResponse} from './snow-terrain.js';
 import {atWanlongForecourt} from './lift-access.js';
-import {AutomaticTurns} from './automatic-turns.js';
-import {pisteVisitKey} from './piste-progress.js';
+import {AutomaticTurns,automaticCentreGain,edgeAcceleration} from './automatic-turns.js';
+import {PisteSplits} from './piste-splits.js';
+import {pisteNames,pisteVisitKey} from './piste-progress.js';
 import {clamp, mixAngle} from './mountain.js';
 import {createSkiNavigation} from './navigation.js';
 
@@ -32,17 +34,19 @@ export class Descent {
   constructor(data, opts, dimensions = null) {
     this.data = data; this.opts = opts; this.gear = opts.gear;
     this.dimensions = dimensions;
+    this.pisteName = pisteNames(data.trailCatalog);
     this.navigation = data.summitPlaces?.wanlong && data.summitPlaces?.genting ? createSkiNavigation(data) : null;
     this.mode = 'idle';
     this.x = this.z = this.y = this.heading = this.travelHeading = this.speed = 0;
     this.airHeight = this.steer = this.brake = this.trim = this.edge = 0;
-    this.snowSink = 0; this.snowSoftness = .14;
+    this.snowSink = 0; this.snowSoftness = .14; this.groundLoad = 0;
   }
 
-  start(route,{timed=false}={}) {
-    this.timed=timed;this.automatic=new AutomaticTurns();this.straightTuck=0;this.route = route; this.mode = 'run'; this.gear = this.opts.gear;
+  start(route) {
+    this.upperGuide=null;
+    this.automatic=new AutomaticTurns();this.autoSkating=false;this.straightTuck=0;this.route = route; this.mode = 'run'; this.gear = this.opts.gear;
     this.junctions=this.navigation?.stationsOn(route)||[];
-    this.pisteVisits=new Map();
+    this.pisteVisits=new Map();this.splits=new PisteSplits();this.continuedFrom=null;
     this.feedback={landing:0,tree:0};
     this.offPisteRest=this.runoutRest=0;
     this.lastTreeHit=-Infinity;
@@ -58,7 +62,7 @@ export class Descent {
     this.charge = this.jumpCooldown = this.launch = this.landing = this.impact = 0;
     this.slope = this.roll = this.steer = this.trim = this.press = this.brake = this.boost = 0;
     this.edge = this.edgeRate = this.pressure = this.skid = this.slipAngle = 0;
-    this.snowSink = 0;
+    this.snowSink = this.groundLoad = 0;
     this.turn = this.curve = this.spray = this.terrainFlex = this.push = this.stride = 0;
     this.guideLean = this.bankSwap = this.bump = this.lastGrade = this.force = 0;
     this.cutSide = 1; this.contactTime = 5; this.takeoffSpeed = this.verticalAlong = 0; this.flightCos = 1;
@@ -72,7 +76,9 @@ export class Descent {
   surface() {
     const near = this.pisteContact = this.data.index.near(this.x, this.z);
     const halfWidth = (near.trail?.width || 36) * .5;
+    this.snowTerrain=this.data.snowTerrain?.sample(this.x,this.z,near);
     this.snowSoftness = near.trail ? .14 + .78 * smooth(near.distance / halfWidth, .63, 1.32) : .92;
+    if(this.snowTerrain?.depth)this.snowSoftness=Math.max(this.snowSoftness,.14+.78*this.snowTerrain.strength);
     this.onTrail = !!near.trail && near.distance < halfWidth * 1.16;
     const named=this.data.snowSection?.(near.trail,near.index)||near.trail;
     this.trail = this.onTrail ? named : null;
@@ -124,7 +130,7 @@ export class Descent {
   get guided(){return this.opts.assist&&!this.handSteering;}
 
   freeHeading(heading){
-    this.handSteering=true;this.neutralTime=0;this.courseCheck=0;
+    this.handSteering=true;this.autoSkating=false;this.neutralTime=0;this.courseCheck=0;
     if(Number.isFinite(heading))this.heading=this.travelHeading=heading;
   }
 
@@ -146,10 +152,30 @@ export class Descent {
     this.offset=offset;this.along=along;this.planIndex=f.index;this.route=route;
   }
 
+  continueAtBase(){
+    if(!['finished','run'].includes(this.mode)||this.airborne)return false;
+    const next=this.navigation?.valleyLine(this);
+    if(!next)return false;
+    const stopped=this.mode==='finished';
+    this.continuedFrom??={id:this.route.id,name:this.route.name};
+    this.mode='run';
+    if(stopped){
+      this.heading=this.travelHeading=next.frame(0).angle;
+      this.speed=2.15;this.push=.75;
+    }
+    this.joinLine(next,0);
+    this.handSteering=!this.opts.assist||(!stopped&&next.finishKind!=='lift-link');this.neutralTime=0;this.courseCheck=.5;
+    this.automatic=new AutomaticTurns();this.autoSkating=false;this.straightTuck=0;
+    this.runoutRest=this.offPisteRest=0;this.recoveryReady=false;
+    this.surface();
+    return true;
+  }
+
   recoverToPiste(){
     if(this.mode!=='run'||!this.recoveryReady||this.airborne)return false;
     const target=this.navigation?.recoveryLine(this);
     if(!target)return false;
+    this.splits.finish();
     const {plan,along,frame}=target;
     this.x=frame.x;this.z=frame.z;this.y=this.ground=this.data.height(this.x,this.z);
     this.heading=this.travelHeading=frame.angle;
@@ -158,7 +184,7 @@ export class Descent {
     this.air=this.airHeight=this.upSpeed=this.verticalAlong=this.snowSink=0;
     this.edge=this.edgeRate=this.skid=this.slipAngle=this.steer=this.brake=this.boost=this.trim=this.push=0;
     this.press=this.pressure=this.curve=this.impact=this.landing=this.spray=this.bump=0;
-    this.requestedTurn=null;this.cancelJump();this.automatic=new AutomaticTurns();this.straightTuck=0;
+    this.requestedTurn=null;this.cancelJump();this.automatic=new AutomaticTurns();this.autoSkating=false;this.straightTuck=0;
     this.handSteering=!this.opts.assist;this.neutralTime=0;this.courseCheck=.4;
     this.offPisteRest=this.runoutRest=0;this.lastTreeHit=-Infinity;this.recoveryReady=false;
     this.surface();
@@ -253,6 +279,10 @@ export class Descent {
   }
 
   step(dt, input) {
+    const continueValley=this.route.destination==='genting'?input.boost:input.steer<-.16;
+    if(continueValley&&!input.brake&&this.route.length-this.along<90&&this.navigation?.valleyExit(this)){
+      this.continueAtBase();
+    }
     this.updateLine(input,dt);
     this.gear = this.opts.gear;
     const board = this.gear === 'board', assisted = this.guided, airborne = this.airborne;
@@ -283,14 +313,27 @@ export class Descent {
     const load = Math.abs(this.edge);
 
     const fx = Math.sin(oldDirection), fz = -Math.cos(oldDirection);
-    const gx = (this.data.height(oldX+2,oldZ)-this.data.height(oldX-2,oldZ)) / 4;
-    const gz = (this.data.height(oldX,oldZ+2)-this.data.height(oldX,oldZ-2)) / 4;
-    const grade = clamp(-(gx*fx + gz*fz), -.85, 1.18), crossGrade = gx*(-fz) + gz*fx;
+    const surface=this.snowTerrain, textured=surface?.kind&&surface.kind!=='groomed';
+    const pipe=surface?.kind==='pipe';
+    const span=textured?.55:2;
+    const gx=(this.data.height(oldX+span,oldZ)-this.data.height(oldX-span,oldZ))/(2*span);
+    const gz=(this.data.height(oldX,oldZ+span)-this.data.height(oldX,oldZ-span))/(2*span);
+    const grade=clamp(-(gx*fx+gz*fz),pipe?-4.5:-.85,pipe?4.5:1.18),crossGrade=gx*(-fz)+gz*fx;
+    const contact=textured&&!airborne?snowResponse(this.data.height,oldX,oldZ,fx,fz,oldSpeed,surface,this.dimensions,board):null;
+    this.groundLoad=approach(this.groundLoad,clamp(contact?.load??0,-.95,2.2),13,dt);
     const theta = Math.atan(grade), normal = 1 / Math.hypot(1,gx,gz);
     const climbLink=this.route.id==='wanlong-aster-climb'&&this.trail?.id==='w1349252976';
     const climb = climbLink&&grade<-.015?1:smooth(-grade,.004,.085);
     const climbPace = 2.15/(1+Math.max(0,-grade)*4);
-    const shuffle = this.boost * (1 - smooth(oldSpeed,3.8*(1-climb)+climbPace*.65*climb,8.7*(1-climb)+climbPace*1.3*climb)) * (1-this.brake) * (1-cut);
+    const remaining = Math.max(0,this.route.length-this.along);
+    const canGlide=assisted&&this.onTrail&&!!this.pisteContact?.trail&&!this.approach;
+    this.automatic.update(input,oldSpeed,canGlide,this.charging,airborne,dt);
+    // Keep taking strides across a crest until there is enough speed to glide.
+    // Steering, braking, jumping or entering the stopping area releases the assist.
+    const canSkate=assisted&&this.onTrail&&!airborne&&!this.charging&&this.automatic.handsFree&&remaining>12;
+    this.autoSkating=canSkate&&(this.autoSkating?oldSpeed<=20/3.6:oldSpeed<10/3.6&&grade<-.005);
+    const manualPush=this.boost*(1-smooth(oldSpeed,3.8*(1-climb)+climbPace*.65*climb,8.7*(1-climb)+climbPace*1.3*climb));
+    const shuffle = Math.max(manualPush,Number(this.autoSkating))*(1-this.brake)*(1-cut);
     this.push = approach(this.push, airborne ? 0 : shuffle, 8, dt);
     this.press = airborne ? 0 : Math.sign(this.trim)*smooth(Math.abs(this.trim),.57,.98)*
       (1-.60*this.skid)*(1-.57*this.push);
@@ -298,23 +341,22 @@ export class Descent {
     const stroke = board ? Math.max(0,Math.sin((this.stride-.12)*TAU))**1.25 :
       Math.abs(Math.sin(this.stride*TAU))**1.45;
     const assistance = assisted && !airborne ? 1 - Math.max(this.brake, cut) : 0;
-    const canGlide=assisted&&!this.timed&&this.onTrail&&!!this.pisteContact?.trail&&!this.approach;
-    this.automatic.update(input,oldSpeed,canGlide,this.charging,airborne,dt);
     this.straightTuck = this.automatic.tuck;
     const tuck = Math.max(this.boost * smooth(oldSpeed,3,11),this.straightTuck);
     const gravity = G * Math.sin(theta);
     const end = this.route.points.at(-1);
-    const remaining = Math.max(0,this.route.length-this.along);
     const baseRange = Math.hypot(this.x-end[0],this.z-end[1]);
     const runout = assisted ? remaining : Math.max(0,baseRange-18);
     const powder = smooth(this.snowSoftness, .14, .92);
     if (!airborne) {
-      const resistance = .21 + .47*powder + (board ? .0054 : .0048) * (1-.37*tuck) * oldSpeed*oldSpeed;
+      const powderDrag=contact?.sink?Math.min(1.6,contact.sink*(2.7+.24*oldSpeed)):0;
+      const bumpDrag=surface?.kind==='moguls' ? surface.strength*(.0032*oldSpeed*oldSpeed + .49*Math.max(0,this.groundLoad)) : 0;
+      const resistance = .21 + .47*powder + powderDrag + bumpDrag + (board ? .0054 : .0048) * (1-.37*tuck) * oldSpeed*oldSpeed;
       const edgeLoss = load*load*(.12+.038*oldSpeed)*(1+.22*powder);
       const cutting = (this.skid*(2.8+.38*oldSpeed) + this.brake*(6.30+.11*oldSpeed))*(1+.12*powder);
       const drag = resistance*(1-Math.max(0,this.trim)*.075) + Math.max(0,-this.trim)*(.09+load*.22);
       // On a steep return traverse, a deliberate pole/skate step can still
-      // gain ground. The intermittent stroke dies off at walking pace.
+      // gain ground. Manual strokes taper off at walking pace on steep climbs.
       let acceleration = gravity + this.push*(.68 + (board ? 4.5 : 3.45)*stroke + climb*Math.max(0,-gravity)*.95) - drag - edgeLoss - cutting;
       // Surveyed traverses contain short uphill and flat patches. The guide skates through
       // them after departure while manual braking still holds at a standstill.
@@ -335,32 +377,21 @@ export class Descent {
     }
     const planarSpeed = this.speed * (airborne ? this.flightCos : Math.cos(theta));
     const distance = planarSpeed * dt;
-    const grip = clamp(1 + this.trim*.19 - this.skid*.49 - .09*powder,.35,1.22);
+    const grip = clamp(1 + this.trim*.19 - this.skid*.49 - .09*powder + (contact?.load ? .13*this.groundLoad : 0),.35,1.22);
     const radius = (board ? 12.4 : 15.8) + oldSpeed*.16;
     const curvature = Math.sign(this.edge) * Math.pow(load,1.28) * grip / radius;
     if (assisted) {
       const width = clamp((this.trail?.width || 38)*.47,9,31);
-      let lane,laneVelocity,guidedArc;
-      if(this.timed) {
-        // Retain the original line and timing for the existing weekly board.
-        const guide=(1-smooth(Math.abs(this.steer),.03,.61))*(1-this.brake)*smooth(this.along,0,20);
-        const phase=this.along/18,amplitude=guide*Math.min(2.1,width*.11);
-        lane=amplitude*Math.sin(phase);
-        laneVelocity=amplitude*Math.cos(phase)*planarSpeed/18;
-        guidedArc=-lane*(planarSpeed/18)**2/G;
-      } else {
-        const here=trackFrame(this.route,this.along),ahead=trackFrame(this.route,this.along+Math.max(13,planarSpeed*.95));
-        const junction=this.activeJunction(32+planarSpeed*.62,2);
-        const clear=Math.min(smooth(remaining,24,61),junction?smooth(junction.along-this.along,9,32+planarSpeed*.62):1);
-        const wave=this.automatic.line(planarSpeed,width,grade,crossGrade,angleBetween(here.angle,ahead.angle),clear,dt);
-        lane=wave.offset;laneVelocity=wave.speed;guidedArc=wave.load;
-      }
-      const steeringGain = this.automatic.active ? .64 : .24;
+      const here=trackFrame(this.route,this.along),ahead=trackFrame(this.route,this.along+Math.max(13,planarSpeed*.95));
+      const junction=this.activeJunction(32+planarSpeed*.62,2);
+      const clear=Math.min(smooth(remaining,24,61),junction?smooth(junction.along-this.along,9,32+planarSpeed*.62):1);
+      const {offset:lane,speed:laneVelocity,load:guidedArc}=this.automatic.line(planarSpeed,width,grade,crossGrade,angleBetween(here.angle,ahead.angle),clear,dt);
+      const steeringGain = this.automatic.active ? automaticCentreGain : .24;
       const recentre = (lane-this.offset)*(steeringGain+.47*smooth(Math.abs(this.offset),width*.55,width*1.04));
-      const lateral = clamp(this.steer*planarSpeed*.59 + laneVelocity + recentre,-planarSpeed*.74,planarSpeed*.74);
+      const pull = edgeAcceleration(this.steer*planarSpeed*.59 + laneVelocity + recentre,this.edgeSpeed,planarSpeed,grip);
       const traction = airborne ? .06 : 1;
       const maxLat = (.90 + planarSpeed*planarSpeed / radius * .78) * traction;
-      this.edgeSpeed += clamp((lateral-this.edgeSpeed) * dt * (1.60+grip*.55), -maxLat*dt, maxLat*dt);
+      this.edgeSpeed += clamp(pull*dt, -maxLat*dt, maxLat*dt);
       this.edgeSpeed = clamp(this.edgeSpeed, -planarSpeed*.75, planarSpeed*.75);
       this.offset += this.edgeSpeed * dt;
       let stride = Math.min(this.route.length-this.along,Math.sqrt(Math.max(0,planarSpeed**2-this.edgeSpeed**2))*dt);
@@ -424,7 +455,7 @@ export class Descent {
     this.slope = approach(this.slope,theta*180/Math.PI,6,dt);
     this.roll = approach(this.roll,Math.atan(crossGrade),6,dt);
     this.bump = approach(this.bump,clamp((grade-this.lastGrade)*oldSpeed,-1,1),14,dt);
-    this.terrainFlex = approach(this.terrainFlex,Math.abs(this.bump),7,dt);
+    this.terrainFlex = approach(this.terrainFlex,Math.abs(this.bump)+Math.max(0,this.groundLoad)*.27,7,dt);
     this.lastGrade = grade;
     if (airborne) {
       this.airTime += dt;
@@ -442,6 +473,19 @@ export class Descent {
       this.flightCos = Math.cos(theta);
       this.contactTime += dt;
       this.y = this.ground; this.airHeight = 0;
+      if(contact && this.contactTime>.14 && this.speed>5.8 && this.jumpCooldown===0){
+        const noseRise=contact.rise;
+        const release=!pipe && contact.load < -1.3 && noseRise>1.07 && this.verticalAlong>-.25;
+        const nearLip=pipe && surface.ramp>.8 && Math.abs(surface.across)>10.72 &&
+          Math.abs(surface.across)<11.05 && noseRise>3.2 && this.verticalAlong>2.8;
+        const lip=nearLip && Math.abs(this.data.snowTerrain.sample(this.x,this.z).across)>Math.abs(surface.across);
+        if(release||lip){
+          this.airborne=true;this.airTime=0;this.airHeight=.004;this.y+=.004;
+          this.upSpeed=clamp(noseRise*(lip?.83:.53),.52,lip?9:2.75);
+          this.flightCos=Math.cos(theta);
+          this.launch=lip?.50:.19;
+        }
+      }
     }
     this.air = this.airborne ? clamp(this.airHeight/.72 + smooth(this.airTime,0,.14)*.22,0,1) : 0;
     const weight = (load*.68 + Math.abs(this.curve)*this.speed/G*.43 + this.skid*.26) * smooth(this.speed,.3,7);
@@ -449,16 +493,19 @@ export class Descent {
     const scrape = Math.abs(Math.sin(this.slipAngle)) * this.speed;
     this.spray = this.airborne ? 0 : clamp(.035 + this.pressure*.30 + scrape*.072 + this.impact*.44,0,1.4) * smooth(this.speed,.55,5);
     this.maxSpeed = Math.max(this.maxSpeed,this.speed);
-    this.travel += Math.hypot(this.x-oldX,this.z-oldZ,this.ground-oldGround);
+    const travelled=Math.hypot(this.x-oldX,this.z-oldZ,this.ground-oldGround);
+    this.travel += travelled;
     this.surface();
-    const contact=this.pisteContact, rawTrail=contact.trail;
-    if(rawTrail&&!this.airborne&&this.speed>1.2&&contact.distance<(rawTrail.width||36)*.48){
-      const a=rawTrail.points[contact.index],b=rawTrail.points[contact.index+1];
+    const currentPiste=this.trail ? this.pisteName(pisteVisitKey(this.trail),this.trail.id) : null;
+    this.splits.add(currentPiste || null,travelled,dt);
+    const piste=this.pisteContact, rawTrail=piste.trail;
+    if(rawTrail&&this.route.finishKind!=='lift-link'&&!this.airborne&&this.speed>1.2&&piste.distance<(rawTrail.width||36)*.48){
+      const a=rawTrail.points[piste.index],b=rawTrail.points[piste.index+1];
       const dx=this.x-oldX,dz=this.z-oldZ,metres=Math.hypot(dx,dz);
       const segmentLength=Math.hypot(b[0]-a[0],b[1]-a[1]);
       const alignment=Math.abs(dx*(b[0]-a[0])+dz*(b[1]-a[1]));
       if(metres>0&&alignment>.68*metres*segmentLength){
-        const trail=this.data.snowSection?.(rawTrail,contact.index)||rawTrail;
+        const trail=this.data.snowSection?.(rawTrail,piste.index)||rawTrail;
         const key=pisteVisitKey(trail),visitId=rawTrail.id+'/'+key;
         if(key){
           const visit=this.pisteVisits.get(visitId)||{key,id:rawTrail.id,metres:0};
@@ -472,7 +519,7 @@ export class Descent {
     const loading = clamp(this.pressure*.65 + this.skid*.18 + this.impact*.40, 0, 1.2);
     const depth = (.005 + .023*softness + (.012+.050*softness)*loading) *
       (board ? .87 : 1) * (this.dimensions?.scale ?? 1);
-    const sinkTarget = this.airborne ? 0 : depth;
+    const sinkTarget = this.airborne ? 0 : depth+(contact?.sink??0);
     this.snowSink = approach(this.snowSink, sinkTarget, this.airborne ? 30 : sinkTarget>this.snowSink ? 16 : 8, dt);
     const stopped=!this.airborne&&this.speed<.65;
     const canRecover=!this.onTrail&&!this.airborne&&!input.boost&&this.speed<10/3.6;
@@ -484,6 +531,7 @@ export class Descent {
     const reachedEnd=assisted?this.route.length-this.along<=.32&&baseRange<56:remaining<45&&baseRange<=18.4;
     const atBase=reachedEnd||this.runoutRest>1.2;
     if(atBase&&!this.airborne){
+      this.splits.finish();
       this.mode='finished';this.speed=0;this.airborne=false;this.air=this.airHeight=0;this.y=this.ground;this.cancelJump();
       this.edge=this.edgeRate=this.edgeSpeed=this.steer=this.brake=this.boost=this.trim=0;
       this.pressure=this.skid=this.curve=this.spray=this.push=this.bankSwap=this.press=0;

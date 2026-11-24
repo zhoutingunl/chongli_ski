@@ -13,12 +13,12 @@ export function heading(en,cn,title=''){
   const text=t(en+' · '+cn,en);
   return '<div class="panel-head"><div><span class="panel-kicker">'+text+'</span>'+(title?'<h2 class="panel-title">'+title+'</h2>':'')+'</div><button class="icon-disc" data-act="close-panel" aria-label="'+t('关闭','Close')+'">'+glyph('close',18)+'</button></div>';
 }
-const icons={auto:'auto',day:'sun',evening:'evening',sunset:'dusk',twilight:'twilight',night:'night',aurora:'aurora',dawn:'dawn',clear:'sun',light:'snow',heavy:'heavy'};
+const icons={auto:'auto',day:'sun',noon:'noon',evening:'evening',sunset:'dusk',twilight:'twilight',night:'night',aurora:'aurora',dawn:'dawn',clear:'sun',light:'snow',heavy:'heavy'};
 function optionTiles(kind,list,value){
-  return '<div class="climate-grid">'+list.map(o=>'<button class="climate-tile" data-choice="'+kind+'" data-value="'+o.id+'" aria-pressed="'+(value===o.id)+'">'+glyph(icons[o.id],27)+'<span>'+label(o.label)+'</span></button>').join('')+'</div>';
+  return '<div class="climate-grid climate-'+kind+'">'+list.map(o=>'<button class="climate-tile" data-choice="'+kind+'" data-value="'+o.id+'" aria-pressed="'+(value===o.id)+'">'+glyph(icons[o.id],27)+'<span>'+label(o.label)+'</span></button>').join('')+'</div>';
 }
 export function environmentPanel(prefs){
-  return heading('TIME','时段')+optionTiles('time',timeOptions,prefs.time)+'<h3 class="panel-kicker weather-title">'+t('WEATHER · 天气','WEATHER')+'</h3>'+optionTiles('weather',weatherOptions,prefs.weather)+'<p class="panel-foot">'+t('自动时段每次起滑进入下一时段，单趟每滑满两分钟也会顺序切换。自动天气每两分钟有 80 秒晴天，另外 40 秒在小雪和大雪之间变化。','Auto time advances on each new run and after every two minutes of skiing. Auto weather has 80 seconds of clear skies in each two-minute cycle. Light and heavy snow share the other 40 seconds.')+'</p>';
+  return heading('TIME','时段')+optionTiles('time',timeOptions,prefs.time)+'<h3 class="panel-kicker weather-title">'+t('WEATHER · 天气','WEATHER')+'</h3>'+optionTiles('weather',weatherOptions,prefs.weather)+'<p class="panel-foot">'+t('抵达索道上站进入下一自动时段，滑行每满两分钟也会顺序切换。自动天气的晴、雪分段交错，每两分钟共 80 秒晴天、40 秒降雪。','Auto time advances on arrival at an upper lift station and after every two minutes of skiing. Auto weather alternates 80 seconds of clear skies with 40 seconds of snowfall in each cycle.')+'</p>';
 }
 function pill(action,txt,active=false){
   return '<button class="setting-pill" data-act="'+action+'" aria-pressed="'+active+'">'+txt+'</button>';
@@ -53,7 +53,7 @@ export function controlsPanel(){
     [t('返回最近雪道','Return to nearest piste'),t('道外停满 5 秒，或连续撞树减速到停下时，可点按钮回到附近雪道。','After five seconds stopped off-piste or repeated tree impacts bring you to a stop, tap to return to a nearby piste.'),''],
     [t('雪场地图','Trail map'),t('地图可以手选雪道。经过索道站时点「上车」。','Choose a specific run on the map. Tap Board lift near a station.'),'M'],
     [t('机位','Camera'),t('右上角切换第一人称和外部机位，眼形图标轮换九种视角。','Use the top switch for first or third person, or the eye to cycle all nine views.'),'V / C'],
-    [t('录像','Record'),t('点右上角「录像」录制当前机位，最长 15 秒。再次点按钮可提前停止，录完可预览并保存。','Tap Record to capture up to 15 seconds from the current camera. Tap again to stop, then preview and save.'),'B']
+    [t('拍照 / 录像','Photo / video'),t('展开机位工具拍照或录制 15 秒视频，山脚也能使用。拍完继续滑行，在「分享雪场」合成实景照片或分享录像。','Open the camera tools for a photo or a 15-second clip, including at the base. Keep skiing after capture. Open Share the mountain to pair photos or share a clip.'),'P / B']
   ];
   if(!motionSupported)controls.splice(4,1);
   return heading('CONTROLS','操作说明')+'<div class="controls-guide">'+controls.map(([title,body,key])=>'<div class="ctrl-row"><strong>'+title+'</strong><span>'+body+'</span><span>'+key+'</span></div>').join('')+'</div>';

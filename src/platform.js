@@ -1,8 +1,8 @@
+import {canShareVideo,shareVideoFile} from './web-video-export.js';
 export {TiltSteering} from './tilt.js';
 
 export const isMiniTool = false;
 export const motionSupported = true;
-export const shareAvailable = () => true;
 export const videoSaveAvailable = () => true;
 export const initializePlatform = () => undefined;
 
@@ -25,24 +25,6 @@ export async function fullscreen() {
   return true;
 }
 
-export async function shareRoute(title, text, route) {
-  if (!route) return 'unavailable';
-  const url = new URL(location.href);
-  url.searchParams.set('run', route);
-  if (navigator.share) {
-    await navigator.share({title,text,url:url.toString()});
-    return 'shared';
-  }
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(url.toString());
-    return 'copied';
-  }
-  const field = document.createElement('textarea');
-  field.value = url.toString();document.body.append(field);field.select();
-  try { return document.execCommand('copy') ? 'copied' : 'unavailable'; }
-  finally { field.remove(); }
-}
-
 export async function saveGameVideo(blob,name) {
   const url = URL.createObjectURL(blob), link = document.createElement('a');
   link.href = url; link.download = name;
@@ -63,12 +45,25 @@ export async function loadForestImage(url) {
 }
 
 export const engagementAvailable = () => false;
-export const authorFollow = async () => null;
-export const followStatus = async () => null;
-export const weeklyScores = async () => null;
-export const submitWeeklyScore = async () => null;
+export const publicRanks = async () => null;
+export const submitRankScore = async () => null;
 export const cloudRead = async () => null;
 export const cloudWrite = async () => null;
 export function gameVibration(type){
   if(typeof navigator.vibrate==='function')navigator.vibrate({light:15,medium:28,heavy:42}[type]);
 }
+
+export function photoActions(file){
+  let share=false;
+  try { share=!!file&&!!navigator.share&&!!navigator.canShare?.({files:[file]}); } catch {}
+  return {share:share?'image':null,save:true};
+}
+export const sharePhoto=(image,file)=>navigator.share({files:[file]});
+export function savePhoto(image,file,name){
+  const link=document.createElement('a');
+  link.href=image;link.download=name||file?.name||'chongli-ski.jpg';
+  document.body.append(link);link.click();link.remove();
+}
+
+export const canPublishVideo=video=>canShareVideo(video?.file);
+export const publishVideo=video=>shareVideoFile(video.file);

@@ -123,7 +123,7 @@ test('弯道低速回转的幅度更大，高速和侧倾坡面会收窄，窄�
   assert.equal(amplitude(6,.43,0,18,0),0);
 });
 
-test('超过百公里时速进入俯身直滑，减速后恢复回转，计时赛沿用原循线',()=>{
+test('超过百公里时速进入俯身直滑，减速后恢复回转',()=>{
   const run=startRun({assist:true});
   run.tick(3);
   run.speed=31;
@@ -138,10 +138,6 @@ test('超过百公里时速进入俯身直滑，减速后恢复回转，计时�
   assert.equal(run.automatic.sprint,false);
   assert.equal(run.automatic.active,true);
   assert.ok(run.automatic.amplitude>.9);
-  run.start(run.route,{timed:true});
-  run.tick(4);
-  assert.equal(run.automatic.active,false);
-  assert.equal(run.straightTuck,0);
 });
 
 test('普通循线在接近 85 公里时速时仍有清晰的左右回转',()=>{
@@ -157,4 +153,48 @@ test('普通循线在接近 85 公里时速时仍有清晰的左右回转',()=>{
   const range=key=>Math.max(...samples.map(sample=>sample[key]))-Math.min(...samples.map(sample=>sample[key]));
   assert.ok(range('offset')>7.6);
   assert.ok(range('heading')>25*Math.PI/180);
+});
+
+for(const [gear,label] of [['ski','双板'],['board','单板']]){
+  test(label+'循线在上坡低于十公里时交替蹬行，超过二十公里收力，直到再次低于十公里',()=>{
+    const run=startRun({grade:-.06,assist:true,gear}),dt=1/90;
+    run.tick(2.7);
+    run.speed=12/3.6;run.autoSkating=false;
+    run.tick(dt);assert.equal(run.autoSkating,false);
+    run.speed=9.8/3.6;run.tick(dt);
+    assert.equal(run.autoSkating,true);
+    const first=run.stride;
+    const travelled=run.travel;
+    let strongest=0,peak=0,movedFeet=false;
+    for(let frame=0;frame<900&&run.autoSkating;frame++){
+      run.tick(dt);peak=Math.max(peak,run.speed*3.6);strongest=Math.max(strongest,run.push);
+      movedFeet||=Math.abs(run.stride-first)>.28;
+    }
+    assert.ok(peak>20&&run.travel>travelled+3);
+    assert.ok(strongest>.8&&movedFeet);
+    assert.equal(run.autoSkating,false);
+    run.speed=16/3.6;run.tick(.35);assert.equal(run.autoSkating,false);assert.ok(run.push<.1);
+    run.speed=9.9/3.6;run.tick(dt);assert.equal(run.autoSkating,true);
+    run.tick(dt,{brake:true});assert.equal(run.autoSkating,false);
+    run.tick(1,{brake:true});assert.equal(run.speed,0);
+    run.tick(2.55);assert.equal(run.autoSkating,false);
+    run.tick(.1);assert.equal(run.autoSkating,true);
+    run.tick(dt,{steer:.8});assert.equal(run.autoSkating,false);
+  });
+}
+
+test('自动蹬坡越过坡顶后收完最后的蹬步，平坡下坡、手动模式和终点停车区不会起蹬',()=>{
+  for(const options of [{grade:0,assist:true},{grade:.14,assist:true},{grade:-.09,assist:false},{grade:-.09,assist:true,length:10}]){
+    const run=startRun(options);
+    run.tick(2.7);run.speed=2;run.tick(1/90);assert.equal(run.autoSkating,false,JSON.stringify(options));
+  }
+  const run=startRun({grade:-.05,assist:true});
+  run.tick(2.7);assert.equal(run.autoSkating,true);
+  const crest=run.ground;
+  run.data.height=()=>crest;
+  run.tick(1/90);assert.equal(run.autoSkating,true);
+  let peak=0;
+  for(let i=0;i<900&&run.autoSkating;i++){run.tick(1/90);peak=Math.max(peak,run.speed);}
+  assert.ok(peak*3.6>20);assert.equal(run.autoSkating,false);
+  run.speed=2;run.tick(1/90);assert.equal(run.autoSkating,false);
 });

@@ -87,3 +87,60 @@ test('沿线支柱避开所有雪道净空，索道上下站保持原坐标',()=
   }
   assert.ok(supports>90);
 });
+
+test('玉龙道左转可连续滑入娇龙道，山脚停留后也能从原地再出发并经过其他索道',()=>{
+  const jade=data.routes.find(route=>route.id==='wanlong-classic');
+  for(const stop of [false,true]){
+    const sim=new Descent(data,{gear:'ski',assist:true});sim.start(jade);
+    const along=jade.length-(stop?.12:25),f=jade.frame(along),visits=sim.pisteVisits;
+    const y=data.height(f.x,f.z);
+    Object.assign(sim,{along,x:f.x,z:f.z,y,ground:y,heading:f.angle,travelHeading:f.angle,
+      travel:2200,elapsed:120,maxSpeed:22,speed:stop?0:12});
+    sim.tick(1/60,stop?{}:{steer:-.5});
+    if(stop){
+      assert.equal(sim.mode,'finished');
+      assert.equal(nearbyLiftStation(data,sim).end,'bottom');
+      const before=[sim.x,sim.z,sim.elapsed,sim.travel];
+      sim.tick(15);
+      assert.ok(sim.continueAtBase());assert.deepEqual([sim.x,sim.z,sim.elapsed,sim.travel],before);
+    }
+    assert.equal(sim.route.name,'娇龙道');assert.equal(sim.mode,'run');
+    assert.equal(sim.pisteVisits,visits);assert.equal(sim.continuedFrom.id,jade.id);
+    assert.equal(sim.continueAtBase(),false);
+    const stations=new Set();
+    for(let i=0;i<180*60&&sim.mode==='run';i++){
+      sim.tick(1/60,{boost:true,steer:!stop&&i<17?-.5:0});
+      const n=nearbyLiftStation(data,sim);
+      if(n?.end==='bottom')stations.add(n.lift.name);
+    }
+    assert.ok(stations.has('三索'));assert.ok(stations.has('七索（新）'));
+    assert.equal(sim.mode,'finished');assert.ok(sim.travel>3000&&sim.elapsed>170);
+    assert.equal(sim.continueAtBase(),false);
+  }
+});
+
+test('云顶三索与大厅雪面可以连续接一索，上车前可停留，连接段保持同一趟',()=>{
+  for(const id of ['genting-classic','genting-valley'])for(const stop of [false,true]){
+    const sim=new Descent(data,{gear:'ski',assist:true});
+    const r=sim.navigation.safeRun(data.routes.find(route=>route.id===id));sim.start(r);
+    const along=r.length-(stop?.1:22),f=r.frame(along),ground=data.height(f.x,f.z);
+    Object.assign(sim,{along,x:f.x,z:f.z,ground,y:ground,heading:f.angle,travelHeading:f.angle,speed:stop?0:8,travel:2400,elapsed:175});
+    const splits=sim.splits;
+    sim.tick(.03,{boost:!stop});
+    if(stop){
+      assert.equal(sim.mode,'finished');assert.equal(nearbyLiftStation(data,sim).lift.name,'3索');
+      const stoppedDistance=sim.travel;
+      sim.tick(10);assert.ok(sim.continueAtBase());assert.equal(sim.travel,stoppedDistance);
+    }
+    assert.equal(sim.route.finishKind,'lift-link');assert.equal(sim.splits,splits);
+    let k=0;
+    while(sim.mode==='run'&&k++<200*30){
+      sim.tick(1/30,{boost:true});
+      assert.equal(data.obstacles.contact(sim.x,sim.z),null);
+    }
+    assert.equal(sim.mode,'finished');assert.ok(sim.travel>2460);
+    const gondola=nearbyLiftStation(data,sim);
+    assert.equal(gondola.lift.name,'1索');assert.ok(sim.navigation.isSummitStation(gondola.lift));
+    assert.equal(sim.continueAtBase(),false);
+  }
+});

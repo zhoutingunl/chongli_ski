@@ -6,7 +6,7 @@ export function arrivalLift(data,route){
   const mapped=lifts.find(lift=>lift.id===route.finishLiftId);
   if(mapped)return mapped;
   const main=lifts.find(lift=>lift.id===(route.destination==='wanlong'?'w1368988315':'w469393391'));
-  if(main&&distance(...end,main.points[0])<140)return main;
+  if(route.destination==='wanlong'&&main&&distance(...end,main.points[0])<140)return main;
   return lifts.sort((a,b)=>distance(...end,a.points[0])-distance(...end,b.points[0]))[0];
 }
 

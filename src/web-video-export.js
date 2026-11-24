@@ -3,7 +3,7 @@ export function appleMobile(nav=navigator) {
 }
 
 export function canShareVideo(file,nav=navigator) {
-  if(file?.type!=='video/mp4'||typeof nav.share!=='function'||typeof nav.canShare!=='function')return false;
+  if(!['video/mp4','video/webm'].includes(file?.type)||typeof nav.share!=='function'||typeof nav.canShare!=='function')return false;
   try{return nav.canShare({files:[file]});}
   catch{return false;}
 }

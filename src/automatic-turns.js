@@ -8,6 +8,11 @@ const smooth=(lo,hi,x)=>{
 };
 const sprintSpeed=100/3.6, releaseSpeed=97.5/3.6;
 
+export const automaticCentreGain=.64;
+export function edgeAcceleration(wanted,edgeSpeed,speed,grip=1){
+  return (clamp(wanted,-speed*.74,speed*.74)-edgeSpeed)*(1.60+grip*.55);
+}
+
 export class AutomaticTurns {
   constructor(){
     this.idle=0;
@@ -18,12 +23,29 @@ export class AutomaticTurns {
     this.tuck=0;
   }
 
+  get handsFree(){return this.idle>=2.6;}
+
+  // Follow the next fraction of the same arc with the edge response used by
+  // the skis. The measured starting velocity carries the lag through an apex.
+  offsetAfter(seconds,speed,offset,edgeSpeed){
+    const omega=speed/this.radius, step=seconds/3;
+    for(let i=0;i<3;i++){
+      const phase=this.phase+omega*(i+.5)*step;
+      const lane=this.amplitude*Math.sin(phase),laneSpeed=this.amplitude*omega*Math.cos(phase);
+      const wanted=laneSpeed+(lane-offset)*automaticCentreGain;
+      const acceleration=edgeAcceleration(wanted,edgeSpeed,speed);
+      offset+=(edgeSpeed+.5*acceleration*step)*step;
+      edgeSpeed+=acceleration*step;
+    }
+    return offset;
+  }
+
   update(input,speed,available,charging,airborne,dt){
     const controlling=Math.abs(input.steer||0)>.055||Math.abs(input.trim||0)>.085||input.brake||charging;
     this.idle=controlling||input.boost ? 0 : Math.min(5,this.idle+dt);
     this.sprint=available&&!controlling&&(speed>sprintSpeed||this.sprint&&speed>=releaseSpeed);
     this.tuck=ease(this.tuck,this.sprint&&!airborne?1:0,controlling?22:9,dt);
-    this.active=available&&!airborne&&!this.sprint&&this.idle>=2.6;
+    this.active=available&&!airborne&&!this.sprint&&this.handsFree;
     if(!available)this.amplitude=ease(this.amplitude,0,15,dt);
   }
 

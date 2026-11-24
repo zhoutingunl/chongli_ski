@@ -43,7 +43,8 @@ function title(c,text,x,y,natural,width,color,outline){
 }
 function drawStencil(c,stencil,language){
   const opt=stencil.option,grade=colors[opt.difficulty]?opt.difficulty:'intermediate',en=language==='en';
-  const text=en?opt.en||opt.name:opt.name,name=nameOf(text),face=en?latin:chinese;
+  const text=en?opt.en||opt.name:opt.name,full=nameOf(text),badge=stencil.status;
+  const name=badge?full.replace(/[（(].*?[）)]/g,'').trim():full,face=en?latin:chinese;
   const destination=text.split(/\s*·\s*/).slice(1).find(s=>/^(至|通往|往|to\s|toward)/i.test(s))||'';
   c.font='850 '+(en?86:91)+'px '+face;c.textBaseline='middle';c.textAlign='left';
   const natural=Math.max(1,c.measureText(name).width),textWidth=Math.min(342,natural);
@@ -51,11 +52,15 @@ function drawStencil(c,stencil,language){
   const arrowAfter=stencil.lateral<-1,textX=arrowAfter?left:left+arrowWidth+gutter;
   // An arrow rests at the inside edge of each side lane, close to the name.
   arrow(c,(arrowAfter?left+textWidth+gutter:left)+arrowWidth/2,mid,stencil,grade);
-  title(c,name,textX,destination?mid-23:mid,natural,textWidth,ink,6);
-  if(destination){
-    const note=en?destination.replace(/^to\b/i,'To'):destination;
+  const qualifier=full.match(/[（(](.+?)[）)]/)?.[1];
+  const fresh=badge==='new',status=fresh?(en?'NEW':'未滑过'):(en?'✓ VISITED':'✓ 已滑过');
+  const via=opt.destination?(en?'to Peony':'至'+opt.destination):'';
+  const sub=badge?[status,qualifier||via].filter(Boolean).join(' · '):destination;
+  title(c,name,textX,sub?mid-22:mid,natural,textWidth,fresh?'#9d3710':ink,6);
+  if(sub){
+    const note=en?sub.replace(/^to\b/i,'To'):sub;
     c.font='760 53px '+face;const w=Math.max(1,c.measureText(note).width);
-    title(c,note,textX,mid+50,w,Math.min(w,Math.max(textWidth,228)),colors[grade],5);
+    title(c,note,textX,mid+50,w,Math.min(w,Math.max(textWidth,228)),fresh?'#9d3710':colors[grade],6);
   }
 }
 
@@ -109,6 +114,7 @@ function atUV(stencil,u,v){
   // stay level even where the piste falls away across the skier's line of sight.
   // The ray is only used while baking the mesh. The paint stays in world space.
   const point=t=>[p.x+t*dx,p.z+t*dz];
+  if(stencil.radial)return point(p.distance/(1-(v-.5)*1.32));
   const clearance=t=>p.eye+t*dy-p.height(p.x+t*dx,p.z+t*dz);
   const far=p.distance*2.45,step=far/14;
   let near=0;
@@ -133,8 +139,8 @@ function prepareProjection(stencil,data){
   stencil.projector={x,z,eye,height:data.height,distance:d,sine:Math.sin(heading),cosine:Math.cos(heading),
     grade:(data.height(...center)-eye)/d,aperture:stencil.aperture};
 }
-function makeGeometry(data,stencils){
-  const positions=[],normals=[],uv=[],indices=[],field=data.field,b=field.bounds,height=data.height,ranges=[];
+function makeGeometry(data,stencils,detail){
+  const positions=[],normals=[],uv=[],indices=[],field=data.field,b=field.bounds,height=detail?.heightAt||data.height,ranges=[];
   function patch(poly,slot){
     const start=positions.length/3;
     for(const [x,z,u,v] of poly){
@@ -143,14 +149,14 @@ function makeGeometry(data,stencils){
     }
     for(let i=1;i<poly.length-1;i++)indices.push(start,start+i,start+i+1);
   }
-  function conform(quad,slot){
-    const dx=field.dx,dz=field.dz;
-    const gx=quad.map(q=>Math.floor((q[0]-b.minX)/dx)),gz=quad.map(q=>Math.floor((q[1]-b.minZ)/dz));
-    for(let ir=Math.min(...gz);ir<=Math.max(...gz);ir++)for(let ic=Math.min(...gx);ic<=Math.max(...gx);ic++){
-      const x=b.minX+ic*dx,z=b.minZ+ir*dz;
-      let p=clip(quad,q=>q[0]-x);p=clip(p,q=>x+dx-q[0]);p=clip(p,q=>q[1]-z);p=clip(p,q=>z+dz-q[1]);
+  function conform(poly,slot,left=b.minX,top=b.minZ,dx=field.dx,dz=field.dz,coarse=true){
+    const gx=poly.map(q=>Math.floor((q[0]-left)/dx)),gz=poly.map(q=>Math.floor((q[1]-top)/dz));
+    for(let r=Math.min(...gz);r<=Math.max(...gz);r++)for(let c=Math.min(...gx);c<=Math.max(...gx);c++){
+      const x=left+c*dx,z=top+r*dz;
+      let p=clip(poly,q=>q[0]-x);p=clip(p,q=>x+dx-q[0]);p=clip(p,q=>q[1]-z);p=clip(p,q=>z+dz-q[1]);
       if(p.length<3)continue;
-      // Split the stencil at the very same diagonal as the snow mesh.
+      const steps=coarse&&detail?.stepsAt(c,r);
+      if(steps>1){conform(p,slot,x,z,dx/steps,dz/steps,false);continue;}
       const diagonal=q=>1-(q[0]-x)/dx-(q[1]-z)/dz;
       for(const sign of [1,-1]){const part=clip(p,q=>sign*diagonal(q));if(part.length>=3)patch(part,slot);}
     }
@@ -192,7 +198,7 @@ function radialStencil(site,option){
   const readingDistance=Math.max(4,distance(hub,center)),heading=bearing(hub,center);
   // Every mouth has a fixed reading direction from the apron. Looking left or
   // right reveals the print on that patch of snow without rotating the print.
-  return {option,center,heading,turn:signedAngle(option.heading-heading),lateral:0,readingDistance,
+  return {option,center,heading,radial:true,turn:signedAngle(option.heading-heading),lateral:0,readingDistance,
     width:Math.min(6.8,Math.max(3.8,readingDistance*.47)),aperture:.167};
 }
 function approachFrame(site,track){
@@ -220,11 +226,11 @@ function layOutChoices(tracks,site,exits){
 }
 function groundPoint(data,p){return new THREE.Vector3(p[0],data.height(...p)+.006,p[1]);}
 
-export function createTrailGuide(scene,data,renderer){
+export function createTrailGuide(scene,data,renderer,progress,detail){
   const root=new THREE.Group();root.name='Snow trail markings';root.visible=false;scene.add(root);
   const ink=makeInk(renderer),light=scene.children.find(o=>o.isHemisphereLight);
   const tracks=new Map(),matrix=new THREE.Matrix4(),clipPoint=new THREE.Vector4(),forward=new THREE.Vector3(),eye=new THREE.Vector3();
-  let mesh=null,batch=null,key='',marks=[],language='',lastMask='';
+  let mesh=null,batch=null,key='',marks=[],language='',lastMask='',terrainRevision;
   function load(site,exits){
     if(mesh){mesh.removeFromParent();mesh.geometry.dispose();mesh=null;}
     const id=site.fromTrailId;
@@ -239,7 +245,7 @@ export function createTrailGuide(scene,data,renderer){
       m.left=groundPoint(data,atUV(m,.105,.50));m.right=groundPoint(data,atUV(m,.895,.50));
       m.mouth=finitePoint(m.option.position)?groundPoint(data,m.option.position):null;
     }
-    batch=makeGeometry(data,marks);mesh=new THREE.Mesh(batch.geometry,ink.material);
+    batch=makeGeometry(data,marks,detail);mesh=new THREE.Mesh(batch.geometry,ink.material);
     mesh.name=(site.type==='summit'?'Piste summit · ':'Piste fork · ')+site.id;mesh.renderOrder=1;mesh.receiveShadow=true;root.add(mesh);
   }
   function inView(point,sideLimit,verticalLimit){
@@ -255,8 +261,15 @@ export function createTrailGuide(scene,data,renderer){
     // Its surveyed geometry owns the paint independently of the selected itinerary.
     const nextKey=[site.type,site.siteId||site.id,site.fromTrailId||'',Math.round(site.approach*90),...exits.map(o=>[o.choiceId||o.routeId,o.name,o.en,o.difficulty,Math.round(o.heading*90),o.paintPosition||o.position].join('/'))].join('|');
     if(key!==nextKey){key=nextKey;load(site,exits);}
+    else if(mesh&&terrainRevision!==detail?.revision){
+      mesh.geometry.dispose();batch=makeGeometry(data,marks,detail);mesh.geometry=batch.geometry;lastMask='';
+    }
+    terrainRevision=detail?.revision;
     if(!mesh){root.visible=false;return;}
-    const next=locale==='en'?'en':'zh';if(language!==next){ink.paintChoices(marks,next);language=next;}
+    const next=locale==='en'?'en':'zh';
+    for(const mark of marks)mark.status=site.type==='summit'?progress?.status(site.resort,mark.option):null;
+    const variant=next+'|'+marks.map(m=>m.status||'').join(',');
+    if(language!==variant){ink.paintChoices(marks,next);language=variant;}
     if(light)ink.material.emissiveIntensity=.085+Math.max(0,1.35-light.intensity)*.38;
     let halfView=0,flat=0;
     if(camera){

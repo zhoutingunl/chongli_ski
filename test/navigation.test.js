@@ -65,7 +65,7 @@ test('万龙山顶给出四个各自可达的道口', () => {
 });
 
 for (const [side, name, outlet] of [
-  ['wanlong', '万龙', 'wanlong-long'], ['genting', '云顶', 'genting-valley']
+  ['wanlong', '万龙', 'wanlong-long'], ['genting', '云顶', 'genting-classic']
 ]) {
   const {position: [x, z], heading, camera} = mountain.summitPlaces[side];
   test(name + '的山顶镜头、雪板与下坡道口对齐，前方雪面连续下降', () => {
@@ -151,10 +151,11 @@ test('沿长龙先看到至云顶的蹬坡支路，到下一处岔口才提示�
   assert.ok(signNames(placeOnRoute(long, jade.along - 25, 12)).includes('玉龙道'));
 });
 
-test('翠菊花反向上坡时松开会停，持续蹬坡能缓慢爬升', () => {
+test('手动滑行时翠菊花反向上坡松开会停，持续蹬坡能缓慢爬升', () => {
   const climb = navigation.canonical('wanlong-aster-climb');
   const coast = placeOnRoute(climb, 46, 4);
   const push = placeOnRoute(climb, 46, 4);
+  coast.opts.assist=false;push.opts.assist=false;
   skiFor(coast, 15);
   skiFor(push, 15, {boost: true});
   assert.equal(coast.speed, 0);
@@ -182,3 +183,60 @@ for (const [region, name] of [['wanlong', '万龙'], ['genting', '云顶']]) {
     }
   });
 }
+
+test('云顶出发点向四周均下降，三个道口逐米接入各自的实测雪道', () => {
+  const place=mountain.summitPlaces.genting, [x,z]=place.position, top=mountain.height(x,z);
+  for(let deg=0;deg<360;deg+=3){
+    const bearing=deg*Math.PI/180;
+    for(const radius of [2,8,16,30]){
+      assert.ok(mountain.height(x+radius*Math.sin(bearing),z-radius*Math.cos(bearing))<top);
+    }
+  }
+  for(const [id,outlet] of [['genting-classic','peony'],['genting-valley','datura'],['via-w771168509','felwort']]){
+    const line=navigation.departure('genting',x,z,navigation.summitHeading('genting',id),id);
+    const link=place.outlets[outlet],trail=mountain.trails.find(t=>t.id===link.trailId);
+    const join=trail.points[link.join], length=line.closest(...join).along;
+    assert.ok(length>50);assert.equal(line.closest(...join).distance,0);
+    let previous=top;
+    for(let metres=.5;metres<=length;metres+=.5){
+      const p=line.at(metres), h=mountain.height(p.x,p.z);
+      assert.ok(h<=previous+.0001,line.approach.target+' '+metres+' m');
+      assert.equal(mountain.obstacles.contact(p.x,p.z),null);
+      previous=h;
+    }
+    assert.ok(top-previous>6);
+  }
+});
+
+test('每条索道的上站都有当地雪面落客点，按每一个地面道名出发会接入对应雪道',()=>{
+  for(const lift of mountain.lifts){
+    const place=navigation.upperStation(lift);
+    assert.ok(place,lift.name);
+    const foot=place.position,top=lift.points.at(-1);
+    assert.ok(Math.hypot(foot[0]-top[0],foot[1]-top[1])<80,lift.name);
+    assert.ok(!mountain.obstacles.contact(...foot),lift.name);
+    const sim={mode:'station',route:place.route,x:foot[0],z:foot[1],upperGuide:place.guide};
+    assert.equal(navigation.nearbyChoices(sim),place.guide);
+    const arms=place.guide.options;
+    assert.equal(new Set(arms.map(o=>o.name)).size,arms.length);
+    assert.ok(arms.length>=1);
+    for(const arm of arms){
+      const plan=navigation.departure(lift.resort,...foot,arm.selectionHeading,null,place.guide);
+      assert.equal(plan.approach.target,arm.plan.approach.target,lift.name+' '+arm.name);
+      assert.equal(plan.legs[0].trailId,arm.plan.legs[0].trailId,lift.name+' '+arm.name);
+      for(let d=3;d<=30;d+=3){const point=plan.at(d);assert.ok(mountain.height(point.x,point.z)<=mountain.height(...foot)+.19,arm.name);}
+      const point=plan.at(36);
+      assert.ok(mountain.height(point.x,point.z)<=mountain.height(...foot)+.3,lift.name+' '+arm.name);
+    }
+    const best=navigation.departure(lift.resort,...foot,place.heading,null,place.guide);
+    const y0=mountain.height(...foot);
+    for(let metres=3;metres<=30;metres+=3){
+      const at=best.at(metres);
+      assert.ok(mountain.height(at.x,at.z)<=y0+.22,lift.name+' '+metres);
+    }
+    assert.equal(navigation.upperStation(lift),place);
+  }
+  const third=mountain.lifts.find(l=>l.id==='w1368988312');
+  const names=navigation.upperStation(third).guide.options.map(o=>o.name);
+  assert.ok(names.includes('小龙道')&&names.includes('威龙道'));
+});

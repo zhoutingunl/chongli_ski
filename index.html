@@ -43,10 +43,27 @@
   <section id="hud" hidden aria-label="滑行仪表">
     <div class="hud-vignette"></div>
     <div class="hud-reading">
-      <div class="speed"><strong id="speed">0</strong><span>KM / H</span><small>落差 <b id="drop">0</b> m</small><i><b id="speed-bar"></b></i></div>
+      <div class="hud-current">
+      <div class="speed"><strong id="speed">0</strong><span>KM / H</span><small><span id="drop-label">落差</span> <b id="drop">0</b> m</small><small><span id="distance-label">滑程</span> <b id="run-distance">0 m</b></small><i><b id="speed-bar"></b></i></div>
       <div class="piste"><small id="elevation"></small><h2 id="trail-name"></h2><div id="gradient"></div><div id="progress"></div><div id="next-flag" hidden></div><div class="weather-compact" id="weather-compact"></div></div>
+      </div>
+      <div id="capture-save" hidden><span role="status"></span> <button class="glass-button" data-act="save-capture">保存</button></div>
+      <aside id="piste-split" role="status" aria-live="polite" aria-atomic="true" hidden>
+        <span id="split-caption">刚滑过</span> <strong id="split-name"></strong>
+        <span id="split-stats"></span>
+      </aside>
+      <div id="piste-discovery" role="status" aria-live="polite" hidden></div>
+      <section id="lift-summary" aria-labelledby="lift-summary-title" hidden>
+        <strong id="lift-summary-title">本趟合计</strong>
+        <dl>
+          <div><dt id="lift-distance-label">总滑程</dt><dd id="lift-distance"></dd></div>
+          <div><dt id="lift-time-label">总用时</dt><dd id="lift-time"></dd></div>
+          <div><dt id="lift-average-label">均速</dt><dd id="lift-average"></dd></div>
+          <div><dt id="lift-peak-label">最高时速</dt><dd id="lift-peak"></dd></div>
+        </dl>
+      </section>
     </div>
-    <div class="game-top"><div class="hud-tools"><button data-act="pov" class="pov-switch" aria-label="切换第一人称与跟随视角"><span id="pov-icon"></span><span id="pov-label">第一人称</span></button><button data-act="map" aria-label="雪场地图" title="雪场地图"></button><button data-act="sound" aria-label="环境音" title="环境音"></button><button data-act="pause" aria-label="暂停菜单" title="暂停菜单"></button></div><button id="game-record" data-act="record" class="glass-button" hidden><i></i><span>录像</span></button><div class="weather"><div><span id="weather-icon"></span><b id="world-clock"></b></div><span id="weather-name"></span></div><button id="look-reset" class="glass-button" data-act="center-look" hidden><span data-glyph="compass"></span><span id="look-reset-text">回正视线</span></button></div>
+    <div class="game-top"><div class="hud-tools"><button data-act="pov" class="pov-switch" aria-label="切换第一人称与跟随视角"><span id="pov-icon"></span><span id="pov-label">第一人称</span></button><button data-act="map" aria-label="雪场地图" title="雪场地图"></button><button data-act="sound" aria-label="环境音" title="环境音"></button><button data-act="pause" aria-label="暂停菜单" title="暂停菜单"></button></div><button id="game-record" data-act="record" class="glass-button" hidden><i></i><span>录像</span></button><div class="weather"><div><span id="weather-icon"></span><b id="world-clock"></b></div><span id="weather-name"></span></div><button id="look-reset" class="glass-button" data-act="center-look" hidden><span data-glyph="compass"></span><span id="look-reset-text">回正视线</span></button><div id="station-media"></div></div>
     <div id="station-card" hidden>
       <div class="station-place"><span data-glyph="pin"></span><span id="station-title"></span></div>
       <p id="station-note">拖动雪景，环顾山顶</p>
@@ -54,12 +71,20 @@
       <div class="station-actions"><button class="launch" data-act="launch-trail" hidden>从这里出发</button><button class="launch" data-act="map">选择雪道</button><button class="glass-button" data-act="lift"><span data-glyph="lift"></span><span id="station-ride">乘索道</span></button></div>
     </div>
     <section id="base-actions" hidden aria-label="山脚停留">
-      <div class="base-caption"><span id="base-hint">拖动转身环顾</span><button data-act="finish" id="base-result">本趟成绩</button></div>
+      <div class="base-controls">
+      <div class="base-toolbar"><div class="base-caption"><span id="base-hint">拖动转身环顾</span><button data-act="finish" id="base-result">本趟成绩</button></div><div id="base-media"></div></div>
       <div class="base-buttons">
         <button class="glass-button" data-act="lift"><span data-glyph="lift"></span><span id="base-lift-text">乘缆车上山</span></button>
+        <button class="glass-button" data-act="continue-base" hidden><span aria-hidden="true">↰</span><span id="base-continue-text">滑往娇龙道</span></button>
         <button class="glass-button" data-act="look-hall"><span data-glyph="eye"></span><span id="base-hall-text">看大厅与酒店</span></button>
         <button class="glass-button" data-act="restart"><span data-glyph="auto"></span><span id="base-restart-text">重滑本线</span></button>
       </div>
+      </div>
+      <dl class="base-metrics" aria-label="累计滑行统计">
+        <div><dt id="career-distance-label">累计滑程</dt><dd id="career-distance"></dd></div>
+        <div><dt id="career-visits-label">雪道滑行次数</dt><dd id="career-visits"></dd></div>
+        <div><dt id="base-explored-label">双雪场已探索</dt><dd><span id="base-explored"></span> <small id="base-count"></small></dd></div>
+      </dl>
     </section>
     <div class="steering-tools">
       <button id="near-lift" class="glass-button" data-act="lift" hidden><span data-glyph="lift"></span><span id="near-lift-label">上车</span></button>
@@ -73,18 +98,38 @@
       <button class="dir-key dir-right" data-drive="right" aria-label="向右滑行"><span></span></button>
     </div>
     <div id="keyboard-hint">A / D 转弯 <i></i> W 加速 <i></i> S 刹车 <i></i> 空格 跳跃</div>
-    <div class="ride-actions"><div class="camera-tray"><button id="tray-toggle" class="tray-button" data-act="tray" aria-label="机位工具" aria-expanded="false" aria-controls="tray-tools"><span data-glyph="back"></span></button><div id="tray-tools" hidden><button class="tray-button" data-act="view" title="切换视角" aria-label="切换视角"></button><button id="tray-record" class="tray-button" data-act="record" hidden><i></i><span>录像</span></button></div></div><button class="control brake" data-hold="brake">刹车</button><button class="control boost" data-hold="boost">加速</button><button class="control jump" data-hold="jump" aria-label="按住蓄力，松开起跳">跳</button></div>
+    <div class="ride-actions"><div class="camera-tray"><button id="tray-toggle" class="tray-button" data-act="tray" aria-label="机位工具" aria-expanded="false" aria-controls="tray-tools"><span data-glyph="back"></span></button><div id="tray-tools" hidden><button class="tray-button" data-act="view" title="切换视角" aria-label="切换视角"></button><button id="tray-photo" class="tray-button" data-act="photo"><span data-glyph="camera"></span><span id="tray-photo-label">拍照</span></button><button id="tray-record" class="tray-button" data-act="record" hidden><i></i><span>录像</span></button></div></div><button class="control brake" data-hold="brake">刹车</button><button class="control boost" data-hold="boost">加速</button><button class="control jump" data-hold="jump" aria-label="按住蓄力，松开起跳">跳</button></div>
     <div id="lift-strip" hidden><span data-glyph="lift"></span><span id="lift-text"></span><button class="lift-shortcut" data-act="skip-lift"><span></span><b aria-hidden="true">→</b></button></div>
+  </section>
+  <section id="save-image-preview" hidden role="dialog" aria-modal="true" aria-labelledby="save-image-hint">
+    <p id="save-image-hint">长按图片保存到相册</p><img alt="雪场照片"><button class="icon-disc" data-act="close-save-preview" aria-label="关闭"><span data-glyph="close"></span></button>
+  </section>
+  <section id="photo-dialog" role="dialog" aria-modal="true" aria-labelledby="photo-title" hidden>
+    <div class="photo-sheet">
+      <div class="photo-preview"><img id="photo-preview" alt="雪场照片"></div>
+      <div class="photo-tools">
+        <header><h2 id="photo-title">分享雪场</h2><button class="icon-disc" data-photo="close" aria-label="关闭"><span data-glyph="close"></span></button></header>
+        <div class="share-media-nav"><strong>雪场照片</strong><button class="glass-button" data-act="share-videos">滑行录像</button></div>
+        <p id="photo-hint"></p>
+        <div class="photo-inputs"><button class="glass-button" data-photo="retake">重拍雪景</button><button class="glass-button" data-photo="camera">拍实景</button><button class="glass-button" data-photo="album">选相册照片</button><button class="glass-button" data-photo="remove" hidden>仅用雪场照</button></div>
+        <input id="real-camera" type="file" accept="image/*" capture="environment" hidden>
+        <input id="real-album" type="file" accept="image/*" hidden>
+        <p id="photo-status" role="status"></p>
+        <div class="photo-actions"><button class="launch" data-photo="share">分享图片</button><button class="glass-button" data-photo="note" hidden>发图文笔记</button><button class="glass-button" data-photo="save">保存图片</button></div>
+      </div>
+    </div>
   </section>
   <section id="video-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="video-title">
     <div class="video-sheet">
-      <h2 id="video-title">滑行录像</h2>
+      <h2 id="video-title">分享雪场</h2>
+      <div class="share-media-nav"><button class="glass-button" data-act="share-photos">雪场照片</button><strong>滑行录像</strong></div>
       <video controls playsinline preload="metadata" hidden></video>
       <p id="video-notice" role="status"></p>
       <div id="video-library" hidden></div>
       <div class="video-actions">
         <button class="glass-button" data-act="close-video">返回</button>
         <button class="glass-button" data-act="new-video" hidden>录新片段</button>
+        <button class="launch" data-act="share-video" hidden>分享录像</button>
         <button class="glass-button" data-act="download-video" hidden>下载到文件</button>
         <button class="launch" data-act="save-video" hidden>保存到本地</button>
       </div>

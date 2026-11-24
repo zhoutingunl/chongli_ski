@@ -18,7 +18,7 @@
 #hud {--pad-bottom:calc(var(--tool-safe-bottom) + 16px);--pad-left:calc(var(--tool-safe-left) + 15px)}
 #hud .game-top, #hud .ride-actions {right:calc(var(--tool-safe-right) + 15px)}
 #hud .hud-reading {left:calc(var(--tool-safe-left) + 15px)}
-#hud #base-actions {left:calc(var(--tool-safe-left) + 15px);bottom:calc(var(--tool-safe-bottom) + 16px)}
+#hud #base-actions {left:calc(var(--tool-safe-left) + 15px);right:calc(var(--tool-safe-right) + 15px);bottom:calc(var(--tool-safe-bottom) + 16px)}
 
 #overlay .overlay-inner {padding-top:calc(var(--tool-safe-top) + 8px);padding-bottom:calc(var(--tool-safe-bottom) + 8px)}
 #flat-view {position:absolute;top:0;right:0;bottom:0;left:0;width:100%;height:100%;pointer-events:none}
@@ -35,6 +35,8 @@ button:focus {outline:2px solid #e8c583;outline-offset:2px}
 .no-flex-gap .settings-tools button+button {margin-left:6px}
 .no-flex-gap .steering-tools #near-lift:not([hidden]) {margin-bottom:6px}
 .no-flex-gap .game-top>*+* {margin-top:7px}
+.no-flex-gap #hud:not(.watching) .hud-current .piste {margin-left:10px}
+.no-flex-gap #piste-split {margin-top:4px}
 .no-flex-gap #pause-nav button {margin-bottom:2px}
 .start-choices .swatch::before {height:61%}
 @media (orientation:portrait) and (max-width:850px) {
@@ -64,3 +66,4 @@ button:focus {outline:2px solid #e8c583;outline-offset:2px}
 
 #video-dialog {padding:calc(var(--tool-safe-top) + 6px) 14px calc(var(--tool-safe-bottom) + 6px)}
 #video-dialog video {max-height:56vh}
+#photo-dialog {padding:calc(var(--tool-safe-top) + 7px) calc(var(--tool-safe-right) + 10px) calc(var(--tool-safe-bottom) + 7px) calc(var(--tool-safe-left) + 10px)}
