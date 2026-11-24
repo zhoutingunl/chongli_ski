@@ -1,4 +1,6 @@
 import './style.css';
+import {SceneryTrial,trialRouteId} from './scenery.js';
+import {paintScenicControls} from './scenic-controls.js';
 import {glyph,emblem,viewNames,viewPicture} from './icons.js';
 import {loadMountain,clamp,resortName,formatTime,difficultyName} from './mountain.js';
 import {TrailMap} from './map.js';
@@ -29,6 +31,7 @@ const setupOptions={
 const prefs={view:'first',outsideView:'follow',quality:'auto',assist:true,sound:false,controls:true,
   time:'auto',weather:'auto',language:'zh',music:true,followMusic:true,track:'ridge',volume:75,tilt:false};
 const chosenSetup={};
+const trial=new SceneryTrial();
 function applySavedPreferences(){
   const previous=read(prefKey,{});
   Object.assign(prefs,previous);
@@ -140,6 +143,7 @@ function setupText(){
   $('#rider-age').textContent=t('5–6 岁','Ages 5–6');
   function face(sel,icon,txt){for(const el of $$(sel))el.innerHTML=glyph(icon,18)+txt;}
   face('[data-act="start"]','mountain',t('进入山顶','Enter summit'));face('.start-actions [data-act="help"]','controls',t('操作指南','Controls'));
+  face('.trial-start','eye',t('同趟试景','Scenery trial'));
   face('.mini-heading,.narrow-map','map',label('雪场地图'));
   $('.footer-meta').innerHTML=glyph('mountain',16)+label('红花梁')+' <b>2,110 m</b>';
   face('.rotate-note','rotate',t('横屏滑行更开阔','Rotate for a wider view'));$('#map-preview').setAttribute('aria-label',t('打开雪场地图','Open trail map'));
@@ -198,7 +202,7 @@ function clearInputs(){
   world?.sim.cancelJump?.();updateInputs();
 }
 function updateInputs(){
-  const active=screen==='run'&&!page&&!busy,viewActive=inWorld()&&!page&&!busy;
+  const active=screen==='run'&&!page&&!busy&&!trial.frozen,viewActive=inWorld()&&!page&&!busy&&!trial.frozen;
   const physical=new Set(drivePointers.values());
   for(const key of keys){if(keyDirection[key])physical.add(keyDirection[key]);}
   const keyboard=Number(physical.has('right'))-Number(physical.has('left'));
@@ -219,7 +223,7 @@ function updateInputs(){
   $('#steering').style.setProperty('--drag',(lateral*22)+'px');$('#steering').classList.toggle('edge-set',active&&Math.abs(lateral)>.72);
 }
 function hudVisible(show){
-  $('#home').hidden=screen!=='home';$('#hud').hidden=!show||!!page;paintRecordButton();
+  $('#home').hidden=screen!=='home';$('#hud').hidden=!show||!!page||trial.frozen;paintRecordButton();paintScenicControls(trial,screen,world?.sim,prefs);
   document.documentElement.classList.toggle('hud-minimal',!prefs.controls||screen!=='run');
   $('#direction-pad').hidden=!watching()&&(screen!=='run'||!prefs.controls);
   $('#look-reset').hidden=!world?.looking||!!page;
@@ -264,7 +268,7 @@ function hudVisible(show){
 }
 function discardMap(){if(large){large.observer.disconnect();large=null;}}
 async function begin(id,flat=false,atHead=false){
-  if(busy)return;checkpoint();busy=true;restoreRequested=false;activateAudio();
+  if(busy)return;endTrial();checkpoint();busy=true;restoreRequested=false;activateAudio();
   if(prefs.tilt&&!tilt.enabled)enableTilt();
   $('#loading').hidden=false;$('#load-text').textContent=label('读取红花梁地形');
   try{
@@ -323,7 +327,7 @@ function beginDirection(direction){
   return true;
 }
 function home(){
-  checkpoint();
+  endTrial();checkpoint();
   recording?.stop();clearInputs();world?.stop();screen='home';page='';discardMap();$('#overlay').hidden=true;
   if(!data?.allRoutes.some(r=>r.id===routeId&&r.resort===prefs.resort))routeId=prefs.resort+'-classic';
   homeChoices();hudVisible(false);sound.update(0,0);refreshMusic();
@@ -338,6 +342,12 @@ function checkpoint(){
 }
 function worldEvent(type,arg){
   if(screen==='run'&&(type==='hud'||type==='finish'))saveActivity(arg,type==='finish');
+  if(type==='hud'&&screen==='run'&&trial.active&&trial.touring&&!trial.frozen){
+    const projected=arg.route===trial.route?{distance:0,along:arg.along}:trial.route.closest(arg.x,arg.z);
+    if(projected.distance<100&&trial.advance(projected.along)){
+      world.previewScenery(trial,true);paintScenicControls(trial,screen,arg,prefs);
+    }
+  }
   if(type==='hud'&&screen==='run'){
     if(arg.feedback&&(!feedback||feedback.source!==arg.feedback))feedback={source:arg.feedback,landing:0,tree:0};
     if(feedback&&arg.feedback===feedback.source){
@@ -367,7 +377,7 @@ function worldEvent(type,arg){
   }
   if(type==='disembark'){routeId=arg.route.id;screen=arg.mode;recorded=false;summitChoice='';
     hudVisible(true);paintHUD();refreshMusic();announce(arg.mode==='summit'?t('已到山顶，可环顾或选道','At the summit. Look around or choose a trail.'):t('已到站，可环顾或乘回程索道','At the station. Look around or take the return lift.'));}
-  if(type==='lost')openPanel('lost');
+  if(type==='lost'){if(trial.active){trial.close();syncTrialUI();}openPanel('lost');}
 }
 const discoveryQueue=[];
 let discoveryTimer;
@@ -509,7 +519,7 @@ function renderPanel(keep=false){
   const p=$('#panel'),scroll=keep?p.scrollTop:0,openDetails=keep&&p.querySelector('.settings-detail')?.open;
   if(page==='view'){
     p.innerHTML=heading('VIEW','视角')+'<div class="view-grid">'+Object.entries(viewNames).map(([id,txt])=>'<button class="view-tile" aria-pressed="'+(prefs.view===id)+'" data-choice="view" data-value="'+id+'">'+viewPicture(id)+'<b>'+label(txt)+'</b>'+(id===prefs.view?tick:'')+'</button>').join('')+'</div><p class="panel-foot">'+t('右上角一键切换第一人称和外部机位。拖动可环顾四周，点指南针回正。','Use the top camera switch for first or third person. Drag to look around and tap the compass to face forward.')+'</p>';
-  }else if(page==='environment')p.innerHTML=environmentPanel(prefs);
+  }else if(page==='environment')p.innerHTML=environmentPanel(prefs)+(world?.flat?'':button('scenery-open',t('在当前位置试景','Compare scenes here'),'setting-pill trial-link'));
   else if(page==='settings')p.innerHTML=settingsPanel(prefs,music.track,sourceText())+cloudControls();
   else if(page==='help')p.innerHTML=controlsPanel();
   else if(page==='rider'){
@@ -724,7 +734,7 @@ function saveImagePreview(item){
 }
 function closeImagePreview(){
   const panel=$('#save-image-preview');panel.hidden=true;panel.querySelector('img').removeAttribute('src');
-  $('#tray-photo').focus({preventScroll:true});
+  $(trial.frozen?'#scene-photo':'#tray-photo').focus({preventScroll:true});
 }
 async function exportCapture(item,manual=false,downloadOnly=false){
   if(!item||item.exporting)return item?.exporting;
@@ -777,6 +787,7 @@ function paintRecordButton(){
   const seconds=recording?Math.min(GAME_CLIP_SECONDS,Math.floor((performance.now()-recordStart)/1000)):0;
   status.hidden=!recording;
   control.hidden=!recordable();
+  const film=$('#scene-film');film.hidden=!recordable();film.textContent=recording?t('停止录像','Stop recording'):t('录像','Record');
   const label=recording?t('停止录像','Stop recording'):t('开始录像','Start recording');
   for(const item of [status,control]){
     item.setAttribute('aria-pressed',String(!!recording));
@@ -876,7 +887,58 @@ async function shareRecording(){
   }finally{control.disabled=false;}
 }
 
+function syncTrialUI(){
+  const notice=$('#capture-save');
+  if(trial.frozen)$('#scenery-desk .scene-console').append(notice);
+  else if(notice.parentElement!==$('.hud-reading'))$('#piste-split').before(notice);
+  hudVisible(inWorld());paintHUD();
+}
+function endTrial(){
+  if(!trial.active)return;
+  trial.close();world?.previewScenery?.(null);syncTrialUI();
+}
+function openTrial(touring=false){
+  if(!inWorld()||!world?.previewScenery){
+    if(world?.flat)announce(t('同趟试景需要三维雪场，当前为轻量雪道视图。','Scenery trials require the 3D mountain. This device is using the lightweight view.'));
+    return;
+  }
+  if(page)closePanel();
+  if(!trial.active)trial.enter(world.sim.route,touring,world.sim.along);
+  trial.frozen=true;clearInputs();world.pause(true);world.previewScenery(trial);
+  sound.update(0,0);syncTrialUI();$('#scene-list').focus({preventScroll:true});
+}
+function leaveTrialDesk(play){
+  if(!play)endTrial();
+  else{
+    trial.sky=false;trial.frozen=false;world.previewScenery(trial);
+  }
+  if(play&&screen==='trailhead')launch(world.sim.route);
+  else world.pause(false);
+  syncTrialUI();
+  (play?$('#scenery-chip'):$('[data-act="pause"]'))?.focus({preventScroll:true});
+}
+function scenicAction(a){
+  if(a==='scenery-start'){
+    return begin(trialRouteId,false,true).then(()=>{if(screen==='trailhead'&&!page)openTrial(true);});
+  }
+  if(a==='scenery-open')return openTrial();
+  if(!trial.frozen)return;
+  if(a==='scenery-end'||a==='scenery-play')return leaveTrialDesk(a==='scenery-play');
+  if(a==='scenery-prev'||a==='scenery-next')trial.step(a==='scenery-next'?1:-1);
+  if(a==='scenery-compare')trial.original=!trial.original;
+  if(a==='scenery-example')trial.example=!trial.example;
+  if(a==='scenery-sky')trial.sky=trial.sky===trial.id?false:trial.id;
+  if(a==='scenery-tour'){
+    trial.touring=!trial.touring;trial.original=false;
+    trial.advance(trial.route.closest(world.sim.x,world.sim.z).along);
+  }
+  world.previewScenery(trial,false,a==='scenery-example'&&trial.sky===trial.id);syncTrialUI();
+}
+$('#scene-list').addEventListener('change',e=>{
+  trial.select(e.target.value);world.previewScenery(trial);syncTrialUI();
+});
 function action(a){
+  if(a.startsWith('scenery-'))return scenicAction(a);
   if(a==='start'||a==='retry')return begin();
   if(a==='flat-mode'&&isMiniTool)return begin(world?.sim.route?.id,true);
   if(a==='fullscreen')return screenFull();
@@ -906,7 +968,7 @@ function action(a){
   if(a==='restart'){
     checkpoint();
     if(!world?.sim.route||watching()||screen==='lift')return begin(world?.sim.route.id||routeId);
-    const route=data.allRoutes.find(r=>r.id===(world.sim.continuedFrom?.id||world.sim.route.id))||world.sim.route;discardMap();page='';$('#overlay').hidden=true;screen='trailhead';tray=false;recorded=false;
+    endTrial();const route=data.allRoutes.find(r=>r.id===(world.sim.continuedFrom?.id||world.sim.route.id))||world.sim.route;discardMap();page='';$('#overlay').hidden=true;screen='trailhead';tray=false;recorded=false;
     clearInputs();world.trailhead(route);hudVisible(true);paintHUD();refreshMusic();return;
   }
   if(a==='launch-trail'&&screen==='trailhead')return launch(world.sim.route);
@@ -926,7 +988,7 @@ function action(a){
     }
     else if(mode==='join'||mode==='junction'){if(world.sim.switchRoute(r)){closePanel();paintHUD();}}
     else {
-      closePanel();routeId=r.id;screen='trailhead';tray=false;recorded=false;
+      endTrial();closePanel();routeId=r.id;screen='trailhead';tray=false;recorded=false;
       clearInputs();world.trailhead(r);hudVisible(true);paintHUD();refreshMusic();
     }
     return;
@@ -984,6 +1046,16 @@ document.addEventListener('keydown',e=>{
     }
     return;
   }
+  if(trial.frozen&&!page){
+    if(e.code==='Escape'){e.preventDefault();leaveTrialDesk(false);}
+    if(e.code==='Tab'){
+      const visible=$$('#scenery-desk button,#scenery-desk select').filter(b=>b.offsetWidth&&!b.disabled);
+      if((e.shiftKey&&document.activeElement===visible[0])||(!e.shiftKey&&document.activeElement===visible.at(-1))){
+        e.preventDefault();visible[e.shiftKey?visible.length-1:0].focus();
+      }
+    }
+    return;
+  }
   if(e.code==='Tab'&&page){
     const all=$$('#overlay button, #overlay a, #overlay input, #overlay summary').filter(b=>b.offsetWidth>0&&!b.disabled);
     if(all.length&&((e.shiftKey&&document.activeElement===all[0])||(!e.shiftKey&&document.activeElement===all.at(-1)))){e.preventDefault();all[e.shiftKey?all.length-1:0].focus();}return;
@@ -1019,11 +1091,11 @@ $('#video-dialog video').addEventListener('error',()=>{
 });
 window.addEventListener('pagehide',checkpoint);
 document.addEventListener('visibilitychange',()=>{
-  if(document.hidden){checkpoint();clearInputs();if(inWorld()&&!page&&videoDialog().hidden&&!photos.visible&&!systemSave)openPanel('view');if(busy)restoreRequested=true;sound.update(0,0,true);}
+  if(document.hidden){checkpoint();clearInputs();if(inWorld()&&!page&&!trial.frozen&&videoDialog().hidden&&!photos.visible&&!systemSave)openPanel('view');if(busy)restoreRequested=true;sound.update(0,0,true);}
   else if(screen==='home')sound.update(0,0);
   refreshMusic();
 });
-window.addEventListener('blur',()=>{clearInputs();if(inWorld()&&!page&&!busy&&videoDialog().hidden&&!photos.visible&&!systemSave)openPanel('view');});
+window.addEventListener('blur',()=>{clearInputs();if(inWorld()&&!page&&!trial.frozen&&!busy&&videoDialog().hidden&&!photos.visible&&!systemSave)openPanel('view');});
 for(const b of $$('.dir-key')){
   b.addEventListener('pointerdown',e=>{
     if(page||busy||e.button!==0||!beginDirection(b.dataset.drive))return;

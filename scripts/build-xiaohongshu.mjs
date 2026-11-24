@@ -108,7 +108,7 @@ try{
   let html=(await source('index.html'))
     .replace(/^.*(?:rel="canonical"|property="og:image").*\n/gm,'')
     .replace(/<button[^>]+data-act="fullscreen"[^>]*><\/button>/,'')
-    .replace(/<main id="home">[\s\S]*?<\/main>/, home=>home.replace(/(<button)(?=[^>]*data-act="(?:start|help|map|sound)"[^>]*>)/g, '$1 data-start-ready disabled'))
+    .replace(/<main id="home">[\s\S]*?<\/main>/, home=>home.replace(/(<button)(?=[^>]*data-act="(?:start|scenery-start|help|map|sound)"[^>]*>)/g, '$1 data-start-ready disabled'))
     .replace('<div class="start-actions">','<p id="boot-status" role="status">正在准备滑雪。长时间未就绪时，请退出后重新打开。</p>\n      <div class="start-actions">')
     .replace('</head>','  <link rel="stylesheet" href="./app.css">\n</head>')
     .replace('<script type="module" src="/src/main.js"></script>','<script defer src="./app.js"></script>');

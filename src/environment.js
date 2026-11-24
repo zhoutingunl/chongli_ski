@@ -15,7 +15,7 @@ const clamp = (value,min=0,max=1) => Math.max(min,Math.min(max,value));
 const mix = (a,b,t) => a+(b-a)*t;
 const smooth = (lo,hi,v) => { const t=clamp((v-lo)/(hi-lo)); return t*t*(3-2*t); };
 const cycle=(n,length)=>((n%length)+length)%length;
-function blendColor(a,b,t) {
+export function blendColor(a,b,t) {
   const r=Math.round(mix((a>>16)&255,(b>>16)&255,t));
   const g=Math.round(mix((a>>8)&255,(b>>8)&255,t));
   return (r<<16)|(g<<8)|Math.round(mix(a&255,b&255,t));

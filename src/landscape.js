@@ -1,3 +1,4 @@
+import {sceneHeader,scenicGround,scenicForest,scenicSky} from './scenic-materials.js';
 import {createTerrainDetail} from './terrain-detail.js';
 import {placePisteLights} from './piste-lighting.js';
 import * as THREE from 'three';
@@ -159,7 +160,7 @@ function snowMaterial(uniforms,far,refined=false) {
       uniform vec3 ridgeAir,hazeAir,horizonAir; uniform vec4 airSun; uniform float aerialStrength; uniform vec3 solarTint;
       uniform vec3 shadowStarts[${shadowBones.length}]; uniform vec2 shadowEnds[${shadowBones.length}]; uniform vec4 shadowArea;
       uniform sampler2D solarHorizons; uniform vec4 sunHorizon;
-      `+glNoise+atmosphereGLSL+(far?'':iceFacets+riderShadowGLSL+ridgeShadowGLSL)+s.fragmentShader.replace('#include <color_fragment>',far?`
+      `+glNoise+sceneHeader+scenicGround+atmosphereGLSL+(far?'':iceFacets+riderShadowGLSL+ridgeShadowGLSL)+s.fragmentShader.replace('#include <color_fragment>',far?`
       vec2 p=vGround.xz;
       float n=noise21(p*.00081)*.56+noise21(p*.0034)*.27+noise21(p*.009)*.17;
       float snow=smoothstep(.21,.80,n+(vGround.y-1800.)*.00082);
@@ -253,25 +254,30 @@ function snowMaterial(uniforms,far,refined=false) {
       if(pisteLights>.005){
         float pool=texture2D(lampMap,(vGround.xz-terrainBounds.xy)/terrainBounds.zw).r;
         outgoingLight+=diffuseColor.rgb*vec3(.91,.76,.53)*pool*pisteLights*.91;
+        if(ridgeScene==RIDGE_LAMPS){
+          float spill=smoothstep(.035,.67,pool);
+          outgoingLight+=diffuseColor.rgb*vec3(.56,.31,.083)*spill*pisteLights*ridgeBlend;
+        }
       }
       #include <opaque_fragment>
     `);
     s.fragmentShader=s.fragmentShader.replace('#include <opaque_fragment>',`
       outgoingLight=aerialSnow(outgoingLight,vGround,cameraPosition);
+      if(ridgeScene!=0)outgoingLight=mix(outgoingLight,paintSnow(outgoingLight,vGround,transformDirectionByInverseViewMatrix(normal,viewMatrix)),ridgeBlend);
       #include <opaque_fragment>
     `);
   };
   return mat;
 }
 
-export function createSky(scene) {
+export function createSky(scene,scenicUniforms) {
   const col=()=>({value:new THREE.Color()}),real=()=>({value:0}),dir=()=>({value:new THREE.Vector3()});
-  const uniforms={zenith:col(),horizonColor:col(),sunDir:dir(),moonDir:dir(),sunColor:col(),cloudColor:col(),cloudiness:real(),snow:real(),solar:real(),moonlight:real(),stars:real(),aurora:real(),phase:real()};
+  const uniforms={...scenicUniforms,zenith:col(),horizonColor:col(),sunDir:dir(),moonDir:dir(),sunColor:col(),cloudColor:col(),cloudiness:real(),snow:real(),solar:real(),moonlight:real(),stars:real(),aurora:real(),phase:real()};
   const mat=new THREE.ShaderMaterial({uniforms,side:THREE.BackSide,depthWrite:false,depthTest:false,
     vertexShader:'varying vec3 vDir; void main(){vDir=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
     fragmentShader:`varying vec3 vDir;uniform vec3 zenith,horizonColor,sunDir,sunColor,moonDir,cloudColor;
       uniform float cloudiness,snow,solar,moonlight,stars,aurora,phase;
-      `+glNoise+`
+      `+glNoise+sceneHeader+scenicSky+`
       float starField(vec2 coord,float frequency,float seed) {
         vec2 q=coord*vec2(frequency,frequency*.52),cell=floor(q);
         float chance=hash21(cell+vec2(seed,17.3));
@@ -344,6 +350,7 @@ export function createSky(scene) {
         vec3 cloud=mix(cloudColor,horizonColor,.20+.26*snow);
         cloud=mix(cloud,sunColor,min(.40,glint*.56)*solar);
         sky=mix(sky,cloud,clouds*(.27+cloudiness*.52)*(1.-stratus*.79));
+        if(ridgeScene!=0)sky=mix(sky,paintSky(sky,d,sunDir,solar,stars,clouds),ridgeBlend);
         gl_FragColor=vec4(max(sky,vec3(.0003)),1.);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -359,6 +366,37 @@ export function createSky(scene) {
     uniforms.aurora.value=env.auroraAmount||0;uniforms.phase.value=env.elapsed||0;
   }};
 }
+
+export function bindScenicBuildings(groups,u){
+  const seen=new Set();
+  for(const group of groups)group.traverse(mesh=>{
+    const m=mesh.material;
+    if(!mesh.isMesh||!m||seen.has(m)||(!m.isMeshStandardMaterial&&!m.isMeshLambertMaterial))return;
+    seen.add(m);
+    const compile=m.onBeforeCompile,key=m.customProgramCacheKey();
+    m.customProgramCacheKey=()=>key+'-scenic-resort';
+    m.onBeforeCompile=(shader,renderer)=>{
+      compile.call(m,shader,renderer);
+      Object.assign(shader.uniforms,u);
+      shader.vertexShader='varying vec3 vScenicBuilding;\n'+shader.vertexShader.replace('#include <project_vertex>',`
+        #include <project_vertex>
+        vec4 scenicLocal=vec4(transformed,1.);
+        #ifdef USE_INSTANCING
+          scenicLocal=instanceMatrix*scenicLocal;
+        #endif
+        vScenicBuilding=(modelMatrix*scenicLocal).xyz;`);
+      shader.fragmentShader='varying vec3 vScenicBuilding;\n'+glNoise+sceneHeader+shader.fragmentShader.replace('#include <opaque_fragment>',`
+        if(ridgeScene==RIDGE_CLOUDSEA)outgoingLight=mix(outgoingLight,crossCloudDeck(outgoingLight,cameraPosition,vScenicBuilding),ridgeBlend);
+        if(ridgeScene==RIDGE_WOODBLOCK){
+          float val=sceneLuma(outgoingLight);
+          float ink=.20+.30*smoothstep(.11,.15,val)+.50*smoothstep(.45,.50,val);
+          outgoingLight=mix(outgoingLight,mix(vec3(.04,.09,.13),vec3(.80,.75,.59),ink),.40*ridgeBlend);
+        }
+        #include <opaque_fragment>`);
+    };
+  });
+}
+
 function makePisteLighting(scene,data) {
   // One baked illuminance map puts light on the actual slope, including the connecting
   // runs. Fixtures reuse two small geometries and distant lamps share one point sprite draw.
@@ -398,9 +436,9 @@ function makePisteLighting(scene,data) {
   return {texture,setLight(e){const amount=e.lampAmount||0;glowUniform.amount.value=amount;glowUniform.fogDensity.value=e.density;glow.visible=amount>.025;}};
 }
 
-export async function buildSurface(scene,data) {
+export async function buildSurface(scene,data,scenicUniforms) {
   const b=data.bounds,fixtures=makePisteLighting(scene,data);
-  const uniforms={
+  const uniforms={...scenicUniforms,
     lampMap:{value:fixtures.texture},pisteLights:{value:0},crystals:{value:dataTexture(128,128,255)},
     lowSun:{value:new THREE.Vector4(-.5,.47,-.66,0)},trailMask:{value:prepareTrailMask(data)},
     terrainBounds:{value:new THREE.Vector4(b.minX,b.minZ,b.maxX-b.minX,b.maxZ-b.minZ)},
@@ -481,9 +519,9 @@ async function readForest() {
     const ct=c.getContext('2d',{willReadFrequently:true});ct.drawImage(img,0,0);const out=ct.getImageData(0,0,c.width,c.height);img.close?.();return out;
   }catch{return null;}
 }
-export async function plantForest(scene,data) {
+export async function plantForest(scene,data,scenicUniforms) {
   const [atlas,cover]=await Promise.all([loadTexture(asset('art/treeline.webp'),THREE.SRGBColorSpace),readForest()]);
-  const uniforms={...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),atlas:{value:atlas},
+  const uniforms={...scenicUniforms,...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),atlas:{value:atlas},
     tint:{value:new THREE.Color(1,1,1)},solarTint:{value:new THREE.Color()},lowSun:{value:new THREE.Vector4(0,1,0,0)}};
   // Regular cards face the viewer. Shadow cards pivot towards the light,
   // using the same crown cutout so shade follows the branches and trunks.
@@ -532,7 +570,7 @@ export async function plantForest(scene,data) {
     fragmentShader:`uniform sampler2D atlas;uniform vec3 tint,solarTint;uniform vec4 lowSun;varying vec2 vUv;varying float vTint;varying float vSpecies;
       varying vec3 vTreeWorld;varying vec4 vBranch;
       #include <fog_pars_fragment>
-      `+iceFacets+`
+      `+glNoise+sceneHeader+scenicForest+iceFacets+`
       void main(){
         vec4 c=texture2D(atlas,vUv);
         float lum=dot(c.rgb,vec3(.22,.68,.10));
@@ -568,6 +606,7 @@ export async function plantForest(scene,data) {
             color+=solarTint*sparkle*branchSnow*facing*lowSun.w*mix(10.,3.2,bare)*(1.-smoothstep(31.,58.,vBranch.w));
           }
         }
+        if(ridgeScene!=0)color=mix(color,paintTree(color,vTreeWorld,lum),ridgeBlend);
         gl_FragColor=vec4(color,1.);
         #include <fog_fragment>
         #include <tonemapping_fragment>

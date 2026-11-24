@@ -554,6 +554,7 @@ export function makeSnowFX(scene,data,snowAir){
     fg.attributes.position.needsUpdate=true;
   }
   return {
+    snowfall,
     reset(){tracks.clear();fan.clear();particles.clear();wake.clear();hadSnow=wasAirborne=movingSnow=false;},
     update(p,dt,weather,view,dimensions){
       night.value=weather?.nightAmount??0;uniforms.haze.value=scene.fog?.density??0;

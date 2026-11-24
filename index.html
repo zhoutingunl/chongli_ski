@@ -33,7 +33,7 @@
         <fieldset class="choice-field"><legend><span data-setup-label="gender">角色</span><span id="rider-age" hidden>5–6 岁</span></legend><div class="segments" id="gender-choices"></div></fieldset>
         <fieldset class="choice-field"><legend><span data-setup-label="color">雪服配色</span><span id="coat-name"></span></legend><div class="swatches" id="color-choices"></div></fieldset>
       </div>
-      <div class="start-actions"><button class="launch" data-act="start"><span class="play-icon"></span>进入山顶</button><button class="quiet-button" data-act="help"><span data-glyph="controls"></span>操作指南</button></div>
+      <div class="start-actions"><button class="launch" data-act="start"><span class="play-icon"></span>进入山顶</button><button class="quiet-button trial-start" data-act="scenery-start">同趟试景</button><button class="quiet-button" data-act="help"><span data-glyph="controls"></span>操作指南</button></div>
     </div>
     <button id="map-preview" data-act="map" aria-label="打开雪场地图">
       <canvas id="mini-map" aria-hidden="true"></canvas><div class="mini-heading"><span data-glyph="map"></span>雪场地图</div><span class="mini-open" data-glyph="expand"></span><span class="mini-credit">© OpenStreetMap</span><span class="mini-north">N<i></i></span>
@@ -42,6 +42,7 @@
   </main>
   <section id="hud" hidden aria-label="滑行仪表">
     <div class="hud-vignette"></div>
+    <button class="glass-button" id="scenery-chip" data-act="scenery-open" hidden>试景</button>
     <div class="hud-reading">
       <div class="hud-current">
       <div class="speed"><strong id="speed">0</strong><span>KM / H</span><small><span id="drop-label">落差</span> <b id="drop">0</b> m</small><small><span id="distance-label">滑程</span> <b id="run-distance">0 m</b></small><i><b id="speed-bar"></b></i></div>
@@ -133,6 +134,18 @@
         <button class="glass-button" data-act="download-video" hidden>下载到文件</button>
         <button class="launch" data-act="save-video" hidden>保存到本地</button>
       </div>
+    </div>
+  </section>
+  <section id="scenery-desk" role="dialog" aria-modal="true" aria-labelledby="scene-title" hidden>
+    <header class="scene-heading"><small id="scene-kind"></small><h2 id="scene-title"></h2><span id="scene-route"></span></header>
+    <button id="scene-exit" data-act="scenery-end" class="glass-button">结束试景</button>
+    <div class="scene-console">
+      <div class="scene-picker"><button id="scene-prev" data-act="scenery-prev" aria-label="上一个景观">‹</button>
+        <label><span id="scene-select-label">选择景观</span><select id="scene-list"></select></label>
+        <button id="scene-next" data-act="scenery-next" aria-label="下一个景观">›</button></div>
+      <p id="scene-note"></p>
+      <div class="scene-buttons"><button id="scene-original" data-act="scenery-compare"></button><button id="scene-sky" data-act="scenery-sky"></button><button id="scene-photo" data-act="photo">拍照</button><button id="scene-film" data-act="record" hidden>录像</button><button id="scene-play" class="launch" data-act="scenery-play"></button></div>
+      <div class="scene-options"><button id="scene-tour" data-act="scenery-tour"></button><button id="scene-example" data-act="scenery-example"></button></div>
     </div>
   </section>
   <section id="overlay" hidden aria-label="设置">

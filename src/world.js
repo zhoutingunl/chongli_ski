@@ -1,3 +1,6 @@
+import {trialClimate,blendScenery,sceneById,cloudFloor,cloudRoof} from './scenery.js';
+import {sceneryUniforms,applySceneryUniforms} from './scenic-materials.js';
+import {createIceDust} from './ice-dust.js';
 import {GlideCamera,cameraWindowMetres,previewGlide,usesCameraWindow} from './camera-window.js';
 import {nearbyLiftStation} from './lift-access.js';
 import {placeLiftSupports} from './lift-supports.js';
@@ -6,7 +9,7 @@ import {createRider} from './rider.js';
 import {createLandmark,createLift,setResortNight} from './resort.js';
 import {Descent} from './simulation.js';
 import {createSkiNavigation} from './navigation.js';
-import {createSky,buildSurface,plantForest} from './landscape.js';
+import {createSky,buildSurface,plantForest,bindScenicBuildings} from './landscape.js';
 import {createMountainClimate} from './environment.js';
 import {courseDetails,makeSnowFX} from './details.js';
 import {createTrailGuide} from './trail-guide.js';
@@ -45,10 +48,12 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     updateShadow(shadowProjector);
   };
   sun.castShadow=true;scene.add(sun,sun.target,hemi);
-  const sky=createSky(scene),source=new THREE.Vector3();
+  const scenic=sceneryUniforms(),iceDust=createIceDust(scene);
+  let trial=null,transition=null;
+  const sky=createSky(scene,scenic),source=new THREE.Vector3();
   let forest,surface;
   onProgress('铺展雪道与远山');
-  await Promise.all([buildSurface(scene,data).then(s=>{surface=s;}),plantForest(scene,data).then(f=>{forest=f;})]);
+  await Promise.all([buildSurface(scene,data,scenic).then(s=>{surface=s;}),plantForest(scene,data,scenic).then(f=>{forest=f;})]);
   onProgress('装配雪具与索道');await new Promise(r=>setTimeout(r,0));
   const rotations={wanlong:{lodge:-2.92,hall:.17},genting:{lodge:1.72,hall:-1.86}};
   const landmarks=[],landmarkViews=new Map();
@@ -68,6 +73,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     const casters=[];obj.group.traverse(child=>{if(child.isMesh&&child.castShadow)casters.push(child);});
     lifts.push({...obj,meta:lift,distance,center,casters,radius:points[0].distanceTo(points.at(-1))*.5+200});
   }
+  bindScenicBuildings([...landmarks,...lifts.map(l=>l.group)],scenic);
   const navigation=createSkiNavigation(data);
   const details=courseDetails(scene,data,navigation);
   const trailGuide=createTrailGuide(scene,data,renderer,pisteProgress,surface.detail);
@@ -131,11 +137,21 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
   }
   const observer=new ResizeObserver(resize);observer.observe(host);resize();
   function environment(){
-    conditions=climate.sample(opts.time,opts.weather);
+    conditions=trialClimate(trial,opts,climate);
+    if(transition){
+      const fraction=(clock-transition.start)/2.4;
+      if(fraction>=1)transition=null;
+      else conditions=blendScenery(transition.from,conditions,fraction);
+    }
     const e=conditions;
+    applySceneryUniforms(scenic,e);iceDust(e,isMiniTool||opts.quality==='lite');
     sky.apply(e);forest.setLight(e);surface.setLight(e);setResortNight(e.lampAmount);
     scene.fog.color.set(e.fog);scene.fog.density=e.density*(.69+.31*e.snowAmount);sun.color.set(e.sun);sun.intensity=e.light;
     sun.shadow.intensity=.42+.42*THREE.MathUtils.smoothstep(e.dir[1],.08,.55);
+    if(e.sceneId==='cloudsea'){
+      const depth=Math.min(camera.position.y-cloudFloor,cloudRoof-camera.position.y);
+      scene.fog.density+=.0016*THREE.MathUtils.smoothstep(depth,0,12)*(e.sceneStrength??1);
+    }
     hemi.intensity=e.ambient;hemi.color.set(e.hemi);hemi.groundColor.set(e.ground);source.fromArray(e.dir).normalize();
     renderer.toneMappingExposure=e.exposure;
   }
@@ -431,6 +447,59 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     }
     onEvent('disembark',{side,route:sim.route,mode:sim.mode,end});
   }
+  let heldCamera=null,framedId=null;
+  const framedCamera=new THREE.Quaternion();
+  const previewTarget=new THREE.Vector3();
+  // Find an open valley view from the held camera, without moving the athlete.
+  function aimAtValley(){
+    const eye=camera.position;
+    let best=-Infinity,azimuth=0,pitch=-.08;
+    for(let n=0;n<24;n++){
+      const angle=n*Math.PI/12,dx=Math.sin(angle),dz=Math.cos(angle);
+      let horizon=-Infinity;
+      for(let step=1;step<=28;step++){
+        const range=step*step*3.4+8;
+        const height=data.height(eye.x+range*dx,eye.z+range*dz);
+        const grade=(height-eye.y)/range;
+        if(range>310){
+          const deck=(Math.max(height+13,(cloudFloor+cloudRoof)/2)-eye.y)/range;
+          const sightline=THREE.MathUtils.clamp((deck-horizon)*13,-1,1);
+          const score=THREE.MathUtils.clamp((eye.y-height)/370,-1,1)+.50*sightline-.3*Math.abs(deck+.14);
+          if(score>best){best=score;azimuth=angle;pitch=THREE.MathUtils.clamp(deck,-.24,.055);}
+        }
+        horizon=Math.max(horizon,grade);
+      }
+    }
+    return previewTarget.set(Math.sin(azimuth),pitch,Math.cos(azimuth));
+  }
+  function previewScenery(next,fade=false,refreshAim=false){
+    if(refreshAim)framedId=null;
+    transition=fade?{from:conditions,start:clock}:null;
+    trial=next?.active?next:null;
+    if(heldCamera){camera.quaternion.copy(heldCamera);heldCamera=null;}
+    environment();
+    if(!trial?.frozen||!trial.sky)framedId=null;
+    if(trial?.frozen){
+      heldCamera=camera.quaternion.clone();
+      if(trial.sky&&framedId===trial.sky)camera.quaternion.copy(framedCamera);
+      else if(trial.sky){
+        const look=sceneById.get(trial.sky).look;
+        if(look==='sun'||look==='crystals')previewTarget.fromArray(conditions.sunDir);
+        else if(look==='moon')previewTarget.fromArray(conditions.moonDir);
+        else if(look==='galaxy')previewTarget.set(-.15,.73,-.63);
+        else if(look==='stars')previewTarget.set(.24,.48,-.84);
+        else aimAtValley();
+        if(look==='crystals'){previewTarget.applyAxisAngle(up,.71);previewTarget.y=.09;}
+        else if(look!=='ridge')previewTarget.y=Math.max(.085,previewTarget.y);
+        camera.lookAt(previewTarget.normalize().multiplyScalar(100).add(camera.position));
+        framedId=trial.sky;framedCamera.copy(camera.quaternion);
+      }
+      fx.snowfall(0,conditions,camera.position);
+      snowAir.update(0,conditions,camera.position,sim,opts.quality,isMiniTool);
+    }
+    sun.position.copy(sun.target.position).addScaledVector(source,143);
+    kick();
+  }
   function renderFrame(){
     if(!isMiniTool&&opts.quality!=='lite')renderLighting??=createSnowLighting(renderer)||false;
     if(!isMiniTool&&opts.quality!=='lite'&&renderLighting)renderLighting(scene,camera,sun,conditions,opts.quality,lightingLimited);
@@ -444,7 +513,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     const raw=prev?(now-prev)/1000:1/60;const dt=Math.min(Math.max(raw,0),.085);prev=now;
     if(!paused){
       clock+=dt;climateAge+=dt;climate.advance(dt,opts.time,opts.weather,sim.mode==='run');
-      if(climateAge>.15){environment();climateAge=0;}
+      if(transition||climateAge>.15){environment();climateAge=0;}
       if(ride){
         ride.t=clamp(ride.t+dt*ride.dir*ride.lift.speed/ride.lift.length,.003,.997);
         const eye=ride.lift.seatAt(ride.t,ride.dir);sim.x=eye.x;sim.z=eye.z;sim.y=eye.y;
@@ -461,7 +530,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
       for(const l of lifts)if(l.group.visible)l.update(clock,camera,ride?.lift===l ? ride.t : null,ride?.dir);
       updateAvatar(dt);fx.update(sim,dt,conditions,camera.position,rider.dimensions);
     }
-    moveCamera(dt);
+    if(!trial?.frozen)moveCamera(dt);
     treesLag+=dt;if(treesLag>.40){refreshLOD();treesLag=0;}
     trailGuide.update(sim,navigation,opts.language,camera);
     if(!paused) snowAir.update(dt,conditions,camera.position,sim,opts.quality,isMiniTool);
@@ -478,15 +547,16 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
         adaptiveTime=adaptiveFrames=0;
       }
     }
-    if(!paused)kick();
+    if(!paused||(videoCanvasLocked&&trial?.frozen))kick();
   }
   function kick(){if(!frame&&active)frame=requestAnimationFrame(loop);}
   el.addEventListener('webglcontextlost',e=>{e.preventDefault();if(active){active=false;onEvent('lost');}});
   return {
     sim,input,start,stage,trailhead,pushOff,beginRide,leaveRide,
+    previewScenery,
     photoFrame(){renderFrame();return el;},
     lockVideoCanvas(){
-      videoCanvasLocked=true;adaptiveTime=adaptiveFrames=0;
+      videoCanvasLocked=true;adaptiveTime=adaptiveFrames=0;kick();
       el.classList.add('video-frame-locked');
       return ()=>{videoCanvasLocked=false;el.classList.remove('video-frame-locked');resize();};
     },

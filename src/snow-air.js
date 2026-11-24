@@ -146,7 +146,7 @@ export function createSnowAir(scene,data) {
       uniforms.sun.value.setHex(weather.sun);uniforms.blue.value.setHex(weather.hemi);
       uniforms.solar.value=weather.sunAmount;uniforms.night.value=weather.nightAmount;
       uniforms.haze.value=weather.density;
-      uniforms.strength.value=.29+.23*w+.077*snow;
+      uniforms.strength.value=(.29+.23*w+.077*snow)*(weather.sceneId==='spindrift'?1+.65*(weather.sceneStrength??1):1);
       for(let i=0;i<count;i++) {
         let particle=positions[i];
         if(!particle||particle.age>=particle.life||Math.hypot(particle.x-camera.x,particle.z-camera.z)>144)
