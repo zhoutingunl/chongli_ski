@@ -15,20 +15,7 @@ const smooth = (x, lo, hi) => {
   return t * t * (3 - 2 * t);
 };
 
-// Round each mapped polyline junction over a few metres so the running edge
-// follows a continuous arc. Both endpoints stay at their surveyed coordinates.
-function trackFrame(route, distance) {
-  const p = route.at(distance);
-  const r = Math.min(10, distance, route.length - distance);
-  const span = r || 1;
-  const a = route.at(distance - span), b = route.at(distance + span);
-  const dx = b.x - a.x, dz = b.z - a.z, length = Math.hypot(dx, dz) || 1;
-  if (r > 0) {
-    p.x = (a.x + 2 * p.x + b.x) / 4;
-    p.z = (a.z + 2 * p.z + b.z) / 4;
-  }
-  return {x:p.x, z:p.z, dx:dx/length, dz:dz/length, angle:Math.atan2(dx,-dz), index:p.index};
-}
+export const physicsStep=1/90;
 
 export class Descent {
   constructor(data, opts, dimensions = null) {
@@ -66,7 +53,7 @@ export class Descent {
     this.turn = this.curve = this.spray = this.terrainFlex = this.push = this.stride = 0;
     this.guideLean = this.bankSwap = this.bump = this.lastGrade = this.force = 0;
     this.cutSide = 1; this.contactTime = 5; this.takeoffSpeed = this.verticalAlong = 0; this.flightCos = 1;
-    const f = trackFrame(route, 0);
+    const f = route.glideFrame(0);
     this.departureHeading=this.guideHeading=f.angle;
     this.x = f.x; this.z = f.z; this.heading = this.travelHeading = f.angle;
     this.y = this.ground = this.startY = this.data.height(this.x, this.z);
@@ -141,7 +128,7 @@ export class Descent {
   }
 
   joinLine(route,along) {
-    const f=trackFrame(route,along);
+    const f=route.glideFrame(along);
     const offset=-(this.x-f.x)*f.dz+(this.z-f.z)*f.dx;
     this.branchShiftX=this.x-(f.x-f.dz*offset);this.branchShiftZ=this.z-(f.z+f.dx*offset);
     this.edgeSpeed=this.speed*Math.sin(angleBetween(f.angle,this.travelHeading));
@@ -274,7 +261,7 @@ export class Descent {
   tick(dt, input = {}) {
     if (this.mode !== 'run' || !(dt > 0)) return;
     // The runtime supplies 90 Hz. Larger direct or replay steps use the same maximum interval.
-    const n = Math.max(1, Math.ceil(dt * 90 - 1e-7));
+    const n = Math.max(1, Math.ceil(dt / physicsStep - 1e-7));
     for (let i = 0; i < n && this.mode === 'run'; i++) this.step(dt/n, input);
   }
 
@@ -382,7 +369,7 @@ export class Descent {
     const curvature = Math.sign(this.edge) * Math.pow(load,1.28) * grip / radius;
     if (assisted) {
       const width = clamp((this.trail?.width || 38)*.47,9,31);
-      const here=trackFrame(this.route,this.along),ahead=trackFrame(this.route,this.along+Math.max(13,planarSpeed*.95));
+      const here=this.route.glideFrame(this.along),ahead=this.route.glideFrame(this.along+Math.max(13,planarSpeed*.95));
       const junction=this.activeJunction(32+planarSpeed*.62,2);
       const clear=Math.min(smooth(remaining,24,61),junction?smooth(junction.along-this.along,9,32+planarSpeed*.62):1);
       const {offset:lane,speed:laneVelocity,load:guidedArc}=this.automatic.line(planarSpeed,width,grade,crossGrade,angleBetween(here.angle,ahead.angle),clear,dt);
@@ -395,15 +382,14 @@ export class Descent {
       this.edgeSpeed = clamp(this.edgeSpeed, -planarSpeed*.75, planarSpeed*.75);
       this.offset += this.edgeSpeed * dt;
       let stride = Math.min(this.route.length-this.along,Math.sqrt(Math.max(0,planarSpeed**2-this.edgeSpeed**2))*dt);
-      let f = trackFrame(this.route,this.along+stride);
+      let f = this.route.glideFrame(this.along+stride);
       // On rejoining from a traverse the boots can be well outside the centre
       // of a bend. Its outer edge travels an extra radius × angle per step.
       if(Math.abs(this.offset)>2 && stride>.0001){
-        const previous=trackFrame(this.route,this.along);
-        const extra=-this.offset*angleBetween(previous.angle,f.angle);
+        const extra=-this.offset*angleBetween(here.angle,f.angle);
         if(extra>stride*.02){
           stride*=stride/(stride+extra);
-          f=trackFrame(this.route,this.along+stride);
+          f=this.route.glideFrame(this.along+stride);
         }
       }
       this.along+=stride;
@@ -440,7 +426,7 @@ export class Descent {
           this.lastTreeHit=this.elapsed;this.feedback.tree++;
         }
         this.x=hit.x;this.z=hit.z;this.speed*=.39;this.edgeSpeed=0;this.impact=Math.max(this.impact,.56);
-        if(assisted){const f=trackFrame(this.route,this.along);this.offset=-(this.x-f.x)*f.dz+(this.z-f.z)*f.dx;}
+        if(assisted){const f=this.route.glideFrame(this.along);this.offset=-(this.x-f.x)*f.dz+(this.z-f.z)*f.dx;}
         else {const inward=Math.min(0,fx*hit.nx+fz*hit.nz);this.travelHeading=Math.atan2(fx-1.28*inward*hit.nx,-(fz-1.28*inward*hit.nz));}
       }
     }

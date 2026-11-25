@@ -152,7 +152,12 @@ export class SkiRoute {
     Object.assign(this, raw);
     const p=this.points;
     this.distances=[0];
-    for(let i=1;i<p.length;i++) this.distances.push(this.distances[i-1]+Math.hypot(p[i][0]-p[i-1][0],p[i][1]-p[i-1][1]));
+    this.directions=[];
+    for(let i=1;i<p.length;i++){
+      const dx=p[i][0]-p[i-1][0],dz=p[i][1]-p[i-1][1],length=Math.hypot(dx,dz);
+      this.distances.push(this.distances[i-1]+length);
+      this.directions.push(length ? [dx/length,dz/length] : this.directions[i-2]||[0,-1]);
+    }
     this.length=this.distances.at(-1);
     this.startHeight=mountain.height(...p[0]);
     this.endHeight=mountain.height(...p.at(-1));
@@ -172,6 +177,27 @@ export class SkiRoute {
     const p=this.at(s), a=this.at(s-9), b=this.at(s+13);
     const dx=b.x-a.x, dz=b.z-a.z, d=Math.hypot(dx,dz)||1;
     return {...p,dx:dx/d,dz:dz/d,angle:Math.atan2(dx,-dz)};
+  }
+  glideFrame(distance) {
+    const s=clamp(distance,0,this.length),p=this.at(s),span=10;
+    let [dx,dz]=this.directions[p.index]||[0,-1];
+    // Integrate a triangular weight across each change of direction. The
+    // centre line and its tangent then describe the same curve, including on
+    // an offset ski track. The weight and curvature vanish at the blend ends.
+    let first=p.index;
+    while(first>1 && this.distances[first-1]>s-span)first--;
+    for(let i=Math.max(1,first);i<this.directions.length && this.distances[i]<s+span;i++){
+      const knot=this.distances[i],u=s-knot,radius=Math.min(span,knot,this.length-knot);
+      if(Math.abs(u)>=radius)continue;
+      const t=1-Math.abs(u)/radius;
+      const shift=radius*t*t*t/6,turn=(u<0 ? .5 : -.5)*t*t;
+      const turnX=this.directions[i][0]-this.directions[i-1][0];
+      const turnZ=this.directions[i][1]-this.directions[i-1][1];
+      p.x+=turnX*shift;p.z+=turnZ*shift;
+      dx+=turnX*turn;dz+=turnZ*turn;
+    }
+    const length=Math.hypot(dx,dz)||1;
+    return {...p,dx:dx/length,dz:dz/length,angle:Math.atan2(dx,-dz)};
   }
   closest(x,z) {
     let best=Infinity, along=0;

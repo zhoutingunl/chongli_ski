@@ -38,5 +38,29 @@ test('公网入口在压缩和兼容模式下都按块校验并从中断处续�
     assert.equal(written,undefined);assert.equal(button.hidden,false);assert.equal(calls.get(65536),3);
     interrupted=false;await button.click();
     assert.equal(written,content);assert.equal(calls.get(0),1);assert.equal(calls.get(65536),4);
+
+    for(const broken of [false,true]){
+      await t.test(`${gzip?'压缩':'兼容'}入口整包${broken?'中断后仅补缺块':'一次读取完成'}`,async()=>{
+        let whole=0,blocks=0;written=undefined;meter.value=0;
+        async function streamOrPart(url,opts){
+          if(opts.headers){
+            const start=Number(opts.headers.Range.slice(6).split('-')[0]);
+            assert.ok(start>=65536);blocks++;return fetch(url,opts);
+          }
+          whole++;
+          let first=true;
+          return new Response(new ReadableStream({pull(controller){
+            if(first){controller.enqueue(bytes.subarray(0,70000));first=false;}
+            else if(broken)controller.error(new Error('Dropped stream'));
+            else{controller.enqueue(bytes.subarray(70000));controller.close();}
+          }}));
+        }
+        await runInNewContext(code,{document,fetch:streamOrPart,Response,Blob,ReadableStream,AbortController,setTimeout,clearTimeout,
+          crypto:webcrypto,window:{crypto:webcrypto},DecompressionStream:gzip?DecompressionStream:undefined});
+        assert.equal(written,content);assert.equal(whole,1);
+        assert.equal(blocks,broken?Math.ceil(bytes.length/65536)-1:0);
+        assert.equal(meter.value,bytes.length);
+      });
+    }
   }
 });

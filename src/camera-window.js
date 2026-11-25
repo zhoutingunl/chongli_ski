@@ -33,12 +33,18 @@ export class GlideCamera {
   turnRate=0;
   lane=0;
   laneRate=0;
+  laneTarget=0;
 
   reset(heading,lane){
     this.heading=heading;
     this.turnRate=0;
+    this.resetLane(lane);
+  }
+
+  resetLane(lane){
     this.lane=lane;
     this.laneRate=0;
+    this.laneTarget=lane;
   }
 
   aim(bearing,dt){
@@ -56,10 +62,18 @@ export class GlideCamera {
     const outside=Math.max(0,Math.abs(prediction)-margin),width=margin*.23;
     const beyond=outside<width ? outside*outside/(2*width) : outside-width*.5;
     const target=Math.sign(prediction)*beyond;
-    const offset=this.lane-target,slope=this.laneRate+laneFrequency*offset;
+    const start=this.laneTarget;
+    this.laneTarget=target;
+    if(dt<=0)return this.lane;
+    // The predicted lane moves during the frame. Integrating that ramp keeps
+    // a late refresh from pulling the boom towards its final position early.
+    const velocity=(target-start)/dt;
+    const lag=2*velocity/laneFrequency;
+    const offset=this.lane-start+lag,relativeRate=this.laneRate-velocity;
+    const slope=relativeRate+laneFrequency*offset;
     const decay=Math.exp(-laneFrequency*dt);
-    this.lane=target+(offset+slope*dt)*decay;
-    this.laneRate=(this.laneRate-laneFrequency*slope*dt)*decay;
+    this.lane=target-lag+(offset+slope*dt)*decay;
+    this.laneRate=velocity+(relativeRate-laneFrequency*slope*dt)*decay;
     return this.lane;
   }
 }

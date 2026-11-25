@@ -1,6 +1,6 @@
 # 山脊之间 · 万龙与云顶
 
-河北崇礼红花梁的三维滑雪网页。万龙与云顶位于山脊两侧，在同一张地形上相连。手机横屏、竖屏和电脑键盘都可以玩。[直接体验网页版 1.21.0](https://qupfile.cloudvdn.com/chongli-ski_20261125_140842.html)
+河北崇礼红花梁的三维滑雪网页。万龙与云顶位于山脊两侧，在同一张地形上相连。手机横屏、竖屏和电脑键盘都可以玩。[直接体验网页版 1.21.1](https://qupfile.cloudvdn.com/chongli-ski_20261126_015844.html)
 
 ![万龙山顶的第一人称游戏画面，索道站前的雪面上标有金龙道和长龙道](docs/media/wanlong-summit.jpg)
 
@@ -35,7 +35,7 @@
 
 ![同机位的四组游戏截帧，依次为莫奈雪境、水墨崇礼、云海穿行与梵高星空](docs/media/scenery-trial.webp)
 
-打开三索专用入口，点「三索上站试景」，会从真实索道上站的固定机位进入水墨崇礼。六种艺术画境都可以点「看近树」，端详同一株树的枝条、树皮和覆雪。点「原景对照」会保留当前机位与光雪，点「回滑手机位」回到原处。[万龙三索上站试景](https://qupfile.cloudvdn.com/chongli-ski_20261125_140842.html#sansuo)
+打开三索专用入口，点「三索上站试景」，会从真实索道上站的固定机位进入水墨崇礼。六种艺术画境都可以点「看近树」，端详同一株树的枝条、树皮和覆雪。点「原景对照」会保留当前机位与光雪，点「回滑手机位」回到原处。[万龙三索上站试景](https://qupfile.cloudvdn.com/chongli-ski_20261126_015844.html#sansuo)
 
 ![六种艺术画境在同一站台及同一株近树的游戏实拍](docs/media/third-lift-art.webp)
 
@@ -86,6 +86,7 @@ npm run preview
 | --- | --- |
 | [navigation.test.js](test/navigation.test.js) | 核对两座雪场山顶的镜头和下坡方向，验证单、双板松键滑行、进道前连续改道、岔口路标顺序、反向蹬坡、原地转身和 64 条公众雪道的起终点信息 |
 | [descent.test.js](test/descent.test.js) | 在已知坡度上比较刹车、蓄力起跳和道边陷雪，验证单板与双板自动蹬坡、玩家接管、抵达山脚后停留及重滑 |
+| [descent-frames.test.js](test/descent-frames.test.js) 和 [camera-window.test.js](test/camera-window.test.js) | 用芍药花实测路线检查不同刷新率、漏帧、换道及落地时的追尾位置，验证横竖屏的回转跟随 |
 | [map-routes.test.js](test/map-routes.test.js) | 按四项指标双向排序、雪道自身的长度和垂降、途中改选起点及继续滑行 |
 | [piste-progress.test.js](test/piste-progress.test.js) 和 [ski-engagement.test.js](test/ski-engagement.test.js) | 两条跨场联滑线实际滑行、标记清除与撤销、旧云存档合并与累计数据 |
 | [snow-terrain.test.js](test/snow-terrain.test.js) | 细雪网格与远处地表连续覆盖、移动换块和切换画质、U 型池和蘑菇道 |

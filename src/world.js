@@ -2,6 +2,7 @@ import {trialClimate,blendScenery,sceneById,cloudFloor,cloudRoof} from './scener
 import {sceneryUniforms,applySceneryUniforms} from './scenic-materials.js';
 import {createIceDust} from './ice-dust.js';
 import {GlideCamera,cameraWindowMetres,previewGlide,usesCameraWindow} from './camera-window.js';
+import {DescentFrames} from './descent-frames.js';
 import {nearbyLiftStation} from './lift-access.js';
 import {placeLiftSupports} from './lift-supports.js';
 import * as THREE from 'three';
@@ -82,8 +83,9 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
   let renderLighting,lightingLimited=false;
   let rider=createRider(opts);scene.add(rider.group);bindScenicBuildings([rider.group],scenic,true);
   const sim=new Descent(data,opts,rider.dimensions);
+  const descentFrames=new DescentFrames(sim);
   const yawQ=new THREE.Quaternion(),tiltQ=new THREE.Quaternion(),surfNorm=new THREE.Vector3(),want=new THREE.Vector3(),look=new THREE.Vector3(),target=new THREE.Vector3();
-  let active=false,paused=false,ride=null,clock=0,prev=0,lastUI=0,simLag=0,treesLag=1,camHeading=0,snap=true,frame=0,graphicsScale=1;
+  let active=false,paused=false,ride=null,clock=0,prev=0,lastUI=0,treesLag=1,camHeading=0,snap=true,frame=0,graphicsScale=1;
   let station=null,baseTurn=null,videoCanvasLocked=false;
   let conditions,climateAge=1;
   const bodyOrigin=new THREE.Vector3(),lastRiderOrigin=new THREE.Vector3(),lastOrigin=new THREE.Vector3(),bodyStep=new THREE.Vector3();
@@ -157,8 +159,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     renderer.toneMappingExposure=e.exposure;
   }
   environment();
-  function updateAvatar(dt){
-    const p=sim;
+  function updateAvatar(dt,p=sim){
     rider.group.visible=!ride;
     const embodied= (!station || station.view==='wide' || opts.view==='first');
     rider.setVisibility(embodied&&opts.view==='first'?'first':embodied&&opts.view==='tips'?'tips':'body');
@@ -172,8 +173,8 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     rider.update(p,dt,clock);
     surface.setRiderShadow(!ride&&(!renderer.shadowMap.enabled||!sun.castShadow||opts.view==='first'||opts.view==='tips')?rider:null);
   }
-  function moveCamera(dt){
-    const p=sim,mode=opts.view,run=p.mode==='run';
+  function moveCamera(dt,p=sim){
+    const mode=opts.view,run=p.mode==='run';
     const bodyScale=rider.dimensions.scale;
     const travel=p.travelHeading??p.heading,fast=clamp(p.speed/22,0,1);
     const first=mode==='first'&&!ride;
@@ -188,9 +189,8 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
       if(!previewRoute||snap)glideCamera.reset(snap?bearing:camHeading,p.offset);
       else if(previewRoute!==p.route){
         // Keep the framing in world space when a branch changes its local centre line.
-        glideCamera.lane=p.offset+(lastOrigin.x-lastRiderOrigin.x)*Math.cos(p.guideHeading)+
-          (lastOrigin.z-lastRiderOrigin.z)*Math.sin(p.guideHeading);
-        glideCamera.laneRate=0;
+        glideCamera.resetLane(p.offset+(lastOrigin.x-lastRiderOrigin.x)*Math.cos(p.guideHeading)+
+          (lastOrigin.z-lastRiderOrigin.z)*Math.sin(p.guideHeading));
       }
       camHeading=glideCamera.aim(bearing,dt);
     }else{
@@ -348,10 +348,10 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
   function resetScene(route){
     sim.start(route);station=null;ride=null;paused=false;active=true;resetLook();
     baseTurn=null;sim.pivotRate=0;
-    simLag=0;snap=true;treesLag=1;lastUI=prev=0;
+    snap=true;treesLag=1;lastUI=prev=0;
     input.trim=input.steer=0;input.boost=input.brake=false;fx.reset();snowAir.reset();
   }
-  function showScene(){updateAvatar(0);moveCamera(0);refreshLOD();kick();}
+  function showScene(){descentFrames.reset();updateAvatar(0);moveCamera(0);refreshLOD();kick();}
   function start(route){route=navigation.safeRun(route);resetScene(route);environment();details.setRoute(route);showScene();}
   function point(xz,height){return new THREE.Vector3(xz[0],data.height(...xz)+height,xz[1]);}
   function stationPortrait(lift,end){
@@ -548,7 +548,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
         if(ride.dir>0?ride.t>=.997:ride.t<=.003)leaveRide();
       }else if(sim.mode==='run'){
         details.setRoute(sim.route);
-        simLag+=dt;while(simLag>=1/90){sim.tick(1/90,input);simLag-=1/90;}
+        descentFrames.advance(dt,input);
         if(sim.mode==='finished'){
           parkFacing(camHeading+lookYaw,sim.travelHeading);
           details.setRoute(null);onEvent('finish',sim);
@@ -556,9 +556,13 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
       }
       if(baseTurn)turnInPlace(dt);
       for(const l of lifts)if(l.group.visible)l.update(clock,camera,ride?.lift===l ? ride.t : null,ride?.dir);
-      updateAvatar(dt);fx.update(sim,dt,conditions,camera.position,rider.dimensions);
     }
-    if(!trial?.frozen)moveCamera(dt);
+    const pose=opts.view==='follow'?descentFrames.chasePose():sim;
+    if(!paused){
+      updateAvatar(dt,pose);
+      fx.update(pose,dt,conditions,camera.position,rider.dimensions);
+    }
+    if(!trial?.frozen)moveCamera(dt,pose);
     treesLag+=dt;if(treesLag>.40){refreshLOD();treesLag=0;}
     if(trial?.frozen&&trial.fromThirdLift)trailGuide.hide();
     else trailGuide.update(sim,navigation,opts.language,camera);
@@ -625,11 +629,11 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     continueAtBase(){
       if(!sim.continueAtBase())return false;
       baseTurn=null;sim.pivotRate=0;camHeading=sim.travelHeading;resetLook();
-      fx.reset();simLag=0;snap=true;treesLag=1;details.setRoute(sim.route);showScene();return true;
+      fx.reset();snap=true;treesLag=1;details.setRoute(sim.route);showScene();return true;
     },
     recoverToPiste(){
       if(!sim.recoverToPiste())return false;
-      resetLook();fx.reset();snowAir.reset();details.setRoute(sim.route);simLag=0;snap=true;treesLag=1;
+      resetLook();fx.reset();snowAir.reset();details.setRoute(sim.route);snap=true;treesLag=1;
       showScene();return true;
     },
     get nearbyStation(){const n=nearestStation();return n?{name:n.lift.meta.name,end:n.end}:null;},

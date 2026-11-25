@@ -27,6 +27,28 @@ test('沿路线预看弯道，进入拐点前已经开始转动，两侧方向�
   assert.ok(Math.abs(course(115)-Math.PI/2)<.001);
 });
 
+test('横竖屏回转时，漏帧与高刷对同一段匀速横移给出相同的镜头位置和速度',()=>{
+  for(const aspect of [393/760,760/393]){
+    const margin=cameraWindowMetres(60,aspect,4.3);
+    const run=intervals=>{
+      const c=new GlideCamera();
+      c.followLane(3,margin,0);
+      let time=0,i=0;
+      while(time<1.2){
+        const dt=Math.min(1.2-time,intervals[i++%intervals.length]);time+=dt;
+        c.followLane(3+time*4,margin,dt);
+      }
+      return c;
+    };
+    const reference=run([1/120]);
+    for(const intervals of [[1/30],[1/60],[1/60,1/20,1/30]]){
+      const camera=run(intervals);
+      assert.ok(Math.abs(camera.lane-reference.lane)<1e-8);
+      assert.ok(Math.abs(camera.laneRate-reference.laneRate)<1e-8);
+    }
+  }
+});
+
 test('回转预测接续实测板速和侧移，在换刃前预见反方向的位移',()=>{
   const a=new AutomaticTurns(),speed=18,offset=3.85,lateral=.15;
   a.radius=12;a.phase=Math.PI/2-.025;a.amplitude=4;

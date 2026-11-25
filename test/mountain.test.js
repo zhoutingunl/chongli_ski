@@ -48,6 +48,30 @@ test('滑手位置能投影到最近的雪道段或端点', () => {
   assert.deepEqual(route.closest(36, -48), {distance: 10, along: 70});
 });
 
+test('循线滑过测绘折点和相邻短弯，雪板行进方向与弧线相切，内外侧的速度都连续', () => {
+  const bends=new SkiRoute({points:[[0,0],[0,-4],[0,-40],[16,-54],[22,-52],[22,-52],[32,-46],[35,-70]]},field);
+  const xy=(s,offset)=>{
+    const f=bends.glideFrame(s);
+    return [f.x-f.dz*offset,f.z+f.dx*offset];
+  };
+  assert.deepEqual(xy(0,0),bends.points[0]);
+  assert.deepEqual(xy(bends.length,0),bends.points.at(-1));
+  const h=.0005;
+  for(const knot of bends.distances.slice(1,-1)){
+    for(const s of [knot-10,knot,knot+10].filter(s=>s>h&&s<bends.length-h)){
+      for(const offset of [-4,0,4]){
+        const a=xy(s-h,offset),b=xy(s,offset),c=xy(s+h,offset);
+        const kink=Math.hypot(c[0]-2*b[0]+a[0],c[1]-2*b[1]+a[1])/h;
+        assert.ok(kink<.002,`lane ${offset} at ${s} m changed velocity by ${kink}`);
+        if(offset===0){
+          const frame=bends.glideFrame(s),vx=c[0]-a[0],vz=c[1]-a[1];
+          assert.ok((vx*frame.dx+vz*frame.dz)/Math.hypot(vx,vz)>.999999);
+        }
+      }
+    }
+  }
+});
+
 test('雪场建筑和横跨索引格线的树干都把滑手推出障碍边界', () => {
   const obstacles = new ObstacleIndex([{footprint: [[-35, -10], [-20, -10], [-20, 10], [-35, 10]]}]);
   obstacles.tree(32, 45, 3);

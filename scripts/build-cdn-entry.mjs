@@ -19,11 +19,41 @@ async function openGame(files){
   const zipped=typeof DecompressionStream==='function';
   const file=zipped?files.compressed:files.html;
   const block=64*1024,parts=new Array(Math.ceil(file.bytes/block));
-  let received=0;
+  let received=0,started=false;
   meter.max=file.bytes;
-  function update(){
-    meter.value=received;
-    status.textContent=Math.round(received*100/file.bytes)+'%';
+  function update(bytes=received){
+    meter.value=bytes;
+    status.textContent=Math.round(bytes*100/file.bytes)+'%';
+  }
+  // One progressing response is usually faster on a phone than many short
+  // requests competing for bandwidth. Keep completed blocks if it stalls.
+  async function readStream(){
+    if(typeof ReadableStream!=='function')return;
+    const controller=new AbortController(),buffer=new Uint8Array(file.bytes);
+    let offset=0,timer;
+    const watch=()=>{clearTimeout(timer);timer=setTimeout(()=>controller.abort(),15000);};
+    try{
+      watch();
+      const response=await fetch(file.name,{signal:controller.signal});
+      if(response.status!==200||!response.body?.getReader)return;
+      const reader=response.body.getReader();
+      while(offset<buffer.length){
+        watch();
+        const {value,done}=await reader.read();
+        if(done)break;
+        buffer.set(value,offset);offset+=value.length;update(offset);
+      }
+    }catch{
+      // The range workers below can resume even after a partial response.
+    }finally{
+      clearTimeout(timer);controller.abort();
+      for(let i=0;i<parts.length;i++){
+        const start=i*block,end=Math.min(start+block,file.bytes);
+        if(end>offset)break;
+        parts[i]=buffer.subarray(start,end);received=end;
+      }
+      update();
+    }
   }
   async function fetchPart(i){
     const start=i*block,end=Math.min(start+block,file.bytes)-1;
@@ -54,7 +84,8 @@ async function openGame(files){
     }
     update();
     try{
-      await Promise.all(Array.from({length:6},worker));
+      if(!started){started=true;await readStream();}
+      if(received<file.bytes)await Promise.all(Array.from({length:3},worker));
       if(failed)throw Error('Download interrupted');
       const blob=new Blob(parts);
       if(window.crypto?.subtle){
