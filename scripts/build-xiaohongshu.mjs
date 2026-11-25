@@ -121,6 +121,7 @@ try{
   await Promise.all([
     build({...common,entryPoints:['src/main.js'],outfile:path.join(stage,'app.js'),banner:{js:compatibility}}),
     build({...common,entryPoints:['src/world.js'],outfile:path.join(stage,'world.js'),globalName:'Ridgeline3D'}),
+    ...(await readdir(path.join(root,'public'))).filter(file=>/^chongli-(grove|paint)-[\w-]+\.webp$/.test(file)).map(file=>copyFile(path.join(root,'public',file),path.join(stage,file))),
     copyFile(path.join(root,'public/favicon.svg'),path.join(stage,'favicon.svg')),
     ...['art','geo','resort'].map(async folder=>{
       const from=path.join(root,'public/assets',folder),to=path.join(stage,'assets',folder);

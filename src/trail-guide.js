@@ -293,5 +293,5 @@ export function createTrailGuide(scene,data,renderer,progress,detail){
     root.visible=mesh.visible=batch.geometry.drawRange.count>0;
   }
   function dispose(){mesh?.geometry.dispose();ink.dispose();root.removeFromParent();}
-  return {update,dispose};
+  return {update,dispose,hide(){root.visible=false;}};
 }

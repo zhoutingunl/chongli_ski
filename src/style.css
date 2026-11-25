@@ -331,3 +331,5 @@ html[lang=en] .start-content h1{font-family:var(--latin);font-size:clamp(42px,6.
 .scene-console #capture-save{grid-column:1/-1;margin:0}
 .scene-console{width:100%;max-width:640px}
 .no-flex-gap .scene-buttons button+button,.no-flex-gap .scene-options button+button{margin-left:5px}
+
+#grove-status{grid-column:1/-1;color:#efdfbb;font:12px/1.3 var(--sans)}

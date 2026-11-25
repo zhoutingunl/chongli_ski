@@ -1,6 +1,6 @@
 import './style.css';
 import {SceneryTrial,trialRouteId} from './scenery.js';
-import {paintScenicControls} from './scenic-controls.js';
+import {paintScenicControls,groveFeedback} from './scenic-controls.js';
 import {glyph,emblem,viewNames,viewPicture} from './icons.js';
 import {loadMountain,clamp,resortName,formatTime,difficultyName} from './mountain.js';
 import {TrailMap} from './map.js';
@@ -143,7 +143,7 @@ function setupText(){
   $('#rider-age').textContent=t('5–6 岁','Ages 5–6');
   function face(sel,icon,txt){for(const el of $$(sel))el.innerHTML=glyph(icon,18)+txt;}
   face('[data-act="start"]','mountain',t('进入山顶','Enter summit'));face('.start-actions [data-act="help"]','controls',t('操作指南','Controls'));
-  face('.trial-start','eye',t('同趟试景','Scenery trial'));
+  face('.trial-start','eye',location.hash==='#sansuo'?t('三索上站试景','Third lift art study'):t('同趟试景','Scenery trial'));
   face('.mini-heading,.narrow-map','map',label('雪场地图'));
   $('.footer-meta').innerHTML=glyph('mountain',16)+label('红花梁')+' <b>2,110 m</b>';
   face('.rotate-note','rotate',t('横屏滑行更开阔','Rotate for a wider view'));$('#map-preview').setAttribute('aria-label',t('打开雪场地图','Open trail map'));
@@ -341,6 +341,7 @@ function checkpoint(){
   if(screen==='run'&&world)saveActivity(world.sim,true);
 }
 function worldEvent(type,arg){
+  if(type==='grove'){groveFeedback(arg);paintScenicControls(trial,screen,world?.sim,prefs);return;}
   if(screen==='run'&&(type==='hud'||type==='finish'))saveActivity(arg,type==='finish');
   if(type==='hud'&&screen==='run'&&trial.active&&trial.touring&&!trial.frozen){
     const projected=arg.route===trial.route?{distance:0,along:arg.along}:trial.route.closest(arg.x,arg.z);
@@ -787,7 +788,7 @@ function paintRecordButton(){
   const seconds=recording?Math.min(GAME_CLIP_SECONDS,Math.floor((performance.now()-recordStart)/1000)):0;
   status.hidden=!recording;
   control.hidden=!recordable();
-  const film=$('#scene-film');film.hidden=!recordable();film.textContent=recording?t('停止录像','Stop recording'):t('录像','Record');
+  const film=$('#scene-film');film.hidden=!recordable();film.setAttribute('aria-pressed',String(!!recording));film.textContent=recording?t('停止录像','Stop recording'):t('录像','Record');
   const label=recording?t('停止录像','Stop recording'):t('开始录像','Start recording');
   for(const item of [status,control]){
     item.setAttribute('aria-pressed',String(!!recording));
@@ -910,7 +911,7 @@ function openTrial(touring=false){
 function leaveTrialDesk(play){
   if(!play)endTrial();
   else{
-    trial.sky=false;trial.frozen=false;world.previewScenery(trial);
+    trial.sky=false;trial.tree=false;trial.fromThirdLift=false;trial.frozen=false;world.previewScenery(trial);
   }
   if(play&&screen==='trailhead')launch(world.sim.route);
   else world.pause(false);
@@ -919,15 +920,23 @@ function leaveTrialDesk(play){
 }
 function scenicAction(a){
   if(a==='scenery-start'){
-    return begin(trialRouteId,false,true).then(()=>{if(screen==='trailhead'&&!page)openTrial(true);});
+    return begin(trialRouteId,false,true).then(()=>{
+      if(screen!=='trailhead'||page)return;
+      if(location.hash==='#sansuo'&&world.stageThirdLift?.()){
+        trial.enter(world.sim.route);trial.select('ink');trial.fromThirdLift=true;trial.example=true;openTrial();return;
+      }
+      openTrial(true);
+    });
   }
   if(a==='scenery-open')return openTrial();
   if(!trial.frozen)return;
   if(a==='scenery-end'||a==='scenery-play')return leaveTrialDesk(a==='scenery-play');
+  if(a==='scenery-retry'){world.retryArt();return;}
   if(a==='scenery-prev'||a==='scenery-next')trial.step(a==='scenery-next'?1:-1);
   if(a==='scenery-compare')trial.original=!trial.original;
   if(a==='scenery-example')trial.example=!trial.example;
-  if(a==='scenery-sky')trial.sky=trial.sky===trial.id?false:trial.id;
+  if(a==='scenery-sky'){trial.tree=false;trial.sky=trial.sky===trial.id?false:trial.id;}
+  if(a==='scenery-tree'){trial.sky=false;trial.tree=!trial.tree;}
   if(a==='scenery-tour'){
     trial.touring=!trial.touring;trial.original=false;
     trial.advance(trial.route.closest(world.sim.x,world.sim.z).along);

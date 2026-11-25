@@ -13,3 +13,5 @@ Use case: photorealistic-natural. One wide 3:1 transparent RGBA game foliage atl
 snow-normal.webp 来自 Rob Tuytel 的 Snow 02，Poly Haven，CC0。https://polyhaven.com/a/snow_02
 
 建筑材质采用 Poly Haven 的 CC0 木板、石墙、混凝土素材，以及程序生成的招牌、玻璃与室内照明。https://polyhaven.com/license
+
+1.21 艺术画境使用原创程序建模的落叶松、云杉与白桦。远景树图集用同一批三维枝条和积雪几何烘焙。梵高星空的环幕与钴蓝雪面、莫奈雪境的粉紫雪面由 ImageGen 为本项目生成。万龙三索离线效果图用于视觉对照。

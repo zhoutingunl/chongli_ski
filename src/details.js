@@ -509,7 +509,7 @@ function powderWake(scene,data,random,uniforms,updateScreen){
 
 export function makeSnowFX(scene,data,snowAir){
   const random=randomGenerator(6127),screen={value:720},night={value:0},viewport=new THREE.Vector2();
-  const uniforms={screen,night,solar:{value:0},snowSky:{value:0},sunColor:{value:new THREE.Color()},haze:{value:0},keyDir:{value:new THREE.Vector3(.36,.75,.55).normalize()},snowGrain:{value:powderGrain()}};
+  const uniforms={screen,night,squall:{value:0},solar:{value:0},snowSky:{value:0},sunColor:{value:new THREE.Color()},haze:{value:0},keyDir:{value:new THREE.Vector3(.36,.75,.55).normalize()},snowGrain:{value:powderGrain()}};
   const updateScreen=renderer=>{screen.value=renderer.getDrawingBufferSize(viewport).y;};
   const tracks=snowTracks(scene,data,uniforms),fan=snowFan(scene,data,uniforms),particles=snowParticles(scene,data,random,uniforms,updateScreen);
   const wake=powderWake(scene,data,randomGenerator(6419),uniforms,updateScreen);
@@ -521,12 +521,15 @@ export function makeSnowFX(scene,data,snowAir){
   const fg=new THREE.BufferGeometry();fg.setAttribute('position',new THREE.BufferAttribute(flakes,3).setUsage(THREE.DynamicDrawUsage));
   fg.setAttribute('speck',new THREE.BufferAttribute(specks,3));fg.setDrawRange(0,0);
   const fallMat=new THREE.ShaderMaterial({transparent:true,depthWrite:false,uniforms,
-    vertexShader:`attribute vec3 speck;uniform float screen;varying float opacity,scatter;uniform vec3 keyDir;
+    vertexShader:`attribute vec3 speck;uniform float screen,squall;varying vec2 flakeAxis;varying float opacity,scatter;uniform vec3 keyDir;
       void main(){vec4 eye=modelViewMatrix*vec4(position,1.);gl_Position=projectionMatrix*eye;
       scatter=pow(max(0.,dot(normalize(position),keyDir)),4.);
-      gl_PointSize=clamp(speck.x*screen*.45*projectionMatrix[1][1]/max(.1,-eye.z),.65,8.);
+      vec2 motion=(mat3(viewMatrix)*vec3(.90,-.58,.28)).xy;
+      flakeAxis=normalize(vec2(motion.x,-motion.y)+vec2(.0001));
+      gl_PointSize=clamp(speck.x*screen*.45*projectionMatrix[1][1]/max(.1,-eye.z),.65,8.)*(1.+2.3*squall);
       opacity=speck.z*smoothstep(.65,2.3,-eye.z)*(1.-smoothstep(17.,25.,-eye.z));}`,
-    fragmentShader:`uniform float night,snowSky;uniform vec3 sunColor;varying float opacity,scatter;void main(){vec2 p=gl_PointCoord-.5;
+    fragmentShader:`uniform float night,snowSky,squall;uniform vec3 sunColor;varying vec2 flakeAxis;varying float opacity,scatter;void main(){vec2 p=gl_PointCoord-.5;
+      p=mix(p,vec2(dot(p,flakeAxis),dot(p,vec2(-flakeAxis.y,flakeAxis.x))*3.5),squall);
       float a=(1.-smoothstep(.2,.5,length(p*vec2(1.05,.88))))*opacity;
       gl_FragColor=vec4(mix(vec3(.87,.92,1.),vec3(.48,.59,.77),night)+sunColor*snowSky*(.10+.55*scatter),a);
       #include <tonemapping_fragment>
@@ -539,6 +542,7 @@ export function makeSnowFX(scene,data,snowAir){
   function snowfall(dt,weather,view) {
     const type=weather?.resolvedWeather??weather;
     const amount=clamp(weather?.snowAmount??(type==='heavy'?1:type==='light'||type==='snow' ? .34:0),0,1);
+    uniforms.squall.value=weather?.sceneId==='squall'?amount*(weather.sceneStrength??1):0;
     const n=type!=='clear'&&amount>.002?Math.max(3,Math.floor(flakeCount*amount**1.19)):0;
     falling.visible=!!n;fg.setDrawRange(0,n);
     if(!n||!view){hadSnow=false;return;}
@@ -547,7 +551,7 @@ export function makeSnowFX(scene,data,snowAir){
     falling.position.copy(view);oldView.copy(view);hadSnow=true;windTime+=dt;
     for(let i=0;i<n;i++){
       const k=i*3,w=specks[k+1],gust=Math.sin(windTime*1.7+w)*.29;
-      flakes[k]=wrap(flakes[k]+dx+dt*(.20+3.3*wind+gust),39,-19.5);
+      flakes[k]=wrap(flakes[k]+dx+dt*(.20+3.3*wind+gust+uniforms.squall.value*4.1),39,-19.5);
       flakes[k+1]=wrap(flakes[k+1]+dy-dt*(.82+specks[k]*15+wind*.63),24,-9);
       flakes[k+2]=wrap(flakes[k+2]+dz+dt*(wind*.78+Math.cos(w+windTime)*.18),39,-19.5);
     }

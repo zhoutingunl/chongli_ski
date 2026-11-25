@@ -19,8 +19,8 @@ export function createIceDust(scene){
         float edge=1.-smoothstep(10.5,15.9,max(max(abs(local.x),abs(local.y)),abs(local.z)));
         float wink=.5+.5*sin(seed*9.17+phase*(1.1+.6*sin(seed)));
         float toward=max(0.,dot(normalize(local),solar));
-        glimmer=strength*edge*(.23+1.19*pow(wink,3.))*(.57+.43*toward);
-        core=fract(seed*2.61);gl_PointSize=clamp(1.65+pixel*(.039+.044*core)/max(1.,-eye.z),1.65,7.1);
+        glimmer=strength*edge*(.04+1.48*pow(wink,6.))*(.24+.76*pow(toward,1.3));
+        core=fract(seed*2.61);gl_PointSize=clamp(1.1+pixel*(.019+.032*core)/max(1.,-eye.z),1.1,5.4);
         gl_Position=projectionMatrix*eye;
       }`,
     fragmentShader:`varying float glimmer,core;void main(){

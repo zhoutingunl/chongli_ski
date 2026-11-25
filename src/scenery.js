@@ -10,12 +10,12 @@ function scene(id,group,name,en,time,weather,note,english,look='ridge'){
 }
 export const scenery=[
   scene('gold',natural,'日照金山','Alpenglow','sunset','clear','看对面山脊的最后一道暖光和背阴沟。','Compare the last warm ridge with the shaded gullies.'),
-  scene('monet',art,'莫奈雪境','Impressionist snow','day','clear','留意板前的暖白雪、蓝紫投影和顺坡的短笔触。','Look for warm snow, violet shadows and short strokes on the piste.'),
+  scene('monet',art,'莫奈雪境','Impressionist snow','day','clear','近松枝头的粉杏色积雪，和脚下蓝紫阴影里的短笔触呼应。','Look for apricot snow on the boughs and broken lilac brushwork under the skis.'),
   scene('ink',art,'水墨崇礼','Chongli in ink','day','light','近松浓墨，远山淡墨。可在岔口检查雪上道名。','Dark pines fade into ink-wash ridges. Check the lettering at a fork.'),
   scene('cloudsea',natural,'云海穿行','Through the cloud sea','evening','clear','云层在海拔 1,830–1,870 米。山顶俯看，滑过玉龙道时穿云。','Look down from the ridge, then cross the 1,830–1,870 m cloud deck on Jade Dragon.'),
   scene('cloudbreak',natural,'云隙光','Cloudbreak','day','clear','看云隙投下的光斑沿坡移动，远近林带随之明暗。','Watch breaks in the clouds send moving pools of light across the snow and trees.'),
   scene('lamps',natural,'灯光夜场','Floodlit pistes','night','clear','沿道边灯具看暖白光池与远处站房。','Follow the pools of lamplight towards the illuminated base.'),
-  scene('starry',art,'梵高星空','Painted starry night','night','clear','抬头看钴蓝旋纹与金色星环，转身可看它们留在同一片天空。','Look up at cobalt brushwork and ochre star halos anchored in the sky.','stars'),
+  scene('starry',art,'梵高星空','Painted starry night','night','clear','树梢卷向一侧；钴蓝笔触从雪坡延伸到旋转的星空。','Curled boughs and cobalt strokes on the piste echo the swirls around the stars.','stars'),
   scene('woodblock',art,'浮世绘雪国','Snow-country woodcut','day','light','看分色的山坡、深蓝松枝和山脊上的细墨边。','Look for printed colour blocks, indigo branches and fine ridge rims.'),
   scene('galaxy',art,'星河之下','Beneath the Milky Way','night','clear','抬头沿星河寻找明亮星云和中间断续的暗尘带。','Trace the luminous galactic arm and its broken dark dust lane.','galaxy'),
   scene('mineral',art,'千里江山','Blue-green mountains','evening','clear','脚下仍是白雪，远坡由石绿过渡到石青，向阳脊略带赭金。','White foreground snow gives way to malachite, azurite and ochre ridges.'),
@@ -36,7 +36,7 @@ export class SceneryTrial {
   constructor(){this.close();}
   close(){
     this.active=false;this.id=scenery[0].id;this.frozen=false;this.original=false;
-    this.touring=false;this.example=false;this.sky=false;this.route=null;this.fraction=0;
+    this.tree=false;this.hasTree=false;this.fromThirdLift=false;this.touring=false;this.example=false;this.sky=false;this.route=null;this.fraction=0;
   }
   enter(route,touring=false,along=0){
     this.close();this.active=true;this.frozen=true;this.route=route;this.touring=touring;this.example=touring;
@@ -45,6 +45,7 @@ export class SceneryTrial {
   select(id){
     if(!sceneById.has(id))return;
     this.id=id;this.touring=false;this.original=false;
+    if(this.preset.group!=='art')this.tree=false;
   }
   step(direction){
     const n=scenery.length,index=scenery.findIndex(s=>s.id===this.id);
@@ -77,13 +78,20 @@ export function trialClimate(trial,opts,climate){
     case 'cloudbreak':e.cloud=Math.max(e.cloud,.64*e.sunAmount);e.sky=blendColor(e.sky,0x405f83,e.sunAmount);break;
     case 'lamps':e.lampAmount*=1.22;break;
     case 'moon':e.lampAmount*=1-.70*e.nightAmount;e.ambient*=1-.07*e.nightAmount;break;
+    case 'monet':e.fog=blendColor(e.fog,0xd8bac8,.54*e.sunAmount);break;
+    case 'mineral':e.fog=blendColor(e.fog,0xb9bd9b,.38*e.sunAmount);break;
+    case 'woodblock':e.fog=blendColor(e.fog,0xacb4b3,.42*e.sunAmount);break;
+    case 'ink':e.fog=blendColor(e.fog,0xdadbd3,.46*e.sunAmount);break;
     case 'spindrift':e.wind=Math.max(e.wind,.63+.27*gust);break;
     case 'squall':
       e.sceneStrength=e.snowAmount;
       e.wind=Math.max(e.wind,gust*.96*e.snowAmount);
       e.density*=1+e.snowAmount*(gust*.92-.43);
       e.snowAmount*=.58+.42*gust;break;
-    case 'starry':case 'galaxy':e.cloud*=1-.70*e.starAmount;break;
+    case 'starry':case 'galaxy':
+      e.cloud*=1-.74*e.starAmount;
+      e.fog=blendColor(e.fog,p.id==='starry'?0x253e7b:0x17253e,e.nightAmount*.64);
+      break;
   }
   return e;
 }

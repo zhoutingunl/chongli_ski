@@ -42,7 +42,8 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     shadowTarget.setFromMatrixPosition(light.target.matrixWorld);
     shadowOrigin.setFromMatrixPosition(light.matrixWorld).sub(shadowTarget);
     const flat=Math.hypot(shadowOrigin.x,shadowOrigin.z);
-    shadowOrigin.y=Math.max(shadowOrigin.y,.55*flat);
+    const minimum=conditions?.sceneId==='moon'?.34:.55;
+    shadowOrigin.y=Math.max(shadowOrigin.y,minimum*flat);
     shadowOrigin.setLength(143).add(shadowTarget);
     shadowProjector.matrixWorld.makeTranslation(shadowOrigin);
     updateShadow(shadowProjector);
@@ -53,7 +54,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
   const sky=createSky(scene,scenic),source=new THREE.Vector3();
   let forest,surface;
   onProgress('铺展雪道与远山');
-  await Promise.all([buildSurface(scene,data,scenic).then(s=>{surface=s;}),plantForest(scene,data,scenic).then(f=>{forest=f;})]);
+  await Promise.all([buildSurface(scene,data,scenic).then(s=>{surface=s;}),plantForest(scene,data,scenic,(id,state)=>{onEvent('grove',{id,state});kick();}).then(f=>{forest=f;})]);
   onProgress('装配雪具与索道');await new Promise(r=>setTimeout(r,0));
   const rotations={wanlong:{lodge:-2.92,hall:.17},genting:{lodge:1.72,hall:-1.86}};
   const landmarks=[],landmarkViews=new Map();
@@ -79,7 +80,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
   const trailGuide=createTrailGuide(scene,data,renderer,pisteProgress,surface.detail);
   const snowAir=createSnowAir(scene,data),fx=makeSnowFX(scene,data,snowAir);
   let renderLighting,lightingLimited=false;
-  let rider=createRider(opts);scene.add(rider.group);
+  let rider=createRider(opts);scene.add(rider.group);bindScenicBuildings([rider.group],scenic,true);
   const sim=new Descent(data,opts,rider.dimensions);
   const yawQ=new THREE.Quaternion(),tiltQ=new THREE.Quaternion(),surfNorm=new THREE.Vector3(),want=new THREE.Vector3(),look=new THREE.Vector3(),target=new THREE.Vector3();
   let active=false,paused=false,ride=null,clock=0,prev=0,lastUI=0,simLag=0,treesLag=1,camHeading=0,snap=true,frame=0,graphicsScale=1;
@@ -147,7 +148,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     applySceneryUniforms(scenic,e);iceDust(e,isMiniTool||opts.quality==='lite');
     sky.apply(e);forest.setLight(e);surface.setLight(e);setResortNight(e.lampAmount);
     scene.fog.color.set(e.fog);scene.fog.density=e.density*(.69+.31*e.snowAmount);sun.color.set(e.sun);sun.intensity=e.light;
-    sun.shadow.intensity=.42+.42*THREE.MathUtils.smoothstep(e.dir[1],.08,.55);
+    sun.shadow.intensity=(e.sceneId==='moon'?.56:.42)+.42*THREE.MathUtils.smoothstep(e.dir[1],.08,.55);
     if(e.sceneId==='cloudsea'){
       const depth=Math.min(camera.position.y-cloudFloor,cloudRoof-camera.position.y);
       scene.fog.density+=.0016*THREE.MathUtils.smoothstep(depth,0,12)*(e.sceneStrength??1);
@@ -447,7 +448,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     }
     onEvent('disembark',{side,route:sim.route,mode:sim.mode,end});
   }
-  let heldCamera=null,framedId=null;
+  let heldCamera=null,heldEye=null,framedId=null;
   const framedCamera=new THREE.Quaternion();
   const previewTarget=new THREE.Vector3();
   // Find an open valley view from the held camera, without moving the athlete.
@@ -472,16 +473,42 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     }
     return previewTarget.set(Math.sin(azimuth),pitch,Math.cos(azimuth));
   }
+  function stageThirdLift(){
+    const lift=lifts.find(item=>item.meta.id==='w1368988312');
+    const place=lift&&navigation.upperStation(lift.meta);
+    if(!place)return false;
+    stopAt(place.route,place,'wanlong',lift,'top',false);
+    const tree=forest.vista(sim.x,sim.y,sim.z,data.height);
+    const valley=tree?new THREE.Vector3(tree.x,0,tree.z):aimAtValley().clone();valley.y=0;valley.normalize();
+    const right=new THREE.Vector3(-valley.z,0,valley.x);
+    const eye=new THREE.Vector3(sim.x,0,sim.z).addScaledVector(valley,-8.8).addScaledVector(right,-1.65);
+    eye.y=Math.max(data.height(eye.x,eye.z)+.76,sim.y+2.13);station.eye.copy(eye);
+    station.target.copy(eye).addScaledVector(valley,48);station.target.y-=5.4;
+    station.homeEye.copy(eye);station.homeTarget.copy(station.target);station.fov=55;
+    camera.position.copy(eye);camera.lookAt(station.target);camera.fov=55;camera.updateProjectionMatrix();refreshLOD();
+    onEvent('disembark',{side:'wanlong',route:place.route,mode:sim.mode,end:'top'});
+    return true;
+  }
   function previewScenery(next,fade=false,refreshAim=false){
     if(refreshAim)framedId=null;
     transition=fade?{from:conditions,start:clock}:null;
     trial=next?.active?next:null;
+    const movedEye=!!heldEye;
+    if(heldEye){camera.position.copy(heldEye);heldEye=null;}
     if(heldCamera){camera.quaternion.copy(heldCamera);heldCamera=null;}
     environment();
     if(!trial?.frozen||!trial.sky)framedId=null;
     if(trial?.frozen){
       heldCamera=camera.quaternion.clone();
-      if(trial.sky&&framedId===trial.sky)camera.quaternion.copy(framedCamera);
+      const near=trial.preset.group==='art'&&forest.portrait(camera.position.x,camera.position.z);
+      trial.hasTree=!!near;
+      if(trial.tree&&near){
+        heldEye=camera.position.clone();
+        const dx=near.x-heldEye.x,dz=near.z-heldEye.z,n=Math.hypot(dx,dz)||1,range=Math.max(8.,near.h*1.49);
+        const x=near.x-dx*range/n+dz*range*.19/n,z=near.z-dz*range/n-dx*range*.19/n;
+        camera.position.set(x,data.height(x,z)+2.3,z);
+        camera.lookAt(near.x,near.y+near.h*.46,near.z);
+      }else if(trial.sky&&framedId===trial.sky)camera.quaternion.copy(framedCamera);
       else if(trial.sky){
         const look=sceneById.get(trial.sky).look;
         if(look==='sun'||look==='crystals')previewTarget.fromArray(conditions.sunDir);
@@ -497,6 +524,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
       fx.snowfall(0,conditions,camera.position);
       snowAir.update(0,conditions,camera.position,sim,opts.quality,isMiniTool);
     }
+    if(movedEye||heldEye)refreshLOD();
     sun.position.copy(sun.target.position).addScaledVector(source,143);
     kick();
   }
@@ -532,7 +560,8 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     }
     if(!trial?.frozen)moveCamera(dt);
     treesLag+=dt;if(treesLag>.40){refreshLOD();treesLag=0;}
-    trailGuide.update(sim,navigation,opts.language,camera);
+    if(trial?.frozen&&trial.fromThirdLift)trailGuide.hide();
+    else trailGuide.update(sim,navigation,opts.language,camera);
     if(!paused) snowAir.update(dt,conditions,camera.position,sim,opts.quality,isMiniTool);
     renderFrame();
     if(shaderFailure){active=false;onEvent('lost');return;}
@@ -553,7 +582,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
   el.addEventListener('webglcontextlost',e=>{e.preventDefault();if(active){active=false;onEvent('lost');}});
   return {
     sim,input,start,stage,trailhead,pushOff,beginRide,leaveRide,
-    previewScenery,
+    previewScenery,stageThirdLift,retryArt:forest.retryArt,
     photoFrame(){renderFrame();return el;},
     lockVideoCanvas(){
       videoCanvasLocked=true;adaptiveTime=adaptiveFrames=0;kick();
@@ -609,7 +638,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     environment(){environment();kick();},graphics(){graphicsScale=1;lightingLimited=false;sun.castShadow=!isMiniTool&&opts.quality!=='lite';resize();treesLag=1;kick();},
     changeRider(){
       const previousScale=rider.dimensions.scale;
-      scene.remove(rider.group);rider.dispose();rider=createRider(opts);scene.add(rider.group);
+      scene.remove(rider.group);rider.dispose();rider=createRider(opts);scene.add(rider.group);bindScenicBuildings([rider.group],scenic,true);
       sim.gear=opts.gear;sim.dimensions=rider.dimensions;
       if(previousScale!==rider.dimensions.scale)snap=true;
       updateAvatar(0);kick();

@@ -1,4 +1,5 @@
-import {sceneHeader,scenicGround,scenicForest,scenicSky} from './scenic-materials.js';
+import {sceneHeader,scenicGround,scenicForest,scenicSky,scenicArchitecture} from './scenic-materials.js';
+import {artForest} from './art-forest.js';
 import {createTerrainDetail} from './terrain-detail.js';
 import {placePisteLights} from './piste-lighting.js';
 import * as THREE from 'three';
@@ -263,7 +264,7 @@ function snowMaterial(uniforms,far,refined=false) {
     `);
     s.fragmentShader=s.fragmentShader.replace('#include <opaque_fragment>',`
       outgoingLight=aerialSnow(outgoingLight,vGround,cameraPosition);
-      if(ridgeScene!=0)outgoingLight=mix(outgoingLight,paintSnow(outgoingLight,vGround,transformDirectionByInverseViewMatrix(normal,viewMatrix)),ridgeBlend);
+      if(ridgeScene!=0)outgoingLight=mix(outgoingLight,paintSnow(outgoingLight,vGround,transformDirectionByInverseViewMatrix(normal,viewMatrix),${far?'vec2(.87,.49)':'mix(vec2(.87,.49),groove,course)'}),ridgeBlend);
       #include <opaque_fragment>
     `);
   };
@@ -367,17 +368,19 @@ export function createSky(scene,scenicUniforms) {
   }};
 }
 
-export function bindScenicBuildings(groups,u){
+export function bindScenicBuildings(groups,u,actor=false){
   const seen=new Set();
   for(const group of groups)group.traverse(mesh=>{
     const m=mesh.material;
-    if(!mesh.isMesh||!m||seen.has(m)||(!m.isMeshStandardMaterial&&!m.isMeshLambertMaterial))return;
+    if(!mesh.isMesh||!m||m.userData.surface==='lettering'||seen.has(m)||(!m.isMeshStandardMaterial&&!m.isMeshLambertMaterial))return;
     seen.add(m);
     const compile=m.onBeforeCompile,key=m.customProgramCacheKey();
     m.customProgramCacheKey=()=>key+'-scenic-resort';
     m.onBeforeCompile=(shader,renderer)=>{
       compile.call(m,shader,renderer);
       Object.assign(shader.uniforms,u);
+      const surface=m.userData.surface;
+      shader.uniforms.paintSurface={value:actor?4:surface==='timber'?1:['glazing','panorama','occupiedRoom','cabinGlass'].includes(surface)?3:0};
       shader.vertexShader='varying vec3 vScenicBuilding;\n'+shader.vertexShader.replace('#include <project_vertex>',`
         #include <project_vertex>
         vec4 scenicLocal=vec4(transformed,1.);
@@ -385,13 +388,8 @@ export function bindScenicBuildings(groups,u){
           scenicLocal=instanceMatrix*scenicLocal;
         #endif
         vScenicBuilding=(modelMatrix*scenicLocal).xyz;`);
-      shader.fragmentShader='varying vec3 vScenicBuilding;\n'+glNoise+sceneHeader+shader.fragmentShader.replace('#include <opaque_fragment>',`
-        if(ridgeScene==RIDGE_CLOUDSEA)outgoingLight=mix(outgoingLight,crossCloudDeck(outgoingLight,cameraPosition,vScenicBuilding),ridgeBlend);
-        if(ridgeScene==RIDGE_WOODBLOCK){
-          float val=sceneLuma(outgoingLight);
-          float ink=.20+.30*smoothstep(.11,.15,val)+.50*smoothstep(.45,.50,val);
-          outgoingLight=mix(outgoingLight,mix(vec3(.04,.09,.13),vec3(.80,.75,.59),ink),.40*ridgeBlend);
-        }
+      shader.fragmentShader='uniform int paintSurface;varying vec3 vScenicBuilding;\n'+glNoise+sceneHeader+scenicArchitecture+shader.fragmentShader.replace('#include <opaque_fragment>',`
+        if(ridgeScene!=0)outgoingLight=mix(outgoingLight,paintObject(outgoingLight,vScenicBuilding,transformDirectionByInverseViewMatrix(normal,viewMatrix),paintSurface),ridgeBlend);
         #include <opaque_fragment>`);
     };
   });
@@ -433,7 +431,38 @@ function makePisteLighting(scene,data) {
   const screen=new THREE.Vector2();
   glow.onBeforeRender=(renderer,scene,camera)=>{glowUniform.scale.value=renderer.getDrawingBufferSize(screen).y*camera.projectionMatrix.elements[5]*.5;};
   glow.renderOrder=2;group.add(glow);
-  return {texture,setLight(e){const amount=e.lampAmount||0;glowUniform.amount.value=amount;glowUniform.fogDensity.value=e.density;glow.visible=amount>.025;}};
+  let shafts;
+  function lampShafts(){
+    const opacity={value:0};
+    const material=new THREE.ShaderMaterial({uniforms:{opacity},transparent:true,depthWrite:false,side:THREE.FrontSide,blending:THREE.AdditiveBlending,
+      vertexShader:`varying vec3 eyeDirection,sideNormal;varying float along,distanceM;
+        void main(){vec4 w=instanceMatrix*vec4(position,1.);eyeDirection=cameraPosition-w.xyz;distanceM=length(eyeDirection);
+          sideNormal=mat3(instanceMatrix)*vec3(normal.x,0.,normal.z);along=.5-position.y;
+          gl_Position=projectionMatrix*viewMatrix*w;}`,
+      fragmentShader:`uniform float opacity;varying vec3 eyeDirection,sideNormal;varying float along,distanceM;
+        void main(){float chord=abs(dot(normalize(eyeDirection),normalize(sideNormal)));
+          float mist=smoothstep(.005,.10,along)*(1.-smoothstep(.56,1.,along));
+          float reach=1.-smoothstep(78.,210.,distanceM);
+          gl_FragColor=vec4(1.,.81,.55,opacity*chord*chord*mist*reach*.17);}`
+    });
+    const cones=new THREE.InstancedMesh(new THREE.ConeGeometry(1,1,20,1,true),material,lights.length);
+    const axis=new THREE.Vector3(),head=new THREE.Vector3(),foot=new THREE.Vector3(),up=new THREE.Vector3(0,1,0);
+    for(const [i,l] of lights.entries()){
+      head.set(...points.slice(i*3,i*3+3));
+      const x=l.p.x+l.rx*l.shoulder*.27+l.p.dx*7,z=l.p.z+l.rz*l.shoulder*.27+l.p.dz*7;
+      foot.set(x,data.height(x,z)+.30,z);axis.subVectors(head,foot);
+      dummy.position.copy(foot).lerp(head,.5);dummy.quaternion.setFromUnitVectors(up,axis.clone().normalize());
+      dummy.scale.set(6.8,axis.length(),6.8);dummy.updateMatrix();cones.setMatrixAt(i,dummy.matrix);
+    }
+    cones.name='Light shafts beneath piste lamps';cones.renderOrder=1;group.add(cones);
+    return {cones,opacity};
+  }
+  return {texture,setLight(e){
+    const amount=e.lampAmount||0;glowUniform.amount.value=amount;glowUniform.fogDensity.value=e.density;glow.visible=amount>.025;
+    const power=e.sceneId==='lamps'?amount*(e.sceneStrength??1):0;
+    if(power>.02&&!shafts)shafts=lampShafts();
+    if(shafts){shafts.cones.visible=power>.02;shafts.opacity.value=power;}
+  }};
 }
 
 export async function buildSurface(scene,data,scenicUniforms) {
@@ -447,7 +476,7 @@ export async function buildSurface(scene,data,scenicUniforms) {
     airSun:{value:new THREE.Vector4()},aerialStrength:{value:0},solarTint:{value:new THREE.Color()},
     solarHorizons:{value:dataTexture(0,0,0)},sunHorizon:{value:new THREE.Vector4()},
     shadowStarts:{value:shadowBones.map(()=>new THREE.Vector3())},
-    shadowEnds:{value:shadowBones.map(()=>new THREE.Vector2())},shadowArea:{value:new THREE.Vector4()}
+    shadowEnds:{value:shadowBones.map(()=>new THREE.Vector2())},shadowArea:{value:new THREE.Vector4()},moonShadow:{value:0}
   };
   const coverCell=addTerrainTiles(scene,data.field,snowMaterial(uniforms,false));
   const detail=data.snowTerrain&&createTerrainDetail(scene,data.field,data.snowTerrain,
@@ -470,7 +499,7 @@ export async function buildSurface(scene,data,scenicUniforms) {
   const floor=joints.map(()=>new THREE.Vector2());
   function setRiderShadow(rider){
     const area=uniforms.shadowArea.value,sun=uniforms.lowSun.value;
-    const strength=sun.w*THREE.MathUtils.smoothstep(sun.y,.095,.22);
+    const strength=Math.max(uniforms.moonShadow.value,sun.w*THREE.MathUtils.smoothstep(sun.y,.095,.22));
     if(!rider||strength<.015){area.w=0;return;}
     rider.shadowPose(joints);
     const root=rider.group.position;
@@ -495,6 +524,7 @@ export async function buildSurface(scene,data,scenicUniforms) {
     area.set(root.x,root.z,span+.45,strength*(span>10?.58:.82));
   }
   return {setRiderShadow,detail,locate:detail?.locate,setLight(env){
+    uniforms.moonShadow.value=env.sceneId==='moon'?.86*env.moonAmount*(env.sceneStrength??1):0;
     setSnowSun(uniforms.lowSun.value,env);uniforms.pisteLights.value=env.lampAmount||0;fixtures.setLight(env);
     const day=1-env.nightAmount,haze=env.snowAmount;
     uniforms.ridgeAir.value.set(env.fog).multiplyScalar(.70+.10*day);
@@ -519,16 +549,16 @@ async function readForest() {
     const ct=c.getContext('2d',{willReadFrequently:true});ct.drawImage(img,0,0);const out=ct.getImageData(0,0,c.width,c.height);img.close?.();return out;
   }catch{return null;}
 }
-export async function plantForest(scene,data,scenicUniforms) {
+export async function plantForest(scene,data,scenicUniforms,onGroveChange) {
   const [atlas,cover]=await Promise.all([loadTexture(asset('art/treeline.webp'),THREE.SRGBColorSpace),readForest()]);
-  const uniforms={...scenicUniforms,...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),atlas:{value:atlas},
+  const uniforms={...scenicUniforms,...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),atlas:{value:atlas},groveActive:{value:0},groveFill:{value:.50},
     tint:{value:new THREE.Color(1,1,1)},solarTint:{value:new THREE.Color()},lowSun:{value:new THREE.Vector4(0,1,0,0)}};
   // Regular cards face the viewer. Shadow cards pivot towards the light,
   // using the same crown cutout so shade follows the branches and trunks.
   const treeDepth=new THREE.MeshDepthMaterial({side:THREE.DoubleSide});
   treeDepth.onBeforeCompile=shader=>{
-    shader.uniforms.lowSun=uniforms.lowSun;shader.uniforms.treeAtlas=uniforms.atlas;
-    shader.vertexShader='attribute vec3 location;attribute vec4 form;uniform vec4 lowSun;varying vec3 crown;varying vec2 shadowSeed;\n'+
+    shader.uniforms.lowSun=uniforms.lowSun;shader.uniforms.treeAtlas=uniforms.atlas;shader.uniforms.groveActive=uniforms.groveActive;
+    shader.vertexShader='attribute float modelDetail;attribute vec3 location;attribute vec4 form;uniform vec4 lowSun;varying vec3 crown;varying vec2 shadowSeed;\n'+
       shader.vertexShader.replace('#include <begin_vertex>',`
         crown=vec3((uv.x+floor(form.z))/3.,1.-uv.y,form.z);
         shadowSeed=location.xz*.071;
@@ -536,7 +566,8 @@ export async function plantForest(scene,data,scenicUniforms) {
         float castHeight=form.y*mix(.60,1.,smoothstep(.10,.54,lowSun.y));
         vec3 transformed=location+vec3(face.y*position.x*form.x,(position.y+.5)*castHeight,-face.x*position.x*form.x);
       `);
-    shader.fragmentShader='uniform sampler2D treeAtlas;varying vec3 crown;varying vec2 shadowSeed;\n'+glNoise+shader.fragmentShader.replace('#include <map_fragment>',`
+    shader.vertexShader=shader.vertexShader.replace('#include <project_vertex>','#include <project_vertex>\nif(modelDetail>.5)gl_Position=vec4(2.,2.,2.,1.);');
+    shader.fragmentShader='uniform float groveActive;uniform sampler2D treeAtlas;varying vec3 crown;varying vec2 shadowSeed;\n'+glNoise+shader.fragmentShader.replace('#include <map_fragment>',`
       vec4 c=texture2D(treeAtlas,crown.xy);
       float bare=step(.45,abs(crown.z-1.));
       float lum=dot(c.rgb,vec3(.22,.68,.10));
@@ -545,13 +576,13 @@ export async function plantForest(scene,data,scenicUniforms) {
       float openings=noise21(bough*vec2(6.1,10.2)+shadowSeed);
       float broken=(.28+.23*smoothstep(.27,.78,openings))*smoothstep(.035,.22,width);
       float cutoff=.36+broken*(.70+.30*bare);
-      if(c.a*(1.-bare*smoothstep(.24,.74,lum))<cutoff)discard;
+      if(c.a*(1.-(1.-groveActive)*bare*smoothstep(.24,.74,lum))<cutoff)discard;
     `);
   };
   const sm=new THREE.ShaderMaterial({uniforms,fog:true,side:THREE.DoubleSide,
     vertexShader:`#include <common>
       #include <fog_pars_vertex>
-      attribute vec3 location;attribute vec4 form;varying vec2 vUv;varying float vTint;varying float vSpecies;
+      attribute float modelDetail;attribute vec3 location;attribute vec4 form;varying vec2 vUv;varying float vTint;varying float vSpecies;
       varying vec3 vTreeWorld;varying vec4 vBranch;
       void main(){
         vUv=vec2((uv.x+floor(form.z))/3.,1.-uv.y);
@@ -565,9 +596,10 @@ export async function plantForest(scene,data,scenicUniforms) {
         vBranch.z=position.x*sign(form.x);vBranch.w=length(cameraPosition-location);
         vec4 mvPosition=viewMatrix*vec4(world,1.);
         gl_Position=projectionMatrix*mvPosition;
+        if(modelDetail>.5)gl_Position=vec4(2.,2.,2.,1.);
         #include <fog_vertex>
       }`,
-    fragmentShader:`uniform sampler2D atlas;uniform vec3 tint,solarTint;uniform vec4 lowSun;varying vec2 vUv;varying float vTint;varying float vSpecies;
+    fragmentShader:`uniform float groveActive,groveFill;uniform sampler2D atlas;uniform vec3 tint,solarTint;uniform vec4 lowSun;varying vec2 vUv;varying float vTint;varying float vSpecies;
       varying vec3 vTreeWorld;varying vec4 vBranch;
       #include <fog_pars_fragment>
       `+glNoise+sceneHeader+scenicForest+iceFacets+`
@@ -575,7 +607,7 @@ export async function plantForest(scene,data,scenicUniforms) {
         vec4 c=texture2D(atlas,vUv);
         float lum=dot(c.rgb,vec3(.22,.68,.10));
         float bare=step(.45,abs(vSpecies-1.));
-        float alpha=c.a*(1.-bare*smoothstep(.24,.74,lum));
+        float alpha=c.a*(1.-bare*(1.-groveActive)*smoothstep(.24,.74,lum));
         float pixel=facetFootprint(vBranch.xy);
         if(alpha<.34)discard;
         vec3 needles=mix(c.rgb,c.rgb*vec3(.68,.69,.72),bare);
@@ -606,7 +638,8 @@ export async function plantForest(scene,data,scenicUniforms) {
             color+=solarTint*sparkle*branchSnow*facing*lowSun.w*mix(10.,3.2,bare)*(1.-smoothstep(31.,58.,vBranch.w));
           }
         }
-        if(ridgeScene!=0)color=mix(color,paintTree(color,vTreeWorld,lum),ridgeBlend);
+        if(groveActive>.5)color=mix(c.rgb*tint,c.rgb,groveFill)*vTint*.91;
+        else if(ridgeScene!=0)color=mix(color,paintTree(color,vTreeWorld,lum,vUv.y),ridgeBlend);
         gl_FragColor=vec4(color,1.);
         #include <fog_fragment>
         #include <tonemapping_fragment>
@@ -623,6 +656,7 @@ export async function plantForest(scene,data,scenicUniforms) {
   });
   const plane=new THREE.PlaneGeometry(1,1);
   const chunks=[],cell=360,step=11.2;
+  const sharedDetail=new THREE.InstancedBufferAttribute(new Float32Array(Math.ceil(cell/step)**2),1);
   for(let iz=-8;iz<=8;iz++) for(let ix=-9;ix<=10;ix++){
     const x0=ix*cell,z0=iz*cell,loc=[],forms=[];
     for(let zz=step/2;zz<cell;zz+=step)for(let xx=step/2;xx<cell;xx+=step){
@@ -641,20 +675,26 @@ export async function plantForest(scene,data,scenicUniforms) {
     }
     if(!loc.length)continue;
     const g=new THREE.InstancedBufferGeometry();
-    g.index=plane.index;g.setAttribute('position',plane.getAttribute('position'));g.setAttribute('uv',plane.getAttribute('uv'));
+    g.setAttribute('modelDetail',sharedDetail);g.index=plane.index;g.setAttribute('position',plane.getAttribute('position'));g.setAttribute('uv',plane.getAttribute('uv'));
     g.setAttribute('location',new THREE.InstancedBufferAttribute(new Float32Array(loc),3));
     g.setAttribute('form',new THREE.InstancedBufferAttribute(new Float32Array(forms),4));g.instanceCount=loc.length/3;
     const center=new THREE.Vector3(x0+cell/2,data.height(x0+cell/2,z0+cell/2)+8,z0+cell/2);
     g.boundingSphere=new THREE.Sphere(center,340);
     const m=new THREE.Mesh(g,sm);m.customDepthMaterial=treeDepth;scene.add(m);chunks.push(m);
   }
+  const grove=artForest(scene,chunks,sharedDetail,uniforms,atlas,file=>loadTexture(new URL(file,document.baseURI).href,THREE.SRGBColorSpace),onGroveChange);
   return {
+    retryArt:grove.retry,vista:grove.vista,portrait:grove.portrait,
     setLight(env) {
+      const id=env.sceneId;
+      uniforms.groveFill.value=(id==='galaxy'?.33:id==='starry'?.64:.50)*(1-(id==='galaxy'||id==='starry'?0:.85)*env.nightAmount);
+      grove.select((env.sceneStrength??1)>.23?id:null);
       setSnowSun(uniforms.lowSun.value,env);
       uniforms.solarTint.value.set(env.sun);
       uniforms.tint.value.set(env.treeTint??0xffffff).multiplyScalar(1-.33*env.nightAmount);
     },
     locate(x,z,quality,sunX,sunZ,shadowRange) {
+      grove.locate(x,z,quality);
       const d=quality==='lite'?1270:quality==='high'?2640:1920;
       for(const mesh of chunks){
         const center=mesh.geometry.boundingSphere.center;

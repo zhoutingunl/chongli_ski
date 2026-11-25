@@ -115,16 +115,16 @@ export function createSnowAir(scene,data) {
       if(strength>.13)ridge.push({x:sx,z:sz,strength});
     }
   }
-  function spawn(i,camera,wind,scatter) {
+  function spawn(i,camera,wind,scatter,drifting) {
     const range=i<18?32:i<64?64:115;
-    const crest=i%4===0&&ridge.length?ridge[Math.floor(random()*ridge.length)]:null;
+    const crest=i%(drifting?2:4)===0&&ridge.length?ridge[Math.floor(random()*ridge.length)]:null;
     const yaw=random()*Math.PI*2, distance=range*Math.sqrt(random());
     const x=crest?crest.x+(random()-.5)*11:camera.x+Math.cos(yaw)*distance;
     const z=crest?crest.z+(random()-.5)*11:camera.z+Math.sin(yaw)*distance;
     const life=1.7+random()*4.1;
     return {x,z,crest,life,age:scatter?random()*life:0,phase:random()*19,
       heading:(random()-.5)*(crest?.57:.84),gust:.41+random()*.88,
-      length:1.25+random()**1.8*(crest?5.3:3.6),thickness:.135+random()*(crest?.30:.18),
+      length:1.25+random()**1.8*(crest?(drifting?9.1:5.3):3.6),thickness:.135+random()*(crest?.30:.18),
       rate:(1.7+random()*3.5)*(.68+wind*1.6),light:0,targetLight:0};
   }
   return {
@@ -150,7 +150,7 @@ export function createSnowAir(scene,data) {
       for(let i=0;i<count;i++) {
         let particle=positions[i];
         if(!particle||particle.age>=particle.life||Math.hypot(particle.x-camera.x,particle.z-camera.z)>144)
-          positions[i]=particle=spawn(i,camera,w,!particle);
+          positions[i]=particle=spawn(i,camera,w,!particle,weather.sceneId==='spindrift');
         const p=particle; p.age+=dt;
         const t=clamp(p.age/p.life,0,1);
         const curl=p.heading+.16*Math.sin(clock*p.gust+p.phase)+.08*Math.sin((p.x+p.z)*.016-clock*.64);

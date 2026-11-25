@@ -67,6 +67,7 @@ function getMaterial(key) {
         '#include <alphamap_fragment>\n if (!gl_FrontFacing) diffuseColor.a *= 0.22;');
     };
   }
+  m.userData.surface=key;
   materialCache.set(key, m);
   return m;
 }
