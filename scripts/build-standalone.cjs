@@ -32,6 +32,7 @@ const singleFileAssets={
    build.onLoad({filter:/\/src\/(main|platform|landscape|resort)\.js$/},args=>{
      const name=path.basename(args.path);let code=fs.readFileSync(args.path,'utf8');
      if(name==='main.js'){
+       code=replaceOne(code,"import.meta.env.BASE_URL+'assets/art/fitting-'+gear+'.webp'","packagedAssetUrl('art/fitting-'+gear+'.webp')");
        code=replaceOne(code,'href="./assets/geo/mountain.json" download','href="\'+packagedAssetUrl("geo/mountain.json")+\'" download="mountain.json"');
        code=replaceOne(code,'href="./assets/art/credits.txt"','href="\'+packagedAssetUrl("art/credits.txt")+\'"');
      } else if(name==='platform.js'){

@@ -18,7 +18,7 @@ function optionTiles(kind,list,value){
   return '<div class="climate-grid climate-'+kind+'">'+list.map(o=>'<button class="climate-tile" data-choice="'+kind+'" data-value="'+o.id+'" aria-pressed="'+(value===o.id)+'">'+glyph(icons[o.id],27)+'<span>'+label(o.label)+'</span></button>').join('')+'</div>';
 }
 export function environmentPanel(prefs){
-  return heading('TIME','时段')+optionTiles('time',timeOptions,prefs.time)+'<h3 class="panel-kicker weather-title">'+t('WEATHER · 天气','WEATHER')+'</h3>'+optionTiles('weather',weatherOptions,prefs.weather)+'<p class="panel-foot">'+t('抵达索道上站进入下一自动时段，滑行每满两分钟也会顺序切换。自动天气的晴、雪分段交错，每两分钟共 80 秒晴天、40 秒降雪。','Auto time advances on arrival at an upper lift station and after every two minutes of skiing. Auto weather alternates 80 seconds of clear skies with 40 seconds of snowfall in each cycle.')+'</p>';
+  return heading('TIME','时段')+optionTiles('time',timeOptions,prefs.time)+'<h3 class="panel-kicker weather-title">'+t('WEATHER · 天气','WEATHER')+'</h3>'+optionTiles('weather',weatherOptions,prefs.weather)+'<p class="panel-foot">'+t('抵达索道上站进入下一自动时段，滑行每满两分钟也会顺序切换。每两分钟有四阵 8–12 秒的雪，合计 80 秒晴、40 秒雪。双自动下，黎明、傍晚和日落可能遇到粉金霞光。','Auto time advances on arrival at an upper lift station and after every two minutes of skiing. Four 8–12 second showers share each cycle with 80 clear seconds. With both settings on Auto, rose alpenglow can appear at dawn, late afternoon or sunset.')+'</p>';
 }
 function pill(action,txt,active=false){
   return '<button class="setting-pill" data-act="'+action+'" aria-pressed="'+active+'">'+txt+'</button>';

@@ -12,9 +12,9 @@ const mountain=prepareMountain(JSON.parse(readFileSync(source,'utf8')));
 const route=mountain.routes.find(r=>r.id===trialRouteId);
 const automatic=Object.freeze({time:'auto',weather:'auto'});
 
-test('同趟巡览按实际里程访问九种自然景观、六种画境各一次',()=>{
+test('同趟巡览按实际里程访问十种自然景观、六种画境各一次',()=>{
   const trial=new SceneryTrial();trial.enter(route,true);
-  assert.equal(scenery.filter(s=>s.group==='nature').length,9);
+  assert.equal(scenery.filter(s=>s.group==='nature').length,10);
   assert.equal(scenery.filter(s=>s.group==='art').length,6);
   const seen=[trial.id];
   for(let m=1;m<=route.length;m++)if(trial.advance(m))seen.push(trial.id);

@@ -5,8 +5,7 @@ export const timeOptions = [
 export const weatherOptions = [['auto','自动'],['clear','晴'],['light','小雪'],['heavy','大雪']].map(([id,label])=>({id,label}));
 export const AUTO_STAGE_SECONDS = 120;
 const stageFade = 7;
-const snowWindow=AUTO_STAGE_SECONDS/3;
-const weatherFade=8;
+const weatherFade=4;
 const snowByWeather={clear:0,light:.38,heavy:1};
 const hourAt = {day:9.65, noon:12, evening:15.95, sunset:16.87, twilight:17.64, night:21.6, aurora:23.4, dawn:6.43};
 const timeNames = Object.fromEntries(timeOptions.map(o=>[o.id,o.label]));
@@ -71,21 +70,37 @@ function calculate(h,resolvedTime,aurora,resolvedWeather,snowAmount,elapsed) {
     light:value(6)*(1-.78*overcast-.16*snowAmount),ambient:value(7)*(1+.14*snowAmount),
     density:value(8)+.00049*snowAmount+.00301*overcast*overcast,exposure:value(9)*(1-.025*overcast),
     dir:[dx/norm,dy/norm,dz/norm], sunDir,moonDir, cloud:clamp(value(10)+haze*.65),
-    nightAmount,auroraAmount,starAmount:smooth(.29,.94,nightAmount)*(1-.95*overcast),
+    roseLight:0,nightAmount,auroraAmount,starAmount:smooth(.29,.94,nightAmount)*(1-.95*overcast),
     sunAmount:solar*(1-.90*overcast),moonAmount:moon*(1-.82*overcast),snowAmount,
     wind:clamp(.13+.70*snowAmount+.13*Math.sin(elapsed*.062+.7)**2),treeTint:blendColor(0xfcf8f0,0x7d97bd,nightAmount),
     lampAmount:smooth(.11,.72,nightAmount),cloudColor
   };
 }
+const roseHours=new Set(['dawn','evening','sunset']);
+// Low-angle warm light on sun-facing snow, with cool skylight in its shadows.
+export function roseAlpenglow(env, strength) {
+  const k=clamp(strength)*(1-smooth(0,.42,env.snowAmount));
+  if(!k)return env;
+  return {...env,roseLight:k,sky:blendColor(env.sky,0x877fb1,.79*k),
+    horizon:blendColor(env.horizon,0xffceac,.87*k),fog:blendColor(env.fog,0xc2a5c1,.59*k),
+    cloudColor:blendColor(env.cloudColor,0xffbed3,.86*k),sun:blendColor(env.sun,0xffcd9a,.84*k),
+    hemi:blendColor(env.hemi,0xb8aee8,.71*k),ground:blendColor(env.ground,0x776b96,.77*k),
+    treeTint:blendColor(env.treeTint,0xffeadc,.43*k),light:env.light+.44*k,ambient:env.ambient+.08*k,
+    cloud:clamp(env.cloud+.12*k),sunAmount:mix(env.sunAmount,.96,.68*k)};
+}
+
 function newWeatherPlan(random) {
-  const firstClear=18+Math.floor(random()*15);
-  const nextClear=21+Math.floor(random()*13);
-  const firstSnow=17+Math.floor(random()*7);
+  // Four showers add up to 40 s. Splitting one clear interval across the
+  // boundary prevents two full clear spells joining between successive stages.
+  const jitter=radius=>Math.floor(random()*(2*radius+1))-radius;
+  const a=jitter(2),b=jitter(2),c=jitter(3),d=jitter(3);
+  const snow=[10+a,10-a,10+b,10-b],clear=[20+c,20+d,20-c,20-d];
   const heavyFirst=random()<.5;
-  return [
-    {start:firstClear,duration:firstSnow,level:heavyFirst?1:.38},
-    {start:firstClear+firstSnow+nextClear,duration:snowWindow-firstSnow,level:heavyFirst?.38:1}
-  ];
+  let start=Math.floor(clear[0]/2);
+  return snow.map((duration,i)=>{
+    const period={start,duration,level:(i%2===0)===heavyFirst?1:.38};
+    start+=duration+(clear[i+1]||0);return period;
+  });
 }
 
 function scheduledSnow(period,phase) {
@@ -101,6 +116,15 @@ export function createMountainClimate(random=Math.random) {
   let previousTime,previousWeather,result,weatherSlot=-1,weatherPlan;
   const stageIndex=()=>startStage+Math.floor(stageAge/AUTO_STAGE_SECONDS);
   let arrival=null;
+  const skyChoices=new Map();
+  function roseAt(index) {
+    if(!roseHours.has(stages[cycle(index,stages.length)]))return 0;
+    if(!skyChoices.has(index)){
+      skyChoices.set(index,Number(random()<.60));
+      for(const old of skyChoices.keys())if(old<index-2)skyChoices.delete(old);
+    }
+    return skyChoices.get(index);
+  }
   function automaticLight(){
     const index=stageIndex(), phase=stageAge%AUTO_STAGE_SECONDS;
     const earlier=phase<stageFade&&stageAge>=AUTO_STAGE_SECONDS;
@@ -109,24 +133,27 @@ export function createMountainClimate(random=Math.random) {
     const progress=earlier?smooth(-stageFade,stageFade,phase):smooth(AUTO_STAGE_SECONDS-stageFade,AUTO_STAGE_SECONDS+stageFade,phase);
     let hour=cycle(hourAt[before]+cycle(hourAt[after]-hourAt[before],24)*progress,24);
     let aurora=mix(Number(before==='aurora'),Number(after==='aurora'),progress);
+    const from=index-Number(earlier);
+    let rose=roseAt(from);
+    if(progress>0)rose=mix(rose,roseAt(from+1),progress);
     if(arrival){
       const fade=smooth(0,2*stageFade,elapsed-arrival.start);
       const arc=cycle(hour-arrival.hour+12,24)-12;
       hour=cycle(arrival.hour+arc*fade,24);
-      aurora=mix(arrival.aurora,aurora,fade);
+      aurora=mix(arrival.aurora,aurora,fade);rose=mix(arrival.rose,rose,fade);
     }
-    return {hour,aurora,stage:stages[cycle(index,stages.length)]};
+    return {hour,aurora,rose,stage:stages[cycle(index,stages.length)]};
   }
   return {
     startVisit(){
       startStage=drawStage();stageAge=weatherAge=0;
-      arrival=null;weatherSlot=-1;result=null;
+      arrival=null;skyChoices.clear();weatherSlot=-1;result=null;
     },
     arriveUpperStation(timeMode){
       if(timeMode!=='auto')return;
       const light=automaticLight();
-      arrival={hour:light.hour,aurora:light.aurora,start:elapsed};
-      startStage=cycle(stageIndex()+1,stages.length);
+      arrival={hour:light.hour,aurora:light.aurora,rose:light.rose,start:elapsed};
+      startStage=stageIndex()+1;
       stageAge=0;weatherSlot=-1;result=null;
     },
     advance(dt,timeMode,_weatherMode,riding){
@@ -142,7 +169,7 @@ export function createMountainClimate(random=Math.random) {
       if(!Object.prototype.hasOwnProperty.call(snowByWeather,weatherMode))weatherMode='auto';
       if(result&&timeMode===previousTime&&weatherMode===previousWeather)return result;
       const automatic=timeMode==='auto';
-      const {hour,stage,aurora}=automatic?automaticLight():
+      const {hour,stage,aurora,rose}=automatic?automaticLight():
         {hour:hourAt[timeMode],stage:timeMode,aurora:Number(timeMode==='aurora')};
       let snow=snowByWeather[weatherMode],resolvedWeather=weatherMode;
       if(weatherMode==='auto'){
@@ -158,7 +185,8 @@ export function createMountainClimate(random=Math.random) {
         resolvedWeather=period?(snow<.70?'light':'heavy'):'clear';
       }
       previousTime=timeMode;previousWeather=weatherMode;
-      return result=calculate(hour,stage,aurora,resolvedWeather,snow,elapsed);
+      const base=calculate(hour,stage,aurora,resolvedWeather,snow,elapsed);
+      return result=automatic && weatherMode==='auto'?roseAlpenglow(base,rose):base;
     }
   };
 }

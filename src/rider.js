@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {outfitFor} from './wardrobe.js';
 import {followSkiTerrain, followTurn, seatSki} from './ski-kinematics.js';
 
 const TAU = Math.PI * 2;
@@ -262,21 +263,46 @@ function lensTexture() {
   return tex;
 }
 
-function materials() {
+// A repeating, staggered cloud print in fabric UVs. Sleeves and torso keep
+// the pattern attached to their skinned cloth throughout a carve.
+function cloudPrint() {
+  const w=128, h=96, data=new Uint8Array(w*h*4);
+  const colours=[[246,185,211],[195,183,231],[172,218,212],[255,207,175]];
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++) {
+    const row=Math.floor(y/24), column=Math.floor((x+(row%2)*16)/32);
+    const u=(x+(row%2)*16)%32-16, v=y%24-12;
+    const brim=(u/10)**2+((v+2)/3.8)**2;
+    const crown=Math.min(brim,((u+4)/4.7)**2+((v-1)/4.2)**2,((u-1)/5.0)**2+((v-2.5)/5.2)**2,((u-6)/3.4)**2+(v/3.6)**2);
+    const ink=colours[(column+3*row)%4], cover=clamp((1.17-crown)*4,0,1);
+    const i=(y*w+x)*4;
+    for(let k=0;k<3;k++)data[i+k]=mix(255,ink[k],cover);
+    data[i+3]=255;
+  }
+  const texture=new THREE.DataTexture(data,w,h);
+  texture.colorSpace=THREE.SRGBColorSpace;texture.wrapS=texture.wrapT=THREE.RepeatWrapping;
+  texture.repeat.set(2,1);texture.generateMipmaps=true;
+  texture.minFilter=THREE.LinearMipmapLinearFilter;texture.magFilter=THREE.LinearFilter;texture.needsUpdate=true;
+  return texture;
+}
+
+function materials(girl) {
   const weave = makeClothTexture(), mirror = lensTexture();
+  const cloth=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.83,metalness:.015,normalMap:weave,normalScale:new THREE.Vector2(.17,.17)});
+  const print=girl?cloudPrint():null;
+  const printed=girl?cloth.clone():null;
+  if(printed)printed.map=print;
   return {
-    cloth: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .83, metalness: .015,
-      normalMap: weave, normalScale: new THREE.Vector2(.17, .17) }),
+    cloth, printed,
     hard: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .50, metalness: .13 }),
     alloy: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .32, metalness: .52 }),
     lens: new THREE.MeshStandardMaterial({ vertexColors: true, map: mirror, roughness: .17, metalness: .14,
       emissive: 0xffffff, emissiveMap: mirror, emissiveIntensity: .14 }),
-    textures: [weave, mirror]
+    textures: print?[weave,mirror,print]:[weave,mirror]
   };
 }
 
 function jacket(batch, m, palette, female, junior) {
-  const shoulder = junior ? .91 : female ? .916 : 1, waist = junior ? .97 : female ? .91 : 1;
+  const shoulder = junior ? (female?.86:.92) : female ? .89 : 1.055, waist = junior ? .96 : female ? .81 : 1.005;
   const cut = [
     [-.080, .158, .113, .016], [-.069, .178, .132, .017], [-.053, .181, .139, .019],
     [-.035, .174, .129, .018], [-.012, .177, .136, .016], [.012, .18, .137, .014],
@@ -312,6 +338,8 @@ function jacket(batch, m, palette, female, junior) {
     p.y += hem * (.019 - back * .032);
     const acrossYoke = .346 + .041 * side - .025 * back;
     p.color = p.y > acrossYoke ? palette.yoke : side > .933 && p.y > .09 && p.y < .345 ? palette.underarm : palette.coat;
+    if(female && !junior && (side > .83-.12*Math.cos(p.t*Math.PI) || (p.y<.058 && side>.46)))p.color=palette.accent;
+    if(junior && !female && p.y<.015+.012*side)p.color=palette.accent;
     p.light = .97 + .035 * ripple * gathering + .017 * Math.cos(3 * p.a) + crease * 8.0;
     if (junior && p.y>.015 && p.y<.336) {
       const chamber=.5+.5*Math.cos((p.y+.013*back+.018*side)*75);
@@ -319,7 +347,7 @@ function jacket(batch, m, palette, female, junior) {
       p.light*=.94+.08*chamber;
     }
   }, false);
-  batch.add(shell, m.cloth);
+  batch.add(shell, m.printed || m.cloth);
   const probe = new THREE.Mesh(shell, m.cloth), ray = new THREE.Raycaster();
   function onShell(x, y, rear, lift = .002) {
     const sign = rear ? 1 : -1;
@@ -343,7 +371,7 @@ function jacket(batch, m, palette, female, junior) {
     const back = Math.sin(pt.a), fold = .005 * Math.sin(3 * pt.a + 15 * pt.y);
     pt.y += .015 * Math.cos(pt.a * 2) * (1 - pt.t * .7);
     pt.z += fold * back;
-    pt.color = back < -.45 ? palette.underarm : palette.coat;
+    pt.color = back < -.45 ? palette.underarm : junior ? palette.accent : palette.coat;
     pt.light = .965 + .035 * Math.cos(3 * pt.a - 10 * pt.y);
   }), m.cloth);
   const hoodSeam = [[0, .279, .169], [.006, .312, .184], [.010, .351, .188], [.008, .386, .182], [0, .422, .167]];
@@ -374,20 +402,8 @@ function jacket(batch, m, palette, female, junior) {
   block(batch, m.alloy, '#929088', onShell(-.069, .33, false, .0055), [.007, .014, .004], [0, 0, -.2]);
   cord(batch, m.hard, palette.dark, [[0, .445, -.079], [0, .480, -.084], [0, .515, -.076]], .0032);
   block(batch, m.alloy, '#928b78', [.003, .494, -.085], [.008, .013, .004]);
-  if (junior) {
-    cord(batch,m.cloth,palette.yoke,[[.003,.490,-.087],[.011,.475,-.091],
-      [.003,.464,-.093],[-.005,.477,-.091],[.003,.490,-.087]],.0037);
-    const reflector=female?'#f4ddb5':'#b2d9d2';
-    for(const s of [-1,1]){
-      seam([[s*.165,.304],[s*.124,.291],[s*.081,.280]],true,reflector,.007);
-      if(female)seam([[s*.149,.268],[s*.111,.254],[s*.083,.250]],true,reflector,.003);
-    }
-  } else if (female) {
-    for(const s of [-1,1])seam([[s*.175,.321],[s*.111,.291],[s*.037,.277]],true,palette.stitch,.004);
-    batch.add(loft([[.022,.055,.020,.132],[.037,.088,.034,.144],[.085,.094,.034,.142],[.102,.061,.018,.137]],22),m.cloth,'#51636a');
-    cord(batch,m.hard,'#96a5a5',[[-.069,.082,.164],[-.027,.083,.177],[.039,.083,.175],[.073,.079,.160]],.0024);
-  } else {
-    const pack='#45575b',webbing='#394245';
+  if(junior && !female) {
+    const pack='#283246',webbing='#303947';
     batch.add(loft([[.040,.039,.021,.134],[.055,.082,.049,.151],[.094,.103,.059,.157],
       [.177,.112,.066,.151],[.251,.107,.063,.148],[.310,.095,.052,.145],[.352,.069,.035,.134],[.369,.042,.021,.132]],24),m.cloth,pack);
     for(const s of [-1,1]){
@@ -398,7 +414,14 @@ function jacket(batch, m, palette, female, junior) {
         [s*.187,.100,.008],[s*.165,.078,.086],[s*.079,.063,.151]],.0067);
       cord(batch,m.cloth,'#91a3a0',[[s*.060,.307,.183],[s*.088,.248,.189],[s*.086,.147,.198],[s*.059,.092,.206]],.0028);
     }
-    cord(batch,m.cloth,'#839691',[[-.052,.119,.209],[.041,.155,.211],[-.047,.185,.210],[.052,.221,.203]],.0023);
+    cord(batch,m.cloth,'#e8e5dc',[[-.067,.174,.212],[-.037,.196,.216],[-.021,.185,.217],[.004,.225,.213],[.053,.181,.215],[.068,.173,.211]],.0048);
+    cord(batch,m.cloth,'#afb6be',[[.004,.224,.214],[.009,.200,.218],[.021,.204,.216]],.0026);
+  } else if(!junior) {
+    for(const side of [-1,1]){
+      const w=side*shoulder, bandColor=female?'#fff8ee':palette.accent;
+      for(const y of [.336,.361])seam([[w*.195,y+.008],[w*.170,y+.005],[w*.137,y]],true,bandColor,.0058);
+      seam([[w*.162,.244],[w*.153,.190],[w*.147,.115],[w*.153,.048],[w*.164,.001]],true,bandColor,female?.0052:.0038);
+    }
   }
 }
 
@@ -583,8 +606,9 @@ function armGarment(batch, m, p, side, l1, l2) {
     pt.z += Math.sin(a) * fold;
     pt.y += .0055 * Math.sin(2 * a + 9 * y) * (elbow + cuff * .6);
     pt.color = Math.cos(a) * side < -.72 && y < -.06 ? p.underarm : y > -.054 + .022 * Math.sin(a) ? p.yoke : p.coat;
+    if(p.sleeve)pt.color=y < -all+.060?p.accent:p.sleeve;
     pt.light = .98 + .036 * wave * (elbow + cuff * .7) + .045 * pleat;
-  }), m.cloth);
+  }), m.printed||m.cloth);
   band(batch, m.cloth, p.lining, -all + .022, .047, .051, .001, .014);
   block(batch, m.hard, p.dark, [side * .042, -all + .025, .024], [.008, .015, .035], [0, side * .37, side * .015]);
   if (side < 0) {
@@ -644,30 +668,58 @@ function glove(batch, m, p, side) {
   band(batch, m.hard, p.guard, -.011, .039, .039, .003, .011);
 }
 
-function buildHead(batch, m, p, female, junior) {
-  const skin = colorOf('#bb8e73'), mask = colorOf('#353c3f');
-  batch.add(loft([
-    [-.015, .057, .056, .013], [.01, .066, .061, .009], [.053, .066, .065, .002],
-    [.073, .062, .083, -.016], [.094, .073, .094, -.014], [.122, .082, .100, -.009],
-    [.147, .087, .103, -.003], [.176, .087, .102, .002], [.207, .083, .096, .006],
-    [.231, .064, .079, .012], [.248, .022, .028, .012]
-  ], 28, pt => {
-    pt.color = pt.y > .126 && Math.sin(pt.a) < -.44 ? skin : mask;
-    pt.light = .95 + .045 * Math.sin(pt.a * 4 + pt.y * 65);
-  }), m.cloth);
-  // Mask, nose bridge and ear liners sit under the lens and shell.
-  batch.add(loft([
-    [.103, .010, .010, -.100], [.109, .018, .018, -.104], [.116, .017, .023, -.105],
-    [.128, .013, .023, -.104], [.148, .010, .015, -.102], [.160, .006, .007, -.101]
-  ], 14), m.cloth, '#414748');
-  for (const s of [-1, 1]) {
-    ellipsoid(batch, m.cloth, '#292e31', [s * .083, .126, .019], [.024, .057, .045], [-.18, 0, s * .10]);
-    cord(batch, m.cloth, p.guard, [
-      [s * .093, .151, -.037], [s * .088, .103, -.029], [s * .062, .071, -.021], [s * .037, .063, -.050]
-    ], .0039);
+function buildFace(batch,m,p,female,junior) {
+  const skin=colorOf(junior?'#e5ae87':female?'#d7a085':'#c18d70'),hair=junior?'#43332e':female?'#422b28':'#322e2c';
+  batch.add(loft([[.001,.049,.050,.010],[.046,.054,.057,.003],[.069,.053,.069,-.012],
+    [.083,.060,.081,-.018],[.103,.074,.090,-.011],[.137,.082,.097,-.004],[.161,.086,.099,0],
+    [.196,.082,.093,.007],[.223,.068,.079,.010],[.247,.022,.030,.012]],28,pt=>{
+    pt.color=skin;
+    if(!junior && !female && pt.y<.10 && pt.y>.065)pt.light=.86;
+  }),m.cloth);
+  for(const side of [-1,1]){
+    ellipsoid(batch,m.cloth,skin,[side*.080,.123,.005],[.017,.030,.016]);
+    ellipsoid(batch,m.hard,'#45312c',[side*.034,.153,-.093],[.012,.006,.005]);
+    cord(batch,m.cloth,hair,[[side*.020,.166,-.097],[side*.037,.169,-.093],[side*.052,.165,-.086]],.0037);
   }
-  const outer = colorOf(junior ? (female ? '#77586b' : '#285974') : (female ? '#697778' : '#383e40'));
-  const matte = colorOf(junior ? (female ? '#f2d5b2' : '#5492a4') : (female ? '#bbc7bf' : '#474d4d'));
+  ellipsoid(batch,m.cloth,skin,[0,.131,-.102],[.014,.020,.017]);
+  cord(batch,m.cloth,'#9c615a',[[-.021,.105,-.095],[0,.101,-.102],[.021,.105,-.095]],.0028);
+  batch.add(loft([[.113,.077,.086,.011],[.141,.085,.101,.007],[.184,.089,.104,.006],
+    [.211,.085,.098,.009],[.237,.073,.084,.011],[.252,.053,.062,.012],[.261,.005,.008,.012]],28,pt=>{
+    const front=Math.max(0,-Math.sin(pt.a));
+    pt.y+=(1-pt.t)*(.065*front-.018*Math.max(0,Math.sin(pt.a)))+.004*Math.sin(pt.a*5);
+    pt.light=.94+.08*Math.cos(pt.a*12+pt.t*2);
+  }),m.cloth,hair);
+}
+
+function buildHair(batch,m,p,female,junior) {
+  if(!female)return;
+  const brown='#51342f',lit='#735047';
+  if(!junior){
+    batch.add(loft([[-.206,.005,.008,.204,.019],[-.181,.022,.014,.212,.016],[-.137,.036,.020,.215,.007],
+      [-.084,.043,.027,.206,-.001],[-.030,.045,.031,.191,-.006],[.022,.039,.032,.160,-.004],
+      [.068,.026,.023,.124,.001],[.094,.019,.015,.110,0]],22,pt=>{
+        pt.light=.94+.10*Math.cos(pt.a*12+pt.t*4);
+      }),m.cloth,brown);
+    for(const x of [-.019,.006,.024])cord(batch,m.cloth,lit,[[x*.3,.055,.144],[x,-.008,.192],[x,-.078,.232],[x+.006,-.139,.234],[.019+x*.2,-.185,.221]],.0016);
+    ellipsoid(batch,m.cloth,p.accent,[0,.068,.123],[.029,.011,.024]);
+  }else for(const side of [-1,1]){
+    for(let i=0;i<10;i++){
+      const v=i/9, x=side*(.078+.048*v)+.005*Math.sin(i*2.5),z=.067+.090*v;
+      ellipsoid(batch,m.cloth,i%2?brown:lit,[x,.096-.184*v,z],[.021-.010*v,.021-.005*v,.018-.007*v],[-.22,0,side*(i%2?.54:-.54)]);
+    }
+    ellipsoid(batch,m.cloth,p.accent,[side*.127,-.076,.155],[.016,.006,.013]);
+  }
+}
+
+function buildHelmet(batch,m,p,female,junior){
+  const matte=p.helmet,outer=tone(matte,.77);
+  for(const s of [-1,1]){
+    ellipsoid(batch,m.cloth,'#303438',[s*.088,.124,.019],[.020,.052,.044],[-.18,0,s*.10]);
+  }
+  if(female && junior)for(const s of [-1,1]){
+    ellipsoid(batch,m.hard,matte,[s*.074,.280,.010],[.038,.041,.024],[0,0,-s*.3]);
+    ellipsoid(batch,m.cloth,p.accent,[s*.077,.285,.029],[.022,.025,.009],[0,0,-s*.3]);
+  }
   const helmetShape = pt => {
     const f = (-Math.sin(pt.a) + 1) / 2;
     pt.y += (1 - pt.t) ** 1.7 * (f * .043 - (1 - f) * .017);
@@ -729,25 +781,7 @@ function buildHead(batch, m, p, female, junior) {
       [s * .096, .178, -.067], [s * .106, .172, -.047], [s * .110, .158, -.023]
     ], .007);
   }
-  if (female && junior) {
-    for (const s of [-1,1]) {
-      for (let i=0;i<5;i++) {
-        const d=i*.013;
-        ellipsoid(batch,m.cloth,i%2 ? '#655040' : '#523e30',
-          [s*(.068+d*.22)+.002*Math.sin(i*2.7),.093-d,.085+d*.33],
-          [.0128-i*.0008,.015,.0125-i*.0007],[-.20,s*.13,s*(i%2 ? .39 : -.33)]);
-      }
-      ellipsoid(batch,m.cloth,p.stitch,[s*.083,.039,.101],[.010,.004,.010]);
-    }
-  } else if (female) {
-    const hair = ['#493c32', '#56463a', '#443a33'];
-    for (let i = 0; i < 5; i++) {
-      ellipsoid(batch, m.cloth, hair[i % 3],
-        [Math.sin(i * 2.4) * .005 + .017, .090 - i * .015, .101 + .003 * i],
-        [.0195 - .0018 * i, .019, .0168 - .0015 * i], [.18, -.2, Math.sin(i) * .24]);
-    }
-    block(batch, m.cloth, p.guard, [.018, .030, .110], [.023, .008, .019]);
-  }
+
 }
 
 function buildBoot(batch, m, p, side, snowboard, junior) {
@@ -1047,20 +1081,16 @@ export function createRider(options = {}) {
   const dimensions = getRiderDimensions(options), junior = dimensions.isChild, size = dimensions.scale;
   const deckLength = dimensions.lengthScale/size, deckWidth = dimensions.widthScale/size;
   const stance = dimensions.stanceScale/size, poleLength = dimensions.poleLength/size;
-  const m = materials();
-  const coat = colorOf(options.color ?? '#bd643c');
-  const palette = {
-    coat, yoke: wash(coat, '#deb78d', .24), underarm: wash(coat, '#353d3f', .38),
-    lining: colorOf('#303a3e'), stitch: wash(coat, '#a49883', .42), dark: colorOf('#232b2d'),
-    pants: colorOf('#323f47'), knee: colorOf('#344149'), seat: colorOf('#35424a'), guard: colorOf('#283237'),
-    glove: colorOf('#394246'), pantSeam: colorOf('#424e54'), silver: colorOf('#aca995'),
-    shaft: colorOf('#838f8c'), pole: wash(coat, '#a09e8d', .32)
+  const m = materials(girl), look=outfitFor(options.gender,options.color);
+  const coat=colorOf(look.coat), accent=colorOf(look.accent), pants=colorOf(look.pants);
+  const palette={
+    coat,accent,pants,helmet:colorOf(look.helmet),sleeve:female?accent:null,
+    yoke:wash(coat,accent,junior&&!girl?.34:.12),underarm:wash(coat,'#344151',.32),
+    lining:tone(accent,.62),stitch:wash(coat,accent,.44),dark:colorOf('#242b33'),
+    knee:tone(pants,.90),seat:tone(pants,.91),guard:wash(pants,'#344252',.72),
+    glove:female||girl?tone(accent,.58):colorOf('#333942'),pantSeam:tone(pants,.75),silver:colorOf('#cdc7ad'),
+    shaft:colorOf('#899293'),pole:wash(coat,'#b9b7a5',.43)
   };
-  if(junior){
-    palette.pants=colorOf(girl?'#44625d':'#304d65');palette.seat=tone(palette.pants,.81);
-    palette.knee=wash(palette.pants,girl?'#72877c':'#56768a',.50);
-    palette.yoke=wash(coat,girl?'#ecceac':'#afcbc2',.42);
-  }
   const group = new THREE.Group();
   group.name = board ? 'Snowboarder' : 'Alpine skier';
   // The public group and camera anchors are in terrain metres. This inner
@@ -1070,7 +1100,9 @@ export function createRider(options = {}) {
   const pelvis = makePart(rig, 'Snow pants', b => pelvisShape(b, m, palette, female));
   const torso = makePart(rig, 'Shell jacket', b => jacket(b, m, palette, female || girl, junior));
   const spine = fitJacket(torso);
-  const head = makePart(torso, 'Helmet and goggles', b => buildHead(b,m,palette,female || options.gender==='girl',junior));
+  const head=makePart(torso,'Helmet and goggles',b=>buildFace(b,m,palette,female||girl,junior));
+  const shell=makePart(rig,'Detachable helmet',b=>buildHelmet(b,m,palette,female||girl,junior));
+  const hair=(female||girl)?makePart(head,girl?'Twin braids':'Ponytail',b=>buildHair(b,m,palette,true,junior)):null;
   const neckY = junior ? .461 : .475;
   if (junior) head.scale.set(1.42,1.38,1.37);
   head.position.set(0, neckY, -.003);
@@ -1495,7 +1527,46 @@ export function createRider(options = {}) {
     }
   }
 
-  function update(state = {}, frameDt, clock) {
+  const headPose=new THREE.Quaternion(),shellTilt=new THREE.Quaternion(),helmetGrip=v3(),helmetAnchor=v3(.093,.148,.018);
+  const helmetHome=v3(),temple=v3(),carryAt=v3(),raised=v3();
+  // Stage the right hand at the rim first, then lift clear of the hair, then
+  // swing the shell out to the hip. The return uses the same reachable path.
+  function wearHelmet(progress) {
+    headPose.multiplyQuaternions(torso.quaternion,head.quaternion);
+    helmetHome.copy(head.position).applyQuaternion(torso.quaternion).add(torso.position);
+    shell.position.copy(helmetHome);shell.scale.copy(head.scale);shell.quaternion.copy(headPose);
+    shell.visible=visibility==='body'||(visibility==='first' && progress>.55);
+    if(!progress)return;
+    const right=limbs[1], reach=THREE.MathUtils.smoothstep(progress,0,.25);
+    const lift=THREE.MathUtils.smoothstep(progress,.25,.48), lower=THREE.MathUtils.smoothstep(progress,.48,.96);
+    const spread=THREE.MathUtils.smoothstep(progress,.36,.72);
+    temple.copy(helmetAnchor).multiply(head.scale).applyQuaternion(headPose).add(helmetHome);
+    spine.socket(jointOrigin.set(width,.396,.009),5).applyQuaternion(torso.quaternion).add(torso.position);
+    raised.copy(temple);raised.y+=junior?.12:.155;raised.x+=.035+spread*.10;
+    carryAt.set(width+.134,.010,.013).applyQuaternion(torso.quaternion).add(torso.position);
+    helmetGrip.copy(temple).lerp(raised,lift).lerp(carryAt,lower);
+    wristGoal.copy(right.hand.position).lerp(helmetGrip,reach);
+    wristGoal.sub(jointOrigin).clampLength(.12,arm1+arm2-.002).add(jointOrigin);
+    jointPlane.set(1,-.12,.50).applyQuaternion(torso.quaternion);
+    solveJoint(jointOrigin,wristGoal,jointPlane,arm1,arm2,jointMid);
+    aimBone(right.arm,jointOrigin,jointMid,arm1,0);aimBone(right.forearm,jointMid,wristGoal,arm2,0);
+    right.hand.position.copy(wristGoal);
+    right.hand.rotation.z-=reach*(.70-.35*lower);
+    if(lift>0){
+      shellTilt.setFromEuler(aimEuler.set(.17*lower,.18*spread,-.88*lower,'YXZ'));
+      shell.quaternion.multiply(shellTilt);
+      support.copy(helmetAnchor).multiply(head.scale).applyQuaternion(shell.quaternion);
+      shell.position.copy(wristGoal).sub(support);
+    }
+    if(right.pole){
+      support.set(width+.20,poleLength-.035,.04).applyQuaternion(torso.quaternion);
+      support.y=poleLength-.02+snowUnder(snow,support.x,support.z);
+      right.pole.position.lerp(support,reach);
+      right.pole.quaternion.slerp(shellTilt.setFromAxisAngle(acrossAxis,-.10),reach);
+    }
+  }
+
+  function update(state = {}, frameDt, clock, helmetProgress = 0) {
     if (disposed) return;
     const dt = clamp(frameDt ?? state.dt ?? 1/60, 0, .1);
     const time = clock ?? state.time ?? (posed.t + dt);
@@ -1847,6 +1918,10 @@ export function createRider(options = {}) {
       outsideMotion(state,dt,snapPose,drive,moving,steep,push,attack,release,impactSoon,lean,angulation);
       seatPose(limbs);
     }
+    if(hair){
+      hair.rotation.set(-.042*moving-.035*air,.045*edge+.012*moving*Math.sin(time*3.4),.08*edge);
+    }
+    wearHelmet(helmetProgress);
   }
 
   const decks = [...new Set(limbs.map(limb => limb.plank))];

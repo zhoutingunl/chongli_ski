@@ -273,11 +273,11 @@ function snowMaterial(uniforms,far,refined=false) {
 
 export function createSky(scene,scenicUniforms) {
   const col=()=>({value:new THREE.Color()}),real=()=>({value:0}),dir=()=>({value:new THREE.Vector3()});
-  const uniforms={...scenicUniforms,zenith:col(),horizonColor:col(),sunDir:dir(),moonDir:dir(),sunColor:col(),cloudColor:col(),cloudiness:real(),snow:real(),solar:real(),moonlight:real(),stars:real(),aurora:real(),phase:real()};
+  const uniforms={...scenicUniforms,zenith:col(),horizonColor:col(),sunDir:dir(),moonDir:dir(),sunColor:col(),cloudColor:col(),cloudiness:real(),roseLight:real(),snow:real(),solar:real(),moonlight:real(),stars:real(),aurora:real(),phase:real()};
   const mat=new THREE.ShaderMaterial({uniforms,side:THREE.BackSide,depthWrite:false,depthTest:false,
     vertexShader:'varying vec3 vDir; void main(){vDir=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
     fragmentShader:`varying vec3 vDir;uniform vec3 zenith,horizonColor,sunDir,sunColor,moonDir,cloudColor;
-      uniform float cloudiness,snow,solar,moonlight,stars,aurora,phase;
+      uniform float cloudiness,roseLight,snow,solar,moonlight,stars,aurora,phase;
       `+glNoise+sceneHeader+scenicSky+`
       float starField(vec2 coord,float frequency,float seed) {
         vec2 q=coord*vec2(frequency,frequency*.52),cell=floor(q);
@@ -351,6 +351,14 @@ export function createSky(scene,scenicUniforms) {
         vec3 cloud=mix(cloudColor,horizonColor,.20+.26*snow);
         cloud=mix(cloud,sunColor,min(.40,glint*.56)*solar);
         sky=mix(sky,cloud,clouds*(.27+cloudiness*.52)*(1.-stratus*.79));
+        if(roseLight>.001){
+          float low=exp(-abs(h-.11)*4.5);
+          float forwardGlow=.23+.77*pow(sunAngle,3.);
+          float veil=clamp(vapor*.78+clouds*.32,0.,1.);
+          vec3 rose=mix(vec3(.67,.28,.46),vec3(1.,.62,.34),forwardGlow);
+          sky=mix(sky,rose+sky*.55,roseLight*low*veil*(.43+.31*forwardGlow));
+          sky+=sunColor*roseLight*pow(sunAngle,75.)*.26;
+        }
         if(ridgeScene!=0)sky=mix(sky,paintSky(sky,d,sunDir,solar,stars,clouds),ridgeBlend);
         gl_FragColor=vec4(max(sky,vec3(.0003)),1.);
         #include <tonemapping_fragment>
@@ -362,7 +370,7 @@ export function createSky(scene,scenicUniforms) {
     uniforms.zenith.value.set(env.sky);uniforms.horizonColor.value.set(env.horizon);
     uniforms.sunColor.value.set(env.sun);uniforms.cloudColor.value.set(env.cloudColor??env.horizon);
     uniforms.sunDir.value.fromArray(env.sunDir||env.dir).normalize();uniforms.moonDir.value.fromArray(env.moonDir||[.4,.39,-.83]).normalize();
-    uniforms.cloudiness.value=env.cloud;uniforms.snow.value=env.snowAmount||0;uniforms.solar.value=env.sunAmount??1;
+    uniforms.roseLight.value=env.roseLight||0;uniforms.cloudiness.value=env.cloud;uniforms.snow.value=env.snowAmount||0;uniforms.solar.value=env.sunAmount??1;
     uniforms.stars.value=env.starAmount||0;uniforms.moonlight.value=env.moonAmount||0;
     uniforms.aurora.value=env.auroraAmount||0;uniforms.phase.value=env.elapsed||0;
   }};
@@ -389,7 +397,14 @@ export function bindScenicBuildings(groups,u,actor=false){
         #endif
         vScenicBuilding=(modelMatrix*scenicLocal).xyz;`);
       shader.fragmentShader='uniform int paintSurface;varying vec3 vScenicBuilding;\n'+glNoise+sceneHeader+scenicArchitecture+shader.fragmentShader.replace('#include <opaque_fragment>',`
-        if(ridgeScene!=0)outgoingLight=mix(outgoingLight,paintObject(outgoingLight,vScenicBuilding,transformDirectionByInverseViewMatrix(normal,viewMatrix),paintSurface),ridgeBlend);
+        vec3 scenicNormal=transformDirectionByInverseViewMatrix(normal,viewMatrix);
+        if(ridgeScene!=0)outgoingLight=mix(outgoingLight,paintObject(outgoingLight,vScenicBuilding,scenicNormal,paintSurface),ridgeBlend);
+        if(paintSurface==4 && ridgeRose>.001){
+          float rim=pow(1.-clamp(dot(normal,normalize(vViewPosition)),0.,1.),2.4);
+          float sunlit=smoothstep(-.12,.55,dot(scenicNormal,ridgeSolar.xyz));
+          outgoingLight+=ridgeRose*(vec3(1.,.56,.32)*rim*sunlit*.23
+            +diffuseColor.rgb*vec3(.12,.11,.18)*(.5+.5*max(-scenicNormal.y,0.)));
+        }
         #include <opaque_fragment>`);
     };
   });

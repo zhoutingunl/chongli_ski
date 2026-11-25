@@ -1,3 +1,4 @@
+import {LiftHelmet} from './lift-helmet.js';
 import {trialClimate,blendScenery,sceneById,cloudFloor,cloudRoof} from './scenery.js';
 import {sceneryUniforms,applySceneryUniforms} from './scenic-materials.js';
 import {createIceDust} from './ice-dust.js';
@@ -76,6 +77,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     lifts.push({...obj,meta:lift,distance,center,casters,radius:points[0].distanceTo(points.at(-1))*.5+200});
   }
   bindScenicBuildings([...landmarks,...lifts.map(l=>l.group)],scenic);
+  const helmet=new LiftHelmet();
   const navigation=createSkiNavigation(data);
   const details=courseDetails(scene,data,navigation);
   const trailGuide=createTrailGuide(scene,data,renderer,pisteProgress,surface.detail);
@@ -170,7 +172,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     if(p.airHeight>.1)surfNorm.lerp(up,clamp(p.airHeight*.8,0,1)).normalize();
     tiltQ.setFromUnitVectors(up,surfNorm);yawQ.setFromAxisAngle(up,-p.heading);tiltQ.multiply(yawQ);
     if(snap||baseTurn)rider.group.quaternion.copy(tiltQ);else rider.group.quaternion.slerp(tiltQ,1-Math.exp(-dt*32));
-    rider.update(p,dt,clock);
+    rider.update(p,dt,clock,helmet.progress);
     surface.setRiderShadow(!ride&&(!renderer.shadowMap.enabled||!sun.castShadow||opts.view==='first'||opts.view==='tips')?rider:null);
   }
   function moveCamera(dt,p=sim){
@@ -259,7 +261,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
       if(mode==='front'){back=-4.3;side=.32;lift=1.48;lead=0;eye=1.01;}
       if(mode==='far'){back=15;side=4.4;lift=4.8;lead=3.4;eye=1.2;}
       if(mode==='follow'){
-        back=3.55+fast*.62;lift=1.55+fast*.18;lead=3.8;eye=1.03;
+        back=2.92+fast*.48;lift=1.40+fast*.15;lead=2.85;eye=.91;
         fov=57+(reducedMotion?1:4)*fast;
         if(run&&!framed&&!reducedMotion)bank=clamp((p.curve||0)*fast*.062+(p.edge||0)*fast*.016,-.048,.048);
       }
@@ -352,7 +354,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     input.trim=input.steer=0;input.boost=input.brake=false;fx.reset();snowAir.reset();
   }
   function showScene(){descentFrames.reset();updateAvatar(0);moveCamera(0);refreshLOD();kick();}
-  function start(route){route=navigation.safeRun(route);resetScene(route);environment();details.setRoute(route);showScene();}
+  function start(route){helmet.reset();route=navigation.safeRun(route);resetScene(route);environment();details.setRoute(route);showScene();}
   function point(xz,height){return new THREE.Vector3(xz[0],data.height(...xz)+height,xz[1]);}
   function stationPortrait(lift,end){
     const at=end==='top'?lift.meta.points.at(-1):lift.meta.points[0];
@@ -388,6 +390,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     resetLook();showScene();
   }
   function stage(route,arrivalLift){
+    helmet.reset();
     const side=route.resort,place=data.summitPlaces[side];
     stopAt(route,place,side,arrivalLift||lifts.find(l=>l.meta.id===place.liftId),place.stationEnd,true);
   }
@@ -407,6 +410,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     showScene();return route;
   }
   function trailhead(route){
+    helmet.reset();
     route=navigation.safeRun(route);
     const f=route.frame(0),eye=[f.x-f.dx*6.4,f.z-f.dz*6.4],aim=[f.x+f.dx*10,f.z+f.dz*10];
     stopAt(route,{position:[f.x,f.z],heading:f.angle,camera:{position:eye,height:2.4,target:aim,targetHeight:1.4}},
@@ -420,7 +424,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
   }
   function beginRide(){
     const here=nearestStation();if(!here)return false;
-    sim.splits.finish();
+    helmet.board();sim.splits.finish();
     const {lift,end}=here,dir=end==='top'?-1:1;
     station=baseTurn=null;sim.pivotRate=0;resetLook();
     ride={lift,dir,t:dir>0?.004:.996,look:.09,pitch:0};sim.mode='lift';sim.speed=0;
@@ -429,6 +433,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
   }
   function leaveRide(){
     if(!ride)return;
+    helmet.unload();
     const {lift,dir}=ride,side=lift.meta.resort,end=dir>0?'top':'bottom';
     const route=data.routes.find(r=>r.id===side+'-classic');
     const at=end==='top'?lift.meta.points.at(-1):lift.meta.points[0];
@@ -542,11 +547,12 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     if(!paused){
       clock+=dt;climateAge+=dt;climate.advance(dt,opts.time,opts.weather,sim.mode==='run');
       if(transition||climateAge>.15){environment();climateAge=0;}
+      const waiting=helmet.update(dt,sim,input,data,conditions.resolvedTime);
       if(ride){
         ride.t=clamp(ride.t+dt*ride.dir*ride.lift.speed/ride.lift.length,.003,.997);
         const eye=ride.lift.seatAt(ride.t,ride.dir);sim.x=eye.x;sim.z=eye.z;sim.y=eye.y;
         if(ride.dir>0?ride.t>=.997:ride.t<=.003)leaveRide();
-      }else if(sim.mode==='run'){
+      }else if(sim.mode==='run'&&!waiting){
         details.setRoute(sim.route);
         descentFrames.advance(dt,input);
         if(sim.mode==='finished'){
@@ -586,6 +592,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
   el.addEventListener('webglcontextlost',e=>{e.preventDefault();if(active){active=false;onEvent('lost');}});
   return {
     sim,input,start,stage,trailhead,pushOff,beginRide,leaveRide,
+    beforeDeparture:ready=>helmet.beforeDeparture(ready),
     previewScenery,stageThirdLift,retryArt:forest.retryArt,
     photoFrame(){renderFrame();return el;},
     lockVideoCanvas(){
@@ -638,7 +645,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     },
     get nearbyStation(){const n=nearestStation();return n?{name:n.lift.meta.name,end:n.end}:null;},
     pause(b){paused=b;input.lookX=input.lookY=input.trim=input.steer=0;input.brake=input.boost=false;prev=0;kick();},
-    stop(){active=false;paused=false;ride=station=baseTurn=null;sim.pivotRate=0;if(frame)cancelAnimationFrame(frame);frame=0;sim.mode='idle';},
+    stop(){helmet.reset();active=false;paused=false;ride=station=baseTurn=null;sim.pivotRate=0;if(frame)cancelAnimationFrame(frame);frame=0;sim.mode='idle';},
     environment(){environment();kick();},graphics(){graphicsScale=1;lightingLimited=false;sun.castShadow=!isMiniTool&&opts.quality!=='lite';resize();treesLag=1;kick();},
     changeRider(){
       const previousScale=rider.dimensions.scale;

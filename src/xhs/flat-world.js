@@ -1,3 +1,5 @@
+import {outfitFor} from '../wardrobe.js';
+import {LiftHelmet} from '../lift-helmet.js';
 import {nearbyLiftStation} from '../lift-access.js';
 import {Descent} from '../simulation.js';
 import {GlideCamera,previewGlide,usesCameraWindow} from '../camera-window.js';
@@ -8,11 +10,11 @@ import {label,t} from '../language.js';
 
 // A top-down marker preserves direction on the trail map while showing the
 // same equipment, leading foot and helmet identity as the mountain view.
-function drawRiderMarker(ctx,opts,sim,x,y,heading) {
+function drawRiderMarker(ctx,opts,sim,x,y,heading,removed) {
   const gear=opts.gear, child=opts.gender==='boy'||opts.gender==='girl', female=opts.gender==='female'||opts.gender==='girl';
   const pace=Math.min(1,Math.max(0,sim.speed/22)), edge=sim.edge||0, brake=sim.brake||0;
   const outline='#344850', deck=child?'#b5d4cb':'#dfc69b';
-  const helmet=opts.gender==='boy'?'#5492a4':opts.gender==='girl'?'#f2d5b2':female?'#bbc7bf':'#3d4648';
+  const look=outfitFor(opts.gender,opts.color), helmet=look.helmet;
   function line(x1,y1,x2,y2,ink,width) {
     ctx.strokeStyle=ink;ctx.lineWidth=width;ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
   }
@@ -37,16 +39,22 @@ function drawRiderMarker(ctx,opts,sim,x,y,heading) {
     line(s*width,-1,tip,front,outline,2.8);
     if(gear!=='board')line(tip,front,tip+s*(2-.8*pace),front+8+6*pace,'#607378',.95);
   }
-  oval(0,0,width+1.0,4.9,0,outline);oval(0,0,width,4.2,0,opts.color||'#b96a47');
-  if(!child&&!female)oval(0,1.8,2.35,2.3,0,'#506263');
+  oval(0,0,width+1.0,4.9,0,outline);oval(0,0,width,4.2,0,look.coat);
+  if(child&&!female)oval(0,1.8,2.7,2.6,0,'#30394b');
+  if(female)for(const side of (child?[-1,1]:[0]))oval(side*2.8,2.0,child?1.2:1.7,2.7,0,'#55392e');
   ctx.restore();
   const headY=-3.6-2.6*pace,hr=child?4.5:4.0;
+  if(removed>0)oval(edge*.65,headY,hr*.89,hr*.93,0,'#4f382f');
+  const hx=removed*6.8,hy=removed*5.8-Math.sin(Math.PI*removed)*2.4;
+  ctx.translate(hx,hy);
+  if(opts.gender==='girl')for(const side of [-1,1])oval(side*3.2,headY-3,1.65,1.65,0,helmet);
   oval(edge*.65,headY,hr+.6,hr+.8,0,outline);oval(edge*.65,headY,hr,hr+.22,0,helmet);
   line(-hr*.55+edge*.65,headY-2.1,hr*.55+edge*.65,headY-2.1,'#4e8392',1.3);
   ctx.restore();
 }
 
 export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainClimate(),pisteProgress) {
+  const helmet=new LiftHelmet();
   const ctx=canvas.getContext('2d');
   if(!ctx)throw new Error('Canvas 2D is unavailable');
   canvas.hidden=false;
@@ -64,6 +72,7 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
     sim.upperGuide=at.guide;station={side,lift,end,summit,guide:at.guide,view:'wide'};ride=null;resetView();draw();kick();
   }
   function stage(route,arrivalLift){
+    helmet.reset();
     const place=data.summitPlaces[route.resort];
     const lift=arrivalLift||data.lifts.find(l=>l.id===place.liftId);
     gates(route,place,route.resort,lift,place.stationEnd,true);
@@ -71,10 +80,11 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
   function resetView(){
     previewRoute=null;lookUntil=0;canvas.hidden=false;active=true;paused=false;last=0;yaw=0;zoom=1;panX=panY=0;snowMarks=[];
   }
-  function start(route){
+  function start(route){helmet.reset();
     sim.start(navigation.safeRun(route));refreshClimate();station=ride=null;resetView();draw();kick();
   }
   function trailhead(route){
+    helmet.reset();
     const point=route.frame(0);
     gates(route,{position:[point.x,point.z],heading:point.angle},route.resort);
     station.trailhead=true;sim.mode='trailhead';
@@ -95,7 +105,7 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
   function beginRide(){
     const here=nearestStation();
     if(!here)return false;
-    sim.splits.finish();
+    helmet.board();sim.splits.finish();
     const {lift,end}=here;
     const line=[];
     for(let i=1;i<lift.points.length;i++){
@@ -109,6 +119,7 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
   }
   function leaveRide(){
     if(!ride)return;
+    helmet.unload();
     const {lift,dir}=ride,side=lift.resort,end=dir<0?'bottom':'top';
     const route=data.routes.find(r=>r.id===side+'-classic');
     if(end==='top'){climate.arriveUpperStation(opts.time);refreshClimate();}
@@ -189,7 +200,7 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
     }
     if(snowMarks.length>1)trace(snowMarks,night?'#7b9cb4':'#7d9cae',1.4);
     const [px,py]=position(sim.x,sim.z), heading=sim.heading+bearing;
-    drawRiderMarker(ctx,opts,sim,px,py,heading);
+    drawRiderMarker(ctx,opts,sim,px,py,heading,helmet.progress);
     const marker=navigation.nearbyChoices(sim);
     if(marker){
       ctx.save();ctx.font='bold 13px sans-serif';ctx.textAlign='center';ctx.lineWidth=3;
@@ -225,8 +236,9 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
     last=now;
     if(!paused){
       climate.advance(dt,opts.time,opts.weather,sim.mode==='run');yaw+=input.lookX*dt*1.75;
+      const waiting=helmet.update(dt,sim,input,data,conditions.resolvedTime);
       if(ride)moveLift(dt);
-      else if(sim.mode==='run'){
+      else if(sim.mode==='run'&&!waiting){
         sim.tick(dt,input);
         if(!sim.airborne&&sim.speed>.65){
           snowMarks.push([sim.x,sim.z]);
@@ -244,6 +256,7 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
   window.addEventListener('resize',redraw);
   return {
     flat:true,sim,input,start,stage,trailhead,pushOff,beginRide,leaveRide,
+    beforeDeparture:ready=>helmet.beforeDeparture(ready),
     photoFrame(){draw();return canvas;},
     lockVideoCanvas(){
       videoCanvasLocked=true;canvas.classList.add('video-frame-locked');
@@ -268,7 +281,7 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
     pushTowardsView(){sim.freeHeading(this.facing);yaw=0;redraw();},
     summitHeading(route){if(station?.guide)return station.guide.options.find(o=>o.routeId===route)?.selectionHeading;return station?.summit?navigation.summitHeading(station.side,route):undefined;},
     pause(value){paused=value;last=0;redraw();},
-    stop(){active=false;if(frame)cancelAnimationFrame(frame);frame=0;sim.mode='idle';canvas.hidden=true;},
+    stop(){helmet.reset();active=false;if(frame)cancelAnimationFrame(frame);frame=0;sim.mode='idle';canvas.hidden=true;},
     environment(){refreshClimate();redraw();},
     graphics:redraw,
     changeRider(){sim.gear=opts.gear;redraw();},

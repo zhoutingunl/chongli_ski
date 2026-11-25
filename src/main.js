@@ -1,3 +1,4 @@
+import {colourKeys, riderRoles, outfitFor, fittingColour} from './wardrobe.js';
 import './style.css';
 import {SceneryTrial,trialRouteId} from './scenery.js';
 import {paintScenicControls,groveFeedback} from './scenic-controls.js';
@@ -26,7 +27,7 @@ const setupOptions={
   resort:[['wanlong','万龙'],['genting','云顶']],
   gear:[['ski','双板','ski'],['board','单板','board']],
   gender:[['male','男士'],['female','女士'],['boy','男孩'],['girl','女孩']],
-  color:[['#aa5536','赭红'],['#ba9041','麦金'],['#597b78','松绿'],['#476d91','冰蓝'],['#c5c3b6','雪灰']]
+  color:colourKeys.map(id=>[id])
 };
 const prefs={view:'first',outsideView:'follow',quality:'auto',assist:true,sound:false,controls:true,
   time:'auto',weather:'auto',language:'zh',music:true,followMusic:true,track:'ridge',volume:75,tilt:false};
@@ -35,6 +36,8 @@ const trial=new SceneryTrial();
 function applySavedPreferences(){
   const previous=read(prefKey,{});
   Object.assign(prefs,previous);
+  prefs.outfits=Object.fromEntries(riderRoles.filter(role=>colourKeys.includes(previous.outfits?.[role]))
+    .map(role=>[role,previous.outfits[role]]));
   if(!motionSupported)prefs.tilt=false;
   if(isMiniTool)prefs.controls=true;
   for(const [kind,options] of Object.entries(setupOptions)){
@@ -111,22 +114,54 @@ function switchCamera(view){
   prefs.view=view;if(view!=='first')prefs.outsideView=view;
   world?.cameraChanged();showCameraMode();save();if(watching())hudVisible(true);
 }
-function swatches(){
-  return setupOptions.color.map(([id,name])=>'<button class="swatch" aria-label="'+label(name)+'" title="'+label(name)+'" data-choice="color" data-value="'+id+'" aria-pressed="'+(prefs.color===id)+'" style="--coat:'+id+'">'+glyph('check',13)+'</button>').join('');
+let fittingFront=false;
+const fittingAtlas=gear=>import.meta.env.BASE_URL+'assets/art/fitting-'+gear+'.webp';
+function outfitName(look){return t(look.name,look.english);}
+function swatches(withNames=false){
+  return colourKeys.map(id=>{
+    const look=outfitFor(prefs.gender,id),name=outfitName(look);
+    return '<button class="swatch'+(withNames?' outfit-chip':'')+'" aria-label="'+name+'" title="'+name+'" data-choice="color" data-value="'+id+'" aria-pressed="'+(prefs.color===id)+'" style="--coat:'+look.coat+';--accent:'+look.accent+';--trousers:'+look.pants+'">'+glyph('check',13)+(withNames?'<span>'+name+'</span>':'')+'</button>';
+  }).join('');
+}
+function modelStyle(role,front){
+  const key=role===prefs.gender?prefs.color:fittingColour(role,prefs.outfits);
+  const x=colourKeys.indexOf(key),y=riderRoles.indexOf(role)*2+Number(front);
+  return 'background-image:url('+fittingAtlas(prefs.gear)+');background-position:'+25*x+'% '+(y*100/7)+'%';
+}
+function showHomeRider(){
+  const home=$('#home-rider'),look=outfitFor(prefs.gender,prefs.color);
+  home.querySelector('.fitting-model').setAttribute('style',modelStyle(prefs.gender,false));
+  home.querySelector('.fitting-caption').textContent=outfitName(look)+'  ·  '+t('试穿','Try on');
+  home.setAttribute('aria-label',t('试穿雪服，当前','Open fitting room, ')+outfitName(look));home.hidden=false;
+  $('#coat-name').textContent=outfitName(look);
+}
+function fittingRoom(){
+  const turn=fittingFront?t('看背面','Back view'):t('看正面','Front view');
+  const roles=setupOptions.gender.map(([id,name])=>{
+    const age=['boy','girl'].includes(id)?'<small>'+t('5–6 岁','Ages 5–6')+'</small>':'';
+    return '<button class="fitting-role" data-choice="gender" data-value="'+id+'" aria-pressed="'+(prefs.gender===id)+'">'+
+      '<span class="fitting-model" style="'+modelStyle(id,fittingFront)+'"></span><span class="fitting-tag">'+label(name)+age+'</span></button>';
+  }).join('');
+  return heading('RIDER','角色',t('雪服试穿','Fitting room'))+
+    '<div class="fitting-bar">'+seg('gear',setupOptions.gear,prefs.gear)+button('fitting-turn',glyph('rotate',17)+turn,'fitting-turn')+'</div>'+
+    '<div class="fitting-rack" role="group" aria-label="'+label('角色')+'">'+roles+'</div>'+
+    '<fieldset class="fitting-colours"><legend>'+t('整套配色','Outfit colours')+'</legend><div>'+swatches(true)+'</div></fieldset>';
 }
 function syncSetupChoice(kind){
   const control=$('#'+kind+'-choices');
   for(const b of control.children)b.setAttribute('aria-pressed',String(b.dataset.value===prefs[kind]));
-  if(kind==='color')$('#coat-name').textContent=control.querySelector('[aria-pressed="true"]').title;
-  if(kind==='gender')$('#rider-age').hidden=!childSelected();
-  if(kind==='resort')mini?.select(selectedRoute());
+  if(kind==='gender'){
+    $('#rider-age').hidden=!childSelected();
+    $('#color-choices').innerHTML=swatches();
+  }
+  if(kind!=='resort')showHomeRider();
+  else mini?.select(selectedRoute());
 }
 const childSelected=()=>prefs.gender==='boy'||prefs.gender==='girl';
 function homeChoices(){
   for(const [kind,options] of Object.entries(setupOptions)){
     $('#'+kind+'-choices').innerHTML=kind==='color'?swatches():options.map(([id,name,icon])=>choice(kind,id,label(name),prefs[kind],icon)).join('');
   }
-  syncSetupChoice('color');
   syncSetupChoice('gender');
   mini?.select(selectedRoute());
 }
@@ -303,6 +338,7 @@ function launch(route){
 }
 function pushOff(direction,preferred=screen==='summit'?summitChoice||undefined:undefined,heading){
   if(!watching()||page||busy||!world)return false;
+  if(world.beforeDeparture(()=>pushOff(direction,preferred,heading)))return false;
   const acrossGenting=screen==='summit'&&world.station?.side==='genting'&&(direction==='left'||direction==='right');
   const turn=acrossGenting?(direction==='left'?-Math.PI/2:Math.PI/2):(departureTurn[direction]??0);
   const route=world.pushOff(turn,preferred,heading);
@@ -311,7 +347,7 @@ function pushOff(direction,preferred=screen==='summit'?summitChoice||undefined:u
   tilt.calibrate();hudVisible(true);paintHUD();refreshMusic();return true;
 }
 function continueDescent(){
-  if(screen!=='base'||page||!world?.continueAtBase())return false;
+  if(screen!=='base'||page||!world||world.beforeDeparture(continueDescent)||!world.continueAtBase())return false;
   screen='run';tray=recorded=false;routeId=world.sim.route.id;
   clearInputs();tilt.calibrate();hudVisible(true);paintHUD();refreshMusic();return true;
 }
@@ -486,7 +522,7 @@ function paintHUD(){
 function nav(k,txt,cls=''){return '<button data-act="'+k+'" class="'+cls+'" aria-current="'+(page===k)+'">'+txt+'</button>';}
 function navMarkup(){
   const item=(k,name,c)=>nav(k,label(name),c);
-  if(screen==='home')return '<span class="nav-label">'+t('红花梁 · 山顶','HONGHUALIANG')+'</span>'+button('close-panel',t('回到出发界面','Back to start'),'resume')+'<hr>'+item('map','雪场地图')+item('help','操作说明')+item('settings','设置')+nav('records',rankings.title())+(lastPhoto||clip||read(videoKey,[]).length?button('share',t('分享雪场','Share the mountain'),'nav-small'):'')+nav('sources',t('地形资料','Terrain data'),'nav-small');
+  if(screen==='home')return '<span class="nav-label">'+t('红花梁 · 山顶','HONGHUALIANG')+'</span>'+button('close-panel',t('回到出发界面','Back to start'),'resume')+'<hr>'+item('rider','角色')+item('map','雪场地图')+item('help','操作说明')+item('settings','设置')+nav('records',rankings.title())+(lastPhoto||clip||read(videoKey,[]).length?button('share',t('分享雪场','Share the mountain'),'nav-small'):'')+nav('sources',t('地形资料','Terrain data'),'nav-small');
   const resume=screen==='base'?t('回到山脚','Back to the base'):screen==='trailhead'?t('回到起点','Back to trailhead'):screen==='summit'?t('回到山顶','Back to summit'):screen==='station'?t('回到站台','Back to station'):screen==='lift'?t('继续乘坐','Continue ride'):t('继续滑','Resume descent');
   const results=screen==='base'?nav('finish',t('本趟成绩','Run stats')):'';
   return '<span class="nav-label">'+t('PAUSED · 暂停','PAUSED')+'</span>'+button('close-panel',resume,'resume')+results+item('map','雪场地图')+'<hr>'+item('environment','环境')+(world?.flat?'':item('view','视角'))+item('rider','角色')+nav('records',rankings.title())+button('share',t('分享雪场','Share the mountain'),'nav-small')+'<hr>'+item('help','操作说明','nav-small')+item('settings','设置','nav-small')+button('restart',t('回到雪道起点','Return to trailhead'),'nav-small')+button('home',t('回到主界面','Main menu'),'nav-small');
@@ -524,7 +560,7 @@ function renderPanel(keep=false){
   else if(page==='settings')p.innerHTML=settingsPanel(prefs,music.track,sourceText())+cloudControls();
   else if(page==='help')p.innerHTML=controlsPanel();
   else if(page==='rider'){
-    p.innerHTML=heading('RIDER','角色',t('角色与雪具','Rider and equipment'))+row(t('滑行装备','Equipment'),seg('gear',setupOptions.gear,prefs.gear))+row(label('角色'),seg('gender',setupOptions.gender,prefs.gender),childSelected()?t('5–6 岁','Ages 5–6'):'')+row(t('雪服配色','Jacket colour'),'<div class="swatches">'+swatches()+'</div>');
+    p.innerHTML=fittingRoom();
   }else if(page==='map'){
     const r=panelRoute(),side=mapRegion||r.resort,visited=t('已滑过','Skied');
     const regions=seg('mapRegion',[['wanlong',resort('wanlong')],['genting',resort('genting')]],side);
@@ -625,6 +661,11 @@ function setChoice(kind,v){
   if(Object.prototype.hasOwnProperty.call(setupOptions,kind)){
     if(!setupOptions[kind].some(([id])=>id===v))return;
     const changed=prefs[kind]!==v;
+    if(kind==='gender'&&changed){
+      if(chosenSetup.color)prefs.outfits[prefs.gender]=prefs.color;
+      chosenSetup.color=prefs.color=fittingColour(v,prefs.outfits);
+    }
+    if(kind==='color')prefs.outfits[prefs.gender]=v;
     chosenSetup[kind]=v;prefs[kind]=v;
     if(kind==='resort'){sharedRouteId=null;routeId=v+'-classic';}
     else if(changed&&world?.sim.route)world.changeRider();
@@ -948,6 +989,7 @@ $('#scene-list').addEventListener('change',e=>{
 });
 function action(a){
   if(a.startsWith('scenery-'))return scenicAction(a);
+  if(a==='fitting-turn'){fittingFront=!fittingFront;renderPanel(true);$('#panel [data-act="fitting-turn"]').focus({preventScroll:true});return;}
   if(a==='start'||a==='retry')return begin();
   if(a==='flat-mode'&&isMiniTool)return begin(world?.sim.route?.id,true);
   if(a==='fullscreen')return screenFull();

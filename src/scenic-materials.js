@@ -4,7 +4,7 @@ import {scenery,cloudFloor,cloudRoof} from './scenery.js';
 const identifiers=new Map(scenery.map((s,i)=>[s.id,i+1]));
 const defines=[...identifiers].map(([id,n])=>'#define RIDGE_'+id.toUpperCase()+' '+n).join('\n');
 export function sceneryUniforms(){
-  return {ridgePaintedSky:{value:null},hasPaintedSky:{value:0},ridgePaintedSnow:{value:null},hasPaintedSnow:{value:0},ridgeScene:{value:0},ridgeBlend:{value:1},ridgeClock:{value:0},ridgeSolar:{value:new THREE.Vector4()},ridgeNight:{value:0}};
+  return {ridgePaintedSky:{value:null},hasPaintedSky:{value:0},ridgePaintedSnow:{value:null},hasPaintedSnow:{value:0},ridgeScene:{value:0},ridgeBlend:{value:1},ridgeClock:{value:0},ridgeSolar:{value:new THREE.Vector4()},ridgeNight:{value:0},ridgeRose:{value:0}};
 }
 export function applySceneryUniforms(u,e){
   u.ridgeScene.value=identifiers.get(e.sceneId)||0;
@@ -12,11 +12,12 @@ export function applySceneryUniforms(u,e){
   u.ridgeClock.value=e.elapsed;
   u.ridgeSolar.value.set(...e.sunDir,e.sunAmount);
   u.ridgeNight.value=e.nightAmount;
+  u.ridgeRose.value=e.roseLight||0;
 }
 
 export const sceneHeader=defines+`
   uniform int ridgeScene;
-  uniform float ridgeClock,ridgeNight,ridgeBlend;
+  uniform float ridgeClock,ridgeNight,ridgeBlend,ridgeRose;
   uniform vec4 ridgeSolar;
   float sceneBell(float x){return exp(-x*x);}
   float sceneLuma(vec3 c){return dot(c,vec3(.23,.65,.12));}

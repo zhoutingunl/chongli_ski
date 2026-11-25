@@ -1,4 +1,4 @@
-import {blendColor} from './environment.js';
+import {blendColor,roseAlpenglow} from './environment.js';
 
 // In display order: visible from the piste first, then lookout and rarer conditions.
 // The automatic itinerary takes the same catalogue in geographical order below.
@@ -12,6 +12,7 @@ export const scenery=[
   scene('gold',natural,'日照金山','Alpenglow','sunset','clear','看对面山脊的最后一道暖光和背阴沟。','Compare the last warm ridge with the shaded gullies.'),
   scene('monet',art,'莫奈雪境','Impressionist snow','day','clear','近松枝头的粉杏色积雪，和脚下蓝紫阴影里的短笔触呼应。','Look for apricot snow on the boughs and broken lilac brushwork under the skis.'),
   scene('ink',art,'水墨崇礼','Chongli in ink','day','light','近松浓墨，远山淡墨。可在岔口检查雪上道名。','Dark pines fade into ink-wash ridges. Check the lettering at a fork.'),
+  scene('rose',natural,'粉金霞光','Rose alpenglow','sunset','clear','云边映成粉金色，背阳的雪坡留着淡紫的天光。','Peach light on the cloud rims and violet skylight across the shaded snow.','sun'),
   scene('cloudsea',natural,'云海穿行','Through the cloud sea','evening','clear','云层在海拔 1,830–1,870 米。山顶俯看，滑过玉龙道时穿云。','Look down from the ridge, then cross the 1,830–1,870 m cloud deck on Jade Dragon.'),
   scene('cloudbreak',natural,'云隙光','Cloudbreak','day','clear','看云隙投下的光斑沿坡移动，远近林带随之明暗。','Watch breaks in the clouds send moving pools of light across the snow and trees.'),
   scene('lamps',natural,'灯光夜场','Floodlit pistes','night','clear','沿道边灯具看暖白光池与远处站房。','Follow the pools of lamplight towards the illuminated base.'),
@@ -28,7 +29,7 @@ export const scenery=[
 export const sceneById=new Map(scenery.map(s=>[s.id,s]));
 // From the summit to the valley; the cloud deck spans 59–66% on the reference line.
 export const stops=[
-  [0,'gold'],[.070,'ink'],[.13,'monet'],[.195,'spindrift'],[.25,'halo'],
+  [0,'gold'],[.034,'rose'],[.070,'ink'],[.13,'monet'],[.195,'spindrift'],[.25,'halo'],
   [.303,'mineral'],[.365,'dust'],[.422,'cloudbreak'],[.49,'woodblock'],
   [.56,'cloudsea'],[.673,'squall'],[.735,'moon'],[.794,'starry'],[.864,'galaxy'],[.927,'lamps']
 ];
@@ -74,6 +75,7 @@ export function trialClimate(trial,opts,climate){
   const e={...base,sceneId:p.id};
   const gust=.5+.5*Math.sin(e.elapsed*.57+.9*Math.sin(e.elapsed*.19));
   switch(p.id){
+    case 'rose':return ['dawn','evening','sunset'].includes(e.resolvedTime)?roseAlpenglow(e,1):e;
     case 'gold':if(e.sunAmount>.35)e.sun=0xffaa51;break;
     case 'cloudbreak':e.cloud=Math.max(e.cloud,.64*e.sunAmount);e.sky=blendColor(e.sky,0x405f83,e.sunAmount);break;
     case 'lamps':e.lampAmount*=1.22;break;
@@ -97,7 +99,7 @@ export function trialClimate(trial,opts,climate){
 }
 
 const radianceFields=['sky','horizon','fog','sun','hemi','ground','treeTint','cloudColor'];
-const weatherFields=['light','ambient','density','exposure','cloud','nightAmount','auroraAmount','starAmount','sunAmount','moonAmount','snowAmount','wind','lampAmount'];
+const weatherFields=['roseLight','light','ambient','density','exposure','cloud','nightAmount','auroraAmount','starAmount','sunAmount','moonAmount','snowAmount','wind','lampAmount'];
 
 // A moving tour passes through neutral material while its two light rigs blend.
 // A frozen comparison always uses the exact endpoint, even mid-transition.
