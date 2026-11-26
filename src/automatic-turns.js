@@ -49,17 +49,18 @@ export class AutomaticTurns {
     if(!available)this.amplitude=ease(this.amplitude,0,15,dt);
   }
 
-  line(speed,halfWidth,grade,crossGrade,routeTurn,clear,dt){
+  line(speed,halfWidth,grade,crossGrade,routeTurn,clear,dt,moves){
     const slow=1-smooth(5,16,speed);
     const bend=smooth(.065,.46,Math.abs(routeTurn));
     const gradeFactor=(.83+.17*smooth(.015,.23,grade))*(1-.29*smooth(.07,.35,Math.abs(crossGrade)));
     const sweep=(4.8+1.15*slow+bend*(4.4*slow-.88))*gradeFactor;
-    const room=halfWidth*(.37+.09*smooth(10,20,halfWidth));
-    const amount=this.active ? Math.min(room,sweep)*clear*smooth(2.4,4.8,speed) : 0;
+    const long=moves?.carve||0,short=moves?.shortTurns||0;
+    const room=halfWidth*(.37+.09*smooth(10,20,halfWidth)+.08*long);
+    const amount=this.active ? Math.min(room,sweep*(1+.64*long-.46*short))*clear*smooth(2.4,4.8,speed) : 0;
     this.amplitude=ease(this.amplitude,amount,amount>this.amplitude?2.2:(this.active?4.0:15),dt);
     // Higher speed retains a full change of direction with a longer turning
     // radius so that the turn does not demand more edge grip than the skier has.
-    const radius=4.6+.54*speed+(1.45+2.9*bend)*slow;
+    const radius=(4.6+.54*speed+(1.45+2.9*bend)*slow)*(1+.22*long-.36*short);
     this.radius=ease(this.radius,Math.max(radius,speed*Math.sqrt(this.amplitude/8.3)),3.6,dt);
     this.phase=(this.phase+speed*dt/this.radius)%tau;
     const arc=this.amplitude*Math.sin(this.phase);

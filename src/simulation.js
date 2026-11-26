@@ -1,6 +1,7 @@
 import {snowResponse} from './snow-terrain.js';
 import {atWanlongForecourt} from './lift-access.js';
 import {AutomaticTurns,automaticCentreGain,edgeAcceleration} from './automatic-turns.js';
+import {RunMoves} from './run-moves.js';
 import {PisteSplits} from './piste-splits.js';
 import {pisteNames,pisteVisitKey} from './piste-progress.js';
 import {clamp, mixAngle} from './mountain.js';
@@ -18,9 +19,10 @@ const smooth = (x, lo, hi) => {
 export const physicsStep=1/90;
 
 export class Descent {
-  constructor(data, opts, dimensions = null) {
+  constructor(data, opts, dimensions = null, random = Math.random) {
     this.data = data; this.opts = opts; this.gear = opts.gear;
     this.dimensions = dimensions;
+    this.moves = new RunMoves(random);
     this.pisteName = pisteNames(data.trailCatalog);
     this.navigation = data.summitPlaces?.wanlong && data.summitPlaces?.genting ? createSkiNavigation(data) : null;
     this.mode = 'idle';
@@ -31,6 +33,7 @@ export class Descent {
 
   start(route) {
     this.upperGuide=null;
+    this.moves.reset();
     this.automatic=new AutomaticTurns();this.autoSkating=false;this.straightTuck=0;this.route = route; this.mode = 'run'; this.gear = this.opts.gear;
     this.junctions=this.navigation?.stationsOn(route)||[];
     this.pisteVisits=new Map();this.splits=new PisteSplits();this.continuedFrom=null;
@@ -98,7 +101,11 @@ export class Descent {
     const charge = this.charge;
     this.cancelJump();
     if (this.mode !== 'run' || this.airborne || this.jumpCooldown > 0) return false;
-    const impulse = 1.75 + 3.0 * smooth(charge, 0, 1);
+    this.moves.manualJump(this,charge);
+    return this.takeOff(1.75 + 3.0 * smooth(charge, 0, 1));
+  }
+
+  takeOff(impulse) {
     // Leave the hill with its current vertical velocity, then follow a world-space parabola.
     this.upSpeed = this.verticalAlong + impulse;
     if (!Number.isFinite(this.upSpeed)) this.upSpeed = impulse;
@@ -133,6 +140,7 @@ export class Descent {
     this.branchShiftX=this.x-(f.x-f.dz*offset);this.branchShiftZ=this.z-(f.z+f.dx*offset);
     this.edgeSpeed=this.speed*Math.sin(angleBetween(f.angle,this.travelHeading));
     if(route!==this.route){
+      this.moves.reset();
       this.junctions=this.navigation?.stationsOn(route)||[];
       this.requestedTurn=null;this.passedJunctions.clear();
     }
@@ -153,6 +161,7 @@ export class Descent {
     this.joinLine(next,0);
     this.handSteering=!this.opts.assist||(!stopped&&next.finishKind!=='lift-link');this.neutralTime=0;this.courseCheck=.5;
     this.automatic=new AutomaticTurns();this.autoSkating=false;this.straightTuck=0;
+    this.moves.reset();
     this.runoutRest=this.offPisteRest=0;this.recoveryReady=false;
     this.surface();
     return true;
@@ -172,6 +181,7 @@ export class Descent {
     this.edge=this.edgeRate=this.skid=this.slipAngle=this.steer=this.brake=this.boost=this.trim=this.push=0;
     this.press=this.pressure=this.curve=this.impact=this.landing=this.spray=this.bump=0;
     this.requestedTurn=null;this.cancelJump();this.automatic=new AutomaticTurns();this.autoSkating=false;this.straightTuck=0;
+    this.moves.reset();
     this.handSteering=!this.opts.assist;this.neutralTime=0;this.courseCheck=.4;
     this.offPisteRest=this.runoutRest=0;this.lastTreeHit=-Infinity;this.recoveryReady=false;
     this.surface();
@@ -315,6 +325,8 @@ export class Descent {
     const remaining = Math.max(0,this.route.length-this.along);
     const canGlide=assisted&&this.onTrail&&!!this.pisteContact?.trail&&!this.approach;
     this.automatic.update(input,oldSpeed,canGlide,this.charging,airborne,dt);
+    const junction=assisted?this.activeJunction(32+oldSpeed*.62,2):null;
+    const pop=this.moves.update(this,grade,remaining,junction,dt);
     // Keep taking strides across a crest until there is enough speed to glide.
     // Steering, braking, jumping or entering the stopping area releases the assist.
     const canSkate=assisted&&this.onTrail&&!airborne&&!this.charging&&this.automatic.handsFree&&remaining>12;
@@ -370,9 +382,8 @@ export class Descent {
     if (assisted) {
       const width = clamp((this.trail?.width || 38)*.47,9,31);
       const here=this.route.glideFrame(this.along),ahead=this.route.glideFrame(this.along+Math.max(13,planarSpeed*.95));
-      const junction=this.activeJunction(32+planarSpeed*.62,2);
       const clear=Math.min(smooth(remaining,24,61),junction?smooth(junction.along-this.along,9,32+planarSpeed*.62):1);
-      const {offset:lane,speed:laneVelocity,load:guidedArc}=this.automatic.line(planarSpeed,width,grade,crossGrade,angleBetween(here.angle,ahead.angle),clear,dt);
+      const {offset:lane,speed:laneVelocity,load:guidedArc}=this.automatic.line(planarSpeed,width,grade,crossGrade,angleBetween(here.angle,ahead.angle),clear,dt,this.moves);
       const steeringGain = this.automatic.active ? automaticCentreGain : .24;
       const recentre = (lane-this.offset)*(steeringGain+.47*smooth(Math.abs(this.offset),width*.55,width*1.04));
       const pull = edgeAcceleration(this.steer*planarSpeed*.59 + laneVelocity + recentre,this.edgeSpeed,planarSpeed,grip);
@@ -419,9 +430,11 @@ export class Descent {
       this.freeAge+=dt;
       if(this.freeAge>.16){const q=this.route.closest(this.x,this.z);this.along=q.along;this.planIndex=this.route.at(q.along).index;this.freeAge=0;}
     }
+    let blocked=false;
     if ((!assisted || Math.abs(this.offset)>9 || baseRange<110) && this.airHeight<1.4) {
       const hit=this.data.obstacles?.contact(this.x,this.z);
       if(hit){
+        blocked=true;
         if(hit.kind==='tree'&&this.elapsed-this.lastTreeHit>.20){
           this.lastTreeHit=this.elapsed;this.feedback.tree++;
         }
@@ -472,7 +485,9 @@ export class Descent {
           this.launch=lip?.50:.19;
         }
       }
+      if(pop && !blocked && !this.airborne)this.takeOff(board?2.70:2.52);
     }
+    this.moves.flight(this,dt);
     this.air = this.airborne ? clamp(this.airHeight/.72 + smooth(this.airTime,0,.14)*.22,0,1) : 0;
     const weight = (load*.68 + Math.abs(this.curve)*this.speed/G*.43 + this.skid*.26) * smooth(this.speed,.3,7);
     this.pressure = approach(this.pressure,this.airborne?0:clamp(weight + this.landing*.49,0,1.32),8,dt);
@@ -518,6 +533,7 @@ export class Descent {
     const atBase=reachedEnd||this.runoutRest>1.2;
     if(atBase&&!this.airborne){
       this.splits.finish();
+      this.moves.reset();
       this.mode='finished';this.speed=0;this.airborne=false;this.air=this.airHeight=0;this.y=this.ground;this.cancelJump();
       this.edge=this.edgeRate=this.edgeSpeed=this.steer=this.brake=this.boost=this.trim=0;
       this.pressure=this.skid=this.curve=this.spray=this.push=this.bankSwap=this.press=0;

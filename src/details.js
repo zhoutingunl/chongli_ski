@@ -150,9 +150,10 @@ function snowContact(p,dimensions){
   const heading=p.heading,travel=p.travelHeading??heading,edge=clamp(p.edge??p.steer??0,-1,1),load=clamp(p.pressure??Math.abs(edge),0,1.35);
   const skid=clamp(p.skid??p.brake??0,0,1),signedSlip=Math.sin(p.slipAngle??(heading-travel)),slip=Math.abs(signedSlip);
   const soft=clamp(p.snowSoftness??(p.onTrail===false ? .86 : .10),0,1),speed=Math.max(0,p.speed),v=smooth(.6,18,speed);
-  const press=clamp(p.press||0,-1,1),side=-Math.sign(Math.abs(signedSlip)>.085?signedSlip:Math.abs(edge)>.085?edge:p.cutSide||1);
+  const press=clamp((p.press||0)-(skis?0:p.moves?.balance||0),-1,1),side=-Math.sign(Math.abs(signedSlip)>.085?signedSlip:Math.abs(edge)>.085?edge:p.cutSide||1);
   const drive=Math.max(slip*(.19+.81*skid),Math.abs(edge)*(.10+.50*load),skid*(.17+.40*load));
-  const force=clamp(drive*(.34+.90*v)+soft*.105*v,0,1.4);
+  const edgeBite=(p.moves?.carve||0)*smooth(.10,.55,load);
+  const force=clamp(drive*(.34+.90*v+.48*edgeBite)+soft*.105*v,0,1.4);
   return {x:p.x,z:p.z,heading,travel,edge,load,skid,slip,soft,speed,press,side,force,skis,length,waist,
     scale:dimensions?.scale||1,stance:(dimensions?.stanceWidth||(skis ? .282 : .55))*(1+.248*load+.206*skid+.206*(p.push||0)),
     sink:Math.max(0,p.snowSink||0)};

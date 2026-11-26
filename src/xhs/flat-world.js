@@ -13,6 +13,8 @@ import {label,t} from '../language.js';
 function drawRiderMarker(ctx,opts,sim,x,y,heading,removed) {
   const gear=opts.gear, child=opts.gender==='boy'||opts.gender==='girl', female=opts.gender==='female'||opts.gender==='girl';
   const pace=Math.min(1,Math.max(0,sim.speed/22)), edge=sim.edge||0, brake=sim.brake||0;
+  const moves=sim.mode==='run'?sim.moves:null;
+  const carve=(moves?.carve||0)*edge, balance=moves?.balance||0;
   const outline='#344850', deck=child?'#b5d4cb':'#dfc69b';
   const look=outfitFor(opts.gender,opts.color), helmet=look.helmet;
   function line(x1,y1,x2,y2,ink,width) {
@@ -25,17 +27,21 @@ function drawRiderMarker(ctx,opts,sim,x,y,heading,removed) {
   ctx.save();ctx.translate(x,y-Math.min(12,(sim.airHeight||0)*12));ctx.rotate(heading);
   if(child)ctx.scale(.83,.83);
   if(gear==='board'){
-    oval(0,0,4.7,15,-edge*.065,outline);oval(0,0,3.5,13.8,-edge*.065,deck);
+    const deckAngle=-edge*.065+(moves?.airPose||0)*(moves?.side||1)*.50;
+    oval(0,0,4.7,15-balance*2,deckAngle,outline);oval(0,0,3.5,13.8-balance*2,deckAngle,deck);
     line(-2.5,-3,2,-5,outline,2.4);line(-2,4,2.7,5,outline,2.4);
   }else for(const s of [-1,1]){
     const toe=s*(3.4-(child?1.6:.7)*brake);
-    line(s*(3.4+brake),10,toe,-15,outline,3.3);line(s*(3.4+brake),10,toe,-15,deck,1.7);
+    const advance=balance*Math.max(0,s*edge)*4;
+    line(s*(3.4+brake),10-advance,toe,-15-advance,outline,3.3);line(s*(3.4+brake),10-advance,toe,-15-advance,deck,1.7);
   }
   const tilt=gear==='board'?.80-edge*.22:edge*.18;
+  ctx.translate(carve*3,gear==='board'?balance*2:0);
   ctx.save();ctx.translate(edge*1.35,0);ctx.rotate(tilt);
   const width=child?5.2:5.6,arm=width+2+Math.abs(edge)*(child?3:1.8);
   for(const s of [-1,1]){
-    const tip=s*arm,front=-2.8-2.8*pace+s*edge*2.5;
+    const tap=(moves?.shortTurns||0)*Math.max(0,s*Math.cos(sim.automatic?.phase||0))**4;
+    const tip=s*(arm+Math.abs(carve)*3.2),front=-2.8-2.8*pace+s*edge*2.5-(gear==='ski'?tap*3:0);
     line(s*width,-1,tip,front,outline,2.8);
     if(gear!=='board')line(tip,front,tip+s*(2-.8*pace),front+8+6*pace,'#607378',.95);
   }

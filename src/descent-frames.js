@@ -1,5 +1,6 @@
 import {clamp,lerp,mixAngle} from './mountain.js';
 import {physicsStep} from './simulation.js';
+import {moveChannels} from './run-moves.js';
 
 const motion=['x','y','z','ground','snowSink','speed','slope','roll','airHeight',
   'edge','edgeRate','curve','pressure','terrainFlex','groundLoad','verticalAlong','upSpeed'];
@@ -13,6 +14,8 @@ export class DescentFrames {
     this.sim=sim;
     this.frame=Object.create(sim);
     this.previous={};
+    this.previousMoves={};
+    this.renderMoves={};
     this.reset();
   }
 
@@ -39,6 +42,7 @@ export class DescentFrames {
     prev.guided=sim.guided;
     prev.route=sim.route;
     prev.airborne=sim.airborne;
+    if(sim.moves)for(const key of moveChannels)this.previousMoves[key]=sim.moves[key];
     if(prev.turns!==turns)this.turns=Object.create(turns);
     prev.turns=turns;
     prev.phase=turns.phase;prev.radius=turns.radius;prev.amplitude=turns.amplitude;
@@ -52,6 +56,11 @@ export class DescentFrames {
     for(const key of motion)frame[key]=lerp(prev[key],sim[key],t);
     for(const key of bearings)frame[key]=mixAngle(prev[key],sim[key],t);
     frame.airborne=sim.airborne||(prev.airborne&&frame.airHeight>.002);
+    if(sim.moves){
+      for(const key of moveChannels)this.renderMoves[key]=lerp(this.previousMoves[key],sim.moves[key],t);
+      this.renderMoves.side=sim.moves.side;
+      frame.moves=this.renderMoves;
+    }
     // A fork can change lane coordinates in one tick even though the skier's
     // world position is continuous. Pick up the new route at its own chainage.
     const sameLane=prev.route===sim.route&&prev.guided===sim.guided&&prev.turns===sim.automatic;

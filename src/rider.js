@@ -1245,6 +1245,13 @@ export function createRider(options = {}) {
     mid.z+=clamp(correction/.81,-.19,.20);
   }
 
+  function turnTap(state,side,speed){
+    const amount=state.mode==='run' && state.moves?.shortTurns;
+    if(!amount || speed>=17)return 0;
+    const crossing=Math.max(0,side*Math.cos(state.automatic?.phase||0));
+    return amount*crossing**4*(1-THREE.MathUtils.smoothstep(speed,14,17));
+  }
+
   // A turn filmed from behind reads through the path of the boots underneath
   // the hips. The lower body establishes an edge before the shoulders follow.
   // Work from the base joints each frame; the goggles camera uses that base pose.
@@ -1276,6 +1283,11 @@ export function createRider(options = {}) {
     const arc = outsidePose.arc, torsoArc = outsidePose.chest, change = arc-torsoArc;
     const entryDelta = outsidePose.entry-attack, exitDelta = outsidePose.exit-release;
     const force = smooth(Math.abs(arc),.055,.93), carve = smooth(Math.abs(arc),.42,1.04)*(1-.58*skid);
+    const moves=drive?state.moves:null;
+    const deep=(moves?.carve||0)*smooth(Math.abs(arc),.08,.52);
+    const quick=(moves?.shortTurns||0)*smooth(Math.abs(arc),.05,.48);
+    const rearPress=board?(moves?.balance||0):0, apex=moves?.airPose||0;
+    const insideSign=Math.sign(arc);
     const coast = (1-smooth(force,.07,.70))*(1-.66*steep)*(1-push)*
       (1-clamp(Math.max(skid,brake,charge,boost*fast,land,air),0,1));
     const heel = board ? Math.max(0,-arc) : 0, toe = board ? Math.max(0,arc) : 0;
@@ -1297,7 +1309,9 @@ export function createRider(options = {}) {
     const rise = neutral+.060*crossing+.052*launch+.027*impactSoon;
     const heightDelta = springLegs(outsidePose.spring,rise-drop-race*(juniorSkier ? .131 : .166),land>.14 ? 23 : 16,dt,snap);
     const juniorBend=small ? .069+(juniorSkier ? .048 : .036)*force+.025*land+.018*charge-(juniorSkier ? .053 : .029)*crossing : 0;
-    pelvis.position.y = Math.max(board ? .423 : .436-race*.067,pelvis.position.y+heightDelta-juniorBend-pace*(.068-.030*force));
+    const accentDrop=deep*(board?.286:.145)+quick*.095+rearPress*.10;
+    pelvis.position.y = Math.max((board ? .423 : .436-race*.067)-deep*.12,
+      pelvis.position.y+heightDelta-juniorBend-pace*(.068-.030*force)-accentDrop);
     const slideX = .43+.57*Math.cos(slip), slideZ = -.57*Math.sin(slip);
     // Project a share of the inverted pendulum at the hip. The rest of the
     // body inclines above it. The outside ski also moves the support point.
@@ -1305,6 +1319,7 @@ export function createRider(options = {}) {
       board ? -.36 : -.46,board ? .36 : .46) * (1-.28*skid);
     const priorX = baseLean*(board ? .310 : .351)+baseAngulation;
     pelvis.position.x += (lateral-priorX)*slideX + pivot*(board ? .023 : .029);
+    pelvis.position.x += insideSign*deep*(board?.245:.138);
     pelvis.position.z += (lateral-baseLean*.249)*slideZ;
     const anticipation = clamp(change*2.2,-1,1);
     const forward = board ? -.030*Math.abs(anticipation)+.033*heel+.029*skid :
@@ -1315,7 +1330,7 @@ export function createRider(options = {}) {
     // Hips hinge about the femoral heads. The rib cage faces farther down the
     // hill and inclines less. Give the steeper slope part of the forward pitch
     // rather than folding the back twice when the snow normal already tilts.
-    const hipYaw=(board ? -1.34 : 0) + slip*(board ? .36 : .28) - arc*((board ? .098 : .057)+(small ? (board ? .057 : .020) : 0)) + pivot*.10;
+    const hipYaw=(board ? -1.34 : 0) + slip*(board ? .36 : .28) - arc*((board ? .098 : .057)+(small ? (board ? .057 : .020) : 0)) + pivot*.10 + (board?apex*(moves?.side||1)*.22:0);
     const upperYaw=(board ? -1.035-.10*coast : 0) + slip*(board ? .67 : .64) +
       torsoArc*((board ? .089 : .045)+(small ? (board ? .165 : .037) : 0)) + anticipation*(small ? (board ? .255 : .135) : .074) +
       push*Math.sin(stridePhase*TAU)*.082 - pivot*(small ? .32 : .20) -
@@ -1327,9 +1342,9 @@ export function createRider(options = {}) {
       (board ? .051*toe-.047*heel : .058*trim)-gradeCredit+.145*pace+(external ? .044*moving+.02*steep : 0)+race*(juniorSkier?.28:.34);
     const cross=Math.sin(state.roll || 0)*moving;
     pelvis.rotation.set(-pelvicFlex,hipYaw,board ? (.064*trim+.042*outsidePose.entry-.039*outsidePose.exit) : 0,'YXZ');
-    leanQ.setFromAxisAngle(leanAxis,arc*(board ? .48 : juniorSkier ? .64 : .51)+cross*.053);pelvis.quaternion.premultiply(leanQ);
+    leanQ.setFromAxisAngle(leanAxis,arc*(board ? .48 : juniorSkier ? .64 : .51)+cross*.053+insideSign*deep*(board?.37:.14));pelvis.quaternion.premultiply(leanQ);
     torso.rotation.set(-chestFlex,chestYaw,board ? -.066*trim : 0,'YXZ');
-    leanQ.setFromAxisAngle(leanAxis,torsoArc*(board ? (small ? .51 : .46) : juniorSkier ? .67 : .34)-change*.045+cross*.067);
+    leanQ.setFromAxisAngle(leanAxis,torsoArc*(board ? (small ? .51 : .46) : juniorSkier ? .67 : .34)-change*.045+cross*.067+insideSign*deep*(board?.94:.22));
     torso.quaternion.premultiply(leanQ);
     if(board && external){
       // A snowboarder faces across the deck. Flexing in the anatomical
@@ -1359,7 +1374,7 @@ export function createRider(options = {}) {
 
     // Pull both decks up during flight with the original sole-to-binding
     // relationship. Release the tuck before touching back down.
-    const draw = flight ? Math.min((state.airHeight ?? air)*.44,.088*air)*(1-impactSoon) : 0;
+    const draw = flight ? Math.min((state.airHeight ?? air)*.44,.088*air)*(1-impactSoon)+apex*(board?.125:.10) : 0;
     if (draw>0) for (const plank of decks) plank.position.y += draw;
     const reach = leg1+leg2-.014;
     const tuckedReach=(leg1+leg2)*(external ? (junior ? (board ? .55 : .495) : .435) : .30);
@@ -1368,7 +1383,10 @@ export function createRider(options = {}) {
     // leg height depend on each other. Re-evaluate after the hips settle.
     const passes=external && standing>.25 ? 3 : 1;
     for(let pass=0;pass<passes;pass++) {
-      if(external)balanceOverBoots(pace,force,arc,tuck,trim,push,standing,race);
+      if(external){
+        balanceOverBoots(pace,force,arc,tuck,trim,push,standing,race);
+        pelvis.position.z+=rearPress*.105;
+      }
       let lowest=0,highest=2;
       for(const {s,ankle} of limbs) {
         hipOffset.set(s*hipWidth,-.007,.006).applyQuaternion(pelvis.quaternion);
@@ -1474,6 +1492,17 @@ export function createRider(options = {}) {
           .applyAxisAngle(axisY,chestYaw).add(jointOrigin);
         wristGoal.lerp(handOffset,race*(juniorSkier ? .75 : .88));
       }
+      if(board && deep>.001){
+        if(s===insideSign){
+          const across=jointOrigin.x+insideSign*.19,along=jointOrigin.z-.07;
+          handOffset.set(across,snowUnder(snow,across,along)+.038,along);
+        }else handOffset.set(-insideSign*.38,.13,s*.19).add(jointOrigin);
+        wristGoal.lerp(handOffset,deep);
+      }
+      if((board && rearPress>.001) || apex>.001){
+        handOffset.set(s*(board?.39:.24),.02,-.10+s*.09).add(jointOrigin);
+        wristGoal.lerp(handOffset,Math.max(rearPress*.80,apex*.90));
+      }
       if (limb.pole) {
         oldTip.copy(limb.poleDirection).multiplyScalar(poleLength*limb.pole.scale.y).add(limb.pole.position);
         if (limb.plant) {
@@ -1514,12 +1543,13 @@ export function createRider(options = {}) {
           const brakingSide=Math.abs(arc)>.09?Math.sign(arc):1;
           const brush=smooth(brake,.40,.91)*smooth(speed,9,21)*(s===brakingSide?.97:.69)*(1-air);
           const clearance=mix(carryHeight+race*(juniorSkier?.14:.22),.035,brush);
-          const targetY=mix(freeTipY,snowY+clearance,carry);
+          const quickTap=turnTap(state,s,speed);
+          const targetY=mix(mix(freeTipY,snowY+clearance,carry),snowY+.014,quickTap);
           const vertical=clamp(pole.position.y-targetY,-.12,poleLength-.016);
           const open=juniorSkier ? mix(limb.poleDirection.x,s*(.24+.066*pace+.19*outside)+.028*arc,carry) :
             limb.poleDirection.x+s*(.14*force+.10*crossing);
           const across=mix(open,s*.105,race)+s*.24*brush;
-          support.set(across,0,mix(limb.poleDirection.z,1,carry));
+          support.set(across,0,mix(mix(limb.poleDirection.z,1,carry),-.38,quickTap));
           support.setLength(Math.sqrt(poleLength**2-vertical**2));support.y=-vertical;support.normalize();pole.scale.y=1;
         }
         pole.quaternion.setFromUnitVectors(axisDown,support);
@@ -1589,7 +1619,9 @@ export function createRider(options = {}) {
     const fast = clamp(posed.speed/21,0,1), edge = posed.edge;
     const incomingAir = drive ? clamp(state.air ?? (state.airHeight || 0),0,1) : 0;
     const inFlight = drive && (state.airborne ?? (incomingAir>.025));
-    const charge = drive ? (state.charge || 0) : 0, launch = drive ? (state.launch || 0) : 0;
+    const moves=drive?state.moves:null;
+    const balanceMove=moves?.balance||0, airStyle=moves?.airPose||0;
+    const charge = drive ? Math.max(state.charge||0,(moves?.preload||0)*.92) : 0, launch = drive ? (state.launch || 0) : 0;
     const land = drive ? clamp(state.landing || 0,0,1.22) : 0;
     const brake = drive ? (state.brake || 0) : 0, boost = drive ? (state.boost || 0) : 0;
     posed.steer = mix(posed.steer,drive ? (state.steer || 0) : 0,ease(15));
@@ -1682,7 +1714,7 @@ export function createRider(options = {}) {
     const footBalance = board ? -.084*attack + .053*release + .055*skid + wave*push*.051 : -.025*attack;
     const hipZ = (board ? -.020 : .050) + (board ? -.021 : .054)*fast - fore +
       lean*intoZ*.249 + footBalance + .046*charge + .057*land + .029*hollow;
-    const gearYaw = -edge*.024;
+    const gearYaw = -edge*.024+(board?airStyle*(moves?.side||1)*.50:0);
     const pelvisYaw = (board?-1.33:0)+gearYaw+slip*(board ? .25:.28) - edge*(board ? .213 : .103)+(board ? (frontEdge-rearEdge)*.13 : 0);
     const chestTarget = (board?-.94:0) + slip*(board ? .73:.69) + edge*(board ? .25:.14)
       + (board ? wave*push*.12 : wave*push*.091);
@@ -1708,12 +1740,12 @@ export function createRider(options = {}) {
     head.quaternion.copy(torso.quaternion).invert().multiply(gaze);
 
     const press = drive ? (state.press ?? Math.sign(trim)*THREE.MathUtils.smoothstep(Math.abs(trim),.57,.98)) : 0;
-    const pressPitch = -press*(board ? .150 : .064);
+    const pressPitch = -press*(board ? .150 : .064)+(board?balanceMove*.21:0);
     const contactLift = Math.abs(Math.sin(pressPitch))*(board ? .62 : .65)*deckLength;
     const boardPitch = air*(-.13 + (state.upSpeed<0 ? .19:0)) - trim*.010 + pressPitch + launch*.083;
     const boardLift = inFlight ? air*(.112-.071*impactSoon) : 0;
     const noseLoad=clamp(Math.max(0,trim)*.88+pressure*.24+land*.18,0,1);
-    const tailLoad=clamp(Math.max(0,-trim)*.85+charge*.28,0,1);
+    const tailLoad=clamp(Math.max(0,-trim)*.85+charge*.28+(board?balanceMove*.74:0),0,1);
     if (deck) {
       const roll = -(edge*(.28+.65*moving) + cutSide*skid*.08)*(1-.69*air);
       const foreSnow = snowUnder(snow,0,-.58*deckLength), aftSnow = snowUnder(snow,0,.58*deckLength);
@@ -1723,6 +1755,7 @@ export function createRider(options = {}) {
       deck.position.set(0,.002+Math.abs(Math.sin(roll))*.116*deckWidth+boardLift+contactLift+centreRelief,0);
       deckFlex(noseLoad,tailLoad,twist);
       if ((junior || groundMatrix) && !inFlight) deck.position.y+=.0015-runningClearance(deck,noseLoad,tailLoad,twist);
+      else if(balanceMove>.001 && !inFlight)deck.position.y+=balanceMove*(.0015-runningClearance(deck,noseLoad,tailLoad,twist));
     }
 
     for (const limb of limbs) {
@@ -1770,10 +1803,11 @@ export function createRider(options = {}) {
         // between the short shovels and blend back to parallel as pace builds.
         const slowWedge = junior && !inFlight ? moving*(1-THREE.MathUtils.smoothstep(speed,5,10))*(1-push) : 0;
         const wedge = brake*(1-skid)*.135 + slowWedge*(.037+.112*brake);
-        let halfTrack = (.141+.035*pressure+.029*skid+.034*air+.029*push)*stance;
+        const stepUp=balanceMove*THREE.MathUtils.smoothstep(inside,.045,.42);
+        let halfTrack = (.141+.035*pressure+.029*skid+.034*air+.029*push+.051*(moves?.carve||0))*stance;
         if (slowWedge>0) halfTrack = Math.max(halfTrack,.060*deckWidth+.96*deckLength*Math.sin(wedge));
         const lateral = s*halfTrack;
-        const advance = -.128*insideLoad+.078*outside+air*s*.080-step*.145;
+        const advance = -.128*insideLoad+.078*outside+air*s*.080-step*.145-.105*stepUp;
         const yaw = gearYaw+s*wedge+s*air*.074-s*push*.097;
         const nose=.64*deckLength, tail=.56*deckLength;
         const dx=Math.sin(yaw), dz=Math.cos(yaw);
@@ -1781,12 +1815,12 @@ export function createRider(options = {}) {
         const front=snowUnder(snow,lateral-dx*nose,advance-dz*nose);
         const rear=snowUnder(snow,lateral+dx*tail,advance+dz*tail);
         const localPitch=followSkiTerrain(limb,front,middle,rear,nose,tail,dt,snapPose);
-        plank.rotation.set(boardPitch+localPitch+air*s*.058+step*.024,yaw,roll,'YXZ');
+        plank.rotation.set(boardPitch+localPitch+air*s*.058+step*.024+.083*stepUp,yaw,roll,'YXZ');
         plank.position.set(lateral,.002+Math.abs(Math.sin(roll))*.047*deckWidth+boardLift+contactLift,advance);
         const frontLoad=clamp(noseLoad*(.85+outside*.34),0,1);
         limb.flex(frontLoad,tailLoad);
         if (!inFlight) {
-          const lift=Math.max(0,step)*.026+insideLoad*turnCycle.transfer*.014;
+          const lift=Math.max(0,step)*.026+insideLoad*turnCycle.transfer*.014+.108*stepUp;
           const height=plank.position.y+.0015+lift-runningClearance(plank,frontLoad,tailLoad,0);
           plank.position.y=seatSki(limb,height,dt,snapPose||incomingAir>.005);
         } else {
@@ -1830,7 +1864,8 @@ export function createRider(options = {}) {
       aimBone(limb.thigh,hip,knee,cutThigh,bootYaw);aimBone(limb.shin,knee,ankle,cutShin,bootYaw);
 
       shoulder.set(s*width,.396,.009).applyQuaternion(torso.quaternion).add(torso.position);
-      const poleTap = s===turnCycle.sign ? turnCycle.plant*turnMotion*(1-.7*tuck) : 0;
+      const quickTap=board?0:turnTap(state,s,speed);
+      const poleTap = Math.max(quickTap,s===turnCycle.sign ? turnCycle.plant*turnMotion*(1-.7*tuck) : 0);
       if (board) {
         wrist.set(s*(.381+.085*pressure+.075*air+.068*land)-s*charge*.046,
           .054+.12*air+.055*charge+s*edge*.14+recovered*push*.087,
@@ -1856,13 +1891,18 @@ export function createRider(options = {}) {
           recovered*push*.090 + outside*.031 + poleTap*.035;
       }
       wrist.applyAxisAngle(axisY,chestYaw).add(torso.position);
+      if(board && visibility!=='body' && !junior && moves?.carve){
+        const loaded=moves.carve*THREE.MathUtils.smoothstep(Math.abs(edge),.08,.52);
+        wrist.x+=(s*edge>0?.16:.08)*Math.sign(edge)*loaded;
+        wrist.y+=(s*edge>0?-.24:.08)*loaded;
+      }
       tmp.subVectors(wrist,shoulder).clampLength(.12,arm1+arm2-.002);
       wrist.copy(shoulder).add(tmp);
 
       // A planted pole tip briefly stays in the snow as the skier moves past it.
       const worldPose = Number.isFinite(state.x) && Number.isFinite(state.z);
       if (limb.pole) {
-        const carryPoles=visibility==='body' && speed>10.5;
+        const carryPoles=visibility==='body' && speed>10.5 && quickTap<.55;
         if (!drive || inFlight || !worldPose || rewound || carryPoles) limb.plant=null;
         const startPlant = (push>.25 && phase<.18 && (limb.lastStroke>=.18 || !limb.wasPushing)) ||
           (poleTap>.8 && limb.lastStroke<.79 && push<.35);

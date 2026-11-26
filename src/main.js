@@ -29,7 +29,7 @@ const setupOptions={
   gender:[['male','男士'],['female','女士'],['boy','男孩'],['girl','女孩']],
   color:colourKeys.map(id=>[id])
 };
-const prefs={view:'first',outsideView:'follow',quality:'auto',assist:true,sound:false,controls:true,
+const prefs={view:'first',outsideView:'follow',quality:'auto',assist:true,variedMoves:true,sound:false,controls:true,
   time:'auto',weather:'auto',language:'zh',music:true,followMusic:true,track:'ridge',volume:75,tilt:false};
 const chosenSetup={};
 const trial=new SceneryTrial();
@@ -673,6 +673,11 @@ function setChoice(kind,v){
   }
   else if(kind==='track'){prefs.track=v;prefs.followMusic=false;prefs.music=true;activateAudio();}
   else if(kind==='assist'){world?.sim.setAssist(v==='on');prefs.assist=v==='on';}
+  else if(kind==='variedMoves'){
+    prefs.variedMoves=v==='on';save();
+    for(const button of $$('#panel [data-choice="variedMoves"]'))button.setAttribute('aria-pressed',String(button.dataset.value===v));
+    return;
+  }
   else if(kind==='controls'){prefs.controls=v==='on';}
   else{
     prefs[kind]=v;
