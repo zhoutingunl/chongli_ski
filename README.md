@@ -1,6 +1,6 @@
 # 山脊之间 · 万龙与云顶
 
-河北崇礼红花梁的三维滑雪网页。万龙与云顶位于山脊两侧，在同一张地形上相连。手机横屏、竖屏和电脑键盘都可以玩。[直接体验网页版 1.25.0](https://qupfile.cloudvdn.com/chongli-ski_20261127_033509.html)
+河北崇礼红花梁的三维滑雪网页。万龙与云顶位于山脊两侧，在同一张地形上相连。手机横屏、竖屏和电脑键盘都可以玩。[直接体验网页版 1.25.0](https://qupfile.cloudvdn.com/chongli-ski_20261127_043432.html)
 
 ![万龙山顶的第一人称游戏画面，索道站前的雪面上标有金龙道和长龙道](docs/media/wanlong-summit.jpg)
 
@@ -49,7 +49,7 @@
 
 ![同机位的四组游戏截帧，依次为莫奈雪境、水墨崇礼、云海穿行与梵高星空](docs/media/scenery-trial.webp)
 
-打开三索专用入口，点「三索上站试景」，会从真实索道上站的固定机位进入水墨崇礼。六种艺术画境都可以点「看近树」，端详同一株树的枝条、树皮和覆雪。点「原景对照」会保留当前机位与光雪，点「回滑手机位」回到原处。[万龙三索上站试景](https://qupfile.cloudvdn.com/chongli-ski_20261127_033509.html#sansuo)
+打开三索专用入口，点「三索上站试景」，会从真实索道上站的固定机位进入水墨崇礼。六种艺术画境都可以点「看近树」，端详同一株树的枝条、树皮和覆雪。点「原景对照」会保留当前机位与光雪，点「回滑手机位」回到原处。[万龙三索上站试景](https://qupfile.cloudvdn.com/chongli-ski_20261127_043432.html#sansuo)
 
 ![六种艺术画境在同一站台及同一株近树的游戏实拍](docs/media/third-lift-art.webp)
 
@@ -74,6 +74,8 @@ npm run dev
 npm run build
 npm run preview
 ```
+
+使用七牛 CDN 发布已有的单文件网页时，运行 `node scripts/build-cdn-entry.mjs <单文件网页路径> <YYYYMMDD_HHMMSS> --parts`。将生成的入口和所有同时间戳的 `.bin` 文件放在同一 CDN 目录。手机遇到断线会单独重试缺失的分块。
 
 ## 操作
 
@@ -109,6 +111,7 @@ npm run preview
 | [piste-progress.test.js](test/piste-progress.test.js) 和 [ski-engagement.test.js](test/ski-engagement.test.js) | 两条跨场联滑线实际滑行、标记清除与撤销、旧云存档合并与累计数据 |
 | [snow-terrain.test.js](test/snow-terrain.test.js) | 细雪网格与远处地表连续覆盖、移动换块和切换画质、U 型池和蘑菇道 |
 | [rider.test.js](test/rider.test.js) | 对比成人与儿童雪具，测量男孩、女孩直滑、加速和左右换刃时的姿态 |
+| [piste-traffic.test.js](test/piste-traffic.test.js) | 实际滑行中避开多名雪友、手动碰撞与掉板重穿、时段更替和缆车换客、六套配色及道外救援 |
 | [lift-helmet.test.js](test/lift-helmet.test.js) | 索道附近的停稳与光照条件、手和头盔的位置、上车后再次出发，以及四个角色的试穿配色 |
 | [mountain.test.js](test/mountain.test.js) | 检查高程三角面、边界采样、雪道里程与最近点、建筑和树干碰撞，以及随包林地图的尺寸 |
 | [environment.test.js](test/environment.test.js) | 检查昼夜与晴雪周期、四段降雪时长、低角度霞光的抽取和渐变、手选优先级 |
