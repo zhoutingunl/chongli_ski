@@ -2,10 +2,22 @@ import {clamp} from './mountain.js';
 
 const laneFrequency=11;
 
-export function usesCameraWindow(sim,input) {
-  return !!(sim.mode==='run' && sim.guided && !sim.airborne && sim.automatic?.handsFree &&
+export function usesCameraWindow(sim,input,carryThroughAir=false) {
+  return !!(sim.mode==='run' && sim.guided && (!sim.airborne||carryThroughAir) && sim.automatic?.handsFree &&
     !input.lookX && !input.lookY && Math.abs(input.steer||0)<.055 && Math.abs(input.trim||0)<.085 &&
     !input.brake && !input.boost && !sim.charging);
+}
+
+// The camera ahead of the skier frames the upper body. Follow a share of
+// the lean while leaving the rest of a turn or a jump visible on screen.
+// The caller damps this target in the travelling camera frame.
+export function frontCameraTarget(out,track,rider,eyes,scale){
+  const ground=track.y+(rider.ground-track.y)*.72;
+  return out.set(
+    track.x+.83*(rider.x-track.x)+.66*(eyes.x-rider.x),
+    ground+1.01*scale+.60*(eyes.y-rider.y-1.32*scale)+.46*(rider.y-rider.ground),
+    track.z+.83*(rider.z-track.z)+.66*(eyes.z-rider.z)
+  );
 }
 
 export function cameraWindowMetres(fov, aspect, depth) {

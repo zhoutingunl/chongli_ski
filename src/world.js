@@ -2,7 +2,7 @@ import {LiftHelmet} from './lift-helmet.js';
 import {trialClimate,blendScenery,sceneById,cloudFloor,cloudRoof} from './scenery.js';
 import {sceneryUniforms,applySceneryUniforms} from './scenic-materials.js';
 import {createIceDust} from './ice-dust.js';
-import {GlideCamera,cameraWindowMetres,previewGlide,usesCameraWindow} from './camera-window.js';
+import {GlideCamera,cameraWindowMetres,frontCameraTarget,previewGlide,usesCameraWindow} from './camera-window.js';
 import {DescentFrames} from './descent-frames.js';
 import {nearbyLiftStation} from './lift-access.js';
 import {placeLiftSupports} from './lift-supports.js';
@@ -94,7 +94,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
   const trackingOrigin=new THREE.Vector3();
   const glideCamera=new GlideCamera();
   let autoCamera=false,previewRoute=null,glideGrade=0,horizonPitch=0;
-  const eyeOffset=new THREE.Vector3(),tipWorld=new THREE.Vector3(),sight=new THREE.Vector3(),orbitPivot=new THREE.Vector3();
+  const eyeOffset=new THREE.Vector3(),tipWorld=new THREE.Vector3(),sight=new THREE.Vector3(),orbitPivot=new THREE.Vector3(),frontEyes=new THREE.Vector3();
   const reducedMotion=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const pitchLimit=THREE.MathUtils.degToRad(85);
   let lookYaw=0,lookPitch=0,headPitch=0,roll=0,baseBearing=0,lookMovedAt=-Infinity;
@@ -180,19 +180,22 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     const bodyScale=rider.dimensions.scale;
     const travel=p.travelHeading??p.heading,fast=clamp(p.speed/22,0,1);
     const first=mode==='first'&&!ride;
+    const frontRun=mode==='front'&&run&&!ride;
+    const laneShare=frontRun ? .32 : 1;
     const tips=mode==='tips'&&!ride&&(!station||station.view==='wide');
     const cameraEase=snap?1:1-Math.exp(-dt*8);
     const pitchEase=snap?1:1-Math.exp(-dt*7.5);
     if(!baseTurn&&!paused&&(input.lookX||input.lookY))panLook(input.lookX*dt*1.95,input.lookY*dt*1.38);
-    const plan=clock-lookMovedAt>.48&&usesCameraWindow(p,input)?previewGlide(p):null;
+    const plan=clock-lookMovedAt>.48&&usesCameraWindow(p,input,frontRun&&autoCamera)?previewGlide(p):null;
     const framed=!!plan&&!first&&!tips;
     if(plan){
       const bearing=framed?plan.course:plan.rideBearing;
       if(!previewRoute||snap)glideCamera.reset(snap?bearing:camHeading,p.offset);
       else if(previewRoute!==p.route){
         // Keep the framing in world space when a branch changes its local centre line.
-        glideCamera.resetLane(p.offset+(lastOrigin.x-lastRiderOrigin.x)*Math.cos(p.guideHeading)+
-          (lastOrigin.z-lastRiderOrigin.z)*Math.sin(p.guideHeading));
+        const lateral=(lastOrigin.x-lastRiderOrigin.x)*Math.cos(p.guideHeading)+
+          (lastOrigin.z-lastRiderOrigin.z)*Math.sin(p.guideHeading);
+        glideCamera.resetLane(p.offset+lateral/laneShare);
       }
       camHeading=glideCamera.aim(bearing,dt);
     }else{
@@ -269,29 +272,39 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
         const framing=.40+.60*bodyScale;
         back*=framing;side*=framing;lead*=framing;lift*=framing;eye*=bodyScale;
       }
+      const terrainBoom=framed||frontRun;
+      const depth=terrainBoom ? Math.hypot(back,side,lift) : 0;
       let gradeX=0,gradeZ=0;
       if(framed){
-        const depth=Math.hypot(back,side,lift),margin=cameraWindowMetres(fov,camera.aspect,depth);
-        const lateral=glideCamera.followLane(plan.lane,margin,dt)-p.offset;
+        const margin=cameraWindowMetres(fov,camera.aspect,depth);
+        const lateral=(glideCamera.followLane(plan.lane,margin,dt)-p.offset)*laneShare;
         trackingOrigin.x+=Math.cos(p.guideHeading)*lateral;
         trackingOrigin.z+=Math.sin(p.guideHeading)*lateral;
+      }
+      if(terrainBoom){
         // A short length of snow supports the camera boom. Individual bumps
         // still move the skier, while the view follows the surrounding slope.
-        const span=3+4*fast+Math.min(9,depth*.40),tx=Math.sin(plan.course),tz=-Math.cos(plan.course);
+        const span=3+4*fast+Math.min(9,depth*.40);
+        const course=framed?plan.course:camHeading,tx=Math.sin(course),tz=-Math.cos(course);
         const ax=trackingOrigin.x,az=trackingOrigin.z;
         const behind=data.height(ax-span*tx,az-span*tz),ahead=data.height(ax+span*tx,az+span*tz);
         trackingOrigin.y=(behind+2*data.height(ax,az)+ahead)*.25;
         const grade=(ahead-behind)/(2*span);
-        glideGrade=autoCamera&&!snap?glideGrade+(grade-glideGrade)*-Math.expm1(-4.5*dt):grade;
+        glideGrade=(autoCamera||frontRun)&&!snap?glideGrade+(grade-glideGrade)*-Math.expm1(-4.5*dt):grade;
         gradeX=glideGrade*tx;gradeZ=glideGrade*tz;
       }
       const dx=(back,side)=>trackingOrigin.x-fx*back+rx*side,dz=(back,side)=>trackingOrigin.z-fz*back+rz*side;
       const x=dx(back,side),z=dz(back,side),aheadX=dx(-lead,0),aheadZ=dz(-lead,0);
-      if(framed){
+      if(terrainBoom){
         const boomRise=(x-trackingOrigin.x)*gradeX+(z-trackingOrigin.z)*gradeZ;
-        const aimRise=(aheadX-trackingOrigin.x)*gradeX+(aheadZ-trackingOrigin.z)*gradeZ;
         want.set(x,Math.max(trackingOrigin.y+lift+Math.max(0,boomRise),data.height(x,z)+Math.min(.48,lift)),z);
-        look.set(aheadX,trackingOrigin.y+eye+aimRise*.75,aheadZ);
+        if(frontRun){
+          rider.group.localToWorld(rider.eyePosition(frontEyes));
+          frontCameraTarget(look,trackingOrigin,p,frontEyes,bodyScale);
+        }else{
+          const aimRise=(aheadX-trackingOrigin.x)*gradeX+(aheadZ-trackingOrigin.z)*gradeZ;
+          look.set(aheadX,trackingOrigin.y+eye+aimRise*.75,aheadZ);
+        }
       }else{
         want.set(x,Math.max(p.y+lift,data.height(x,z)+lift),z);
         look.set(aheadX,p.y+eye+(data.height(aheadX,aheadZ)-p.ground)*.75,aheadZ);
@@ -563,7 +576,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
       if(baseTurn)turnInPlace(dt);
       for(const l of lifts)if(l.group.visible)l.update(clock,camera,ride?.lift===l ? ride.t : null,ride?.dir);
     }
-    const pose=opts.view==='follow'?descentFrames.chasePose():sim;
+    const pose=descentFrames.poseForView(opts.view);
     if(!paused){
       updateAvatar(dt,pose);
       fx.update(pose,dt,conditions,camera.position,rider.dimensions);

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {GlideCamera,cameraWindowMetres,previewGlide,usesCameraWindow} from '../src/camera-window.js';
+import {Vector3} from 'three';
+import {GlideCamera,cameraWindowMetres,frontCameraTarget,previewGlide,usesCameraWindow} from '../src/camera-window.js';
 import {AutomaticTurns} from '../src/automatic-turns.js';
 import {SkiRoute} from '../src/mountain.js';
 
@@ -90,4 +91,41 @@ test('自动状态经过岔口或冲刺时持续，手动转向、加速、刹�
   }
   sim.automatic.update({steer:.8},15,true,false,false,1/60);
   assert.equal(usesCameraWindow(sim,{}),false);
+});
+
+test('正面镜头跟随成人和儿童滑手的重心，保留换刃、下蹲和腾空幅度',()=>{
+  const track=new Vector3(37,1800,-129);
+  const rider={x:38.5,y:1800.3,z:-130,ground:1800.3};
+  for(const scale of [1,.68]){
+    const eyes=new Vector3(rider.x,rider.y+1.32*scale,rider.z);
+    const aim=(path,skier,head)=>frontCameraTarget(new Vector3(),path,skier,head,scale);
+    const rest=aim(track,rider,eyes);
+    assert.ok(rest.x>track.x&&rest.x<rider.x&&rest.z>rider.z&&rest.z<track.z);
+    assert.ok(rest.y>rider.y&&rest.y<eyes.y);
+    const lean=new Vector3(.36,-.28,.13).multiplyScalar(scale);
+    const change=aim(track,rider,eyes.clone().add(lean)).sub(rest);
+    for(const axis of ['x','y','z']){
+      const fraction=change[axis]/lean[axis];
+      assert.ok(fraction>.4&&fraction<.8);
+    }
+    const jump=.65;
+    const air=aim(track,{...rider,y:rider.y+jump},eyes.clone().add(new Vector3(0,jump,0)));
+    assert.ok(air.y-rest.y>jump*.25&&air.y-rest.y<jump*.75);
+    const step=new Vector3(9,-2.6,-17);
+    const moved={x:rider.x+step.x,y:rider.y+step.y,z:rider.z+step.z,ground:rider.ground+step.y};
+    assert.ok(aim(track.clone().add(step),moved,eyes.clone().add(step)).distanceTo(rest.clone().add(step))<1e-8);
+  }
+});
+
+test('正面自动跟拍经过小跳时保持路线参考，环顾与手动操作立即接管',()=>{
+  const sim={mode:'run',guided:true,airborne:true,automatic:new AutomaticTurns()};
+  sim.automatic.idle=4;
+  assert.equal(usesCameraWindow(sim,{}),false);
+  assert.equal(usesCameraWindow(sim,{},true),true);
+  for(const input of [{steer:-.8},{lookX:1},{lookY:-1},{boost:true},{brake:true},{trim:.4}]){
+    assert.equal(usesCameraWindow(sim,input,true),false);
+  }
+  for(const change of [{guided:false},{mode:'lift'},{charging:true},{automatic:{handsFree:false}}]){
+    assert.equal(usesCameraWindow({...sim,...change},{},true),false);
+  }
 });

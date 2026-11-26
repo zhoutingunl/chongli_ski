@@ -7,7 +7,7 @@ const motion=['x','y','z','ground','snowSink','speed','slope','roll','airHeight'
 const bearings=['heading','travelHeading','slipAngle'];
 const lane=['along','offset','edgeSpeed'];
 
-// Render the boots, torso, snow contact and chase camera at the same instant
+// Render the boots, torso, snow contact and tracking camera at the same instant
 // between completed physics ticks. Gameplay and the HUD keep the live state.
 export class DescentFrames {
   constructor(sim){
@@ -75,5 +75,9 @@ export class DescentFrames {
       frame.automatic=turns;
     }
     return frame;
+  }
+
+  poseForView(view){
+    return view==='front'||view==='follow'?this.chasePose():this.sim;
   }
 }

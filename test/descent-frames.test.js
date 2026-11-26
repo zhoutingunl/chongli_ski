@@ -84,3 +84,29 @@ test('手动起跳后雪板落回同一帧的雪面，换刃和落地事件由�
   assert.equal(sim.feedback.landing,landings+1);
   assert.ok(sim.steer>.20);
 });
+
+test('玉龙道正面滑手按显示时刻连续移动，切往其他机位或索道仍取各自的姿态',()=>{
+  const sim=new Descent(mountain,{gear:'ski',assist:true});
+  sim.start(mountain.routes.find(r=>r.id==='wanlong-gold'));
+  while(sim.along<998&&sim.mode==='run')sim.tick(physicsStep);
+  assert.equal(sim.trail.name,'玉龙道');
+  assert.ok(sim.speed*3.6>50);
+  const frames=new DescentFrames(sim),start={x:sim.x,y:sim.y,z:sim.z};
+  frames.advance(physicsStep,{});
+  const end={x:sim.x,y:sim.y,z:sim.z};
+  assert.ok(Math.hypot(end.x-start.x,end.z-start.z)>.1);
+  for(const fraction of [0,.25,.50,.75]){
+    if(fraction)frames.advance(physicsStep/4,{});
+    const front=frames.poseForView('front');
+    for(const axis of ['x','y','z']){
+      assert.ok(Math.abs(front[axis]-(start[axis]+fraction*(end[axis]-start[axis])))<1e-8);
+      assert.equal(sim[axis],end[axis]);
+    }
+    assert.equal(frames.poseForView('follow'),front);
+    for(const view of ['first','tips','left','right','top','low','far'])assert.equal(frames.poseForView(view),sim);
+  }
+  sim.mode='lift';
+  assert.equal(frames.poseForView('front'),sim);
+  frames.reset();
+  assert.equal(frames.poseForView('follow'),sim);
+});
