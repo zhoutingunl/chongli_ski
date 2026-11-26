@@ -52,10 +52,12 @@ const singleFileAssets={
   const compiled=await esbuild.build({absWorkingDir:project,entryPoints:['src/main.js'],bundle:true,write:false,format:'iife',target:['safari16','chrome100'],platform:'browser',minify:true,legalComments:'inline',loader:{'.css':'empty'},define:{'import.meta.env.BASE_URL':'"/"','process.env.NODE_ENV':'"production"'},plugins:[singleFileAssets]});
   const js=compiled.outputFiles[0].text.replace(/<\/script/gi,'<\\/script');
   const types={'.jpg':'image/jpeg','.webp':'image/webp','.png':'image/png','.txt':'text/plain;charset=utf-8','.json':'application/json'};
-  const dest='public/assets',table={};const cover='art/ridgeline.webp';
+  const dest='public/assets',table={};
+  const lobbyAssets={'art/ridgeline.webp':'image/webp','art/ridgeline-wide.webp':'image/webp','art/landing-title.woff':'font/woff'};
+  const lobbyUri=key=>'data:'+lobbyAssets[key]+';base64,'+fs.readFileSync(path.join(dest,key)).toString('base64');
   for(const folder of fs.readdirSync(dest)){
     for(const file of fs.readdirSync(path.join(dest,folder))){
-      const key=folder+'/'+file;if(key===cover)continue;
+      const key=folder+'/'+file;if(key in lobbyAssets)continue;
       const ext=path.extname(file),type=types[ext];if(!type)throw Error('Unknown asset '+key);
       const text=ext==='.json'||ext==='.txt',data=fs.readFileSync(path.join(dest,key));
       table[key]=[type,text,data.toString(text?'utf8':'base64')];
@@ -70,15 +72,17 @@ const singleFileAssets={
       table['groves/'+file]=['external',false,name];art.push(name);
     }else table['groves/'+file]=['image/webp',false,bytes.toString('base64')];
   }
-  const coverUri='data:image/webp;base64,'+fs.readFileSync(path.join(dest,cover)).toString('base64');
-  const css=replaceOne(read('src/style.css'),"url('/assets/art/ridgeline.webp')",'url("'+coverUri+'")');
+  const lobby=replaceOne(read('src/lobby.css'),"url('/assets/art/landing-title.woff')",'url("'+lobbyUri('art/landing-title.woff')+'")');
+  const css=read('src/style.css')+'\n'+lobby;
   const cssmin=await esbuild.transform(css,{loader:'css',minify:true,target:['safari16','chrome100']});
   let html=read('index.html').replace(/^\s*<meta property="og:image"[^>]+>/m,'').replace(/^\s*<link rel="preload" as="image"[^>]+>/m,'');
+  for(const key of ['art/ridgeline.webp','art/ridgeline-wide.webp'])html=replaceOne(html,'./assets/'+key,lobbyUri(key));
+  html=replaceOne(html,'</head>','<!-- '+read('public/RidgeTitle-OFL.txt')+' -->\n</head>');
   html=html.replace(/(<link rel="canonical" href=")[^"]+/,(_,prefix)=>prefix+cdn);
   html=replaceOne(html,'href="./favicon.svg"','href="data:image/svg+xml;base64,'+fs.readFileSync('public/favicon.svg').toString('base64')+'"');
   html=replaceOne(html,'</head>','<style>'+cssmin.code+'</style>\n</head>');
   const lib=JSON.stringify(table).replace(/</g,'\\u003c');
   html=replaceOne(html,'<script type="module" src="/src/main.js"></script>','<script type="application/json" id="ridge-assets">'+lib+'</script>\n<script>'+js+'</script>');
   const filename=path.join(outDir,outName);fs.writeFileSync(filename,html,{flag:'wx'});
-  console.log(JSON.stringify({filename,bytes:fs.statSync(filename).size,embeddedAssets:Object.keys(table).length+2-art.length,art,cdn}));
+  console.log(JSON.stringify({filename,bytes:fs.statSync(filename).size,embeddedAssets:Object.keys(table).length+Object.keys(lobbyAssets).length+1-art.length,art,cdn}));
 })().catch(e=>{console.error(e);process.exitCode=1;});

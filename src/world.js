@@ -576,7 +576,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
       if(baseTurn)turnInPlace(dt);
       for(const l of lifts)if(l.group.visible)l.update(clock,camera,ride?.lift===l ? ride.t : null,ride?.dir);
     }
-    const pose=descentFrames.poseForView(opts.view);
+    const pose=descentFrames.renderPose();
     if(!paused){
       updateAvatar(dt,pose);
       fx.update(pose,dt,conditions,camera.position,rider.dimensions);

@@ -1,5 +1,6 @@
 import {colourKeys, riderRoles, outfitFor, fittingColour} from './wardrobe.js';
 import './style.css';
+import './lobby.css';
 import {SceneryTrial,trialRouteId} from './scenery.js';
 import {paintScenicControls,groveFeedback} from './scenic-controls.js';
 import {glyph,emblem,viewNames,viewPicture} from './icons.js';
@@ -57,7 +58,7 @@ function applySavedPreferences(){
 }
 const sound=new MountainSound(),music=new MountainMusic(sound),climate=createMountainClimate();
 let mapRegion='',mapPicked=false,clearedMarks;
-let data,world,mini,large,pisteProgress,routeId=prefs.resort+'-classic',mapId=routeId,summitChoice='';
+let data,world,large,pisteProgress,routeId=prefs.resort+'-classic',mapId=routeId,summitChoice='';
 let sharedRouteId=new URLSearchParams(location.search).get('run');
 let lastArrival=null;
 let screen='home',page='',recordTab='explore',busy=false,toastTimer,focusBack,restoreRequested=false,recorded=false,tray=false;
@@ -117,10 +118,10 @@ function switchCamera(view){
 let fittingFront=false;
 const fittingAtlas=gear=>import.meta.env.BASE_URL+'assets/art/fitting-'+gear+'.webp';
 function outfitName(look){return t(look.name,look.english);}
-function swatches(withNames=false){
+function swatches(){
   return colourKeys.map(id=>{
     const look=outfitFor(prefs.gender,id),name=outfitName(look);
-    return '<button class="swatch'+(withNames?' outfit-chip':'')+'" aria-label="'+name+'" title="'+name+'" data-choice="color" data-value="'+id+'" aria-pressed="'+(prefs.color===id)+'" style="--coat:'+look.coat+';--accent:'+look.accent+';--trousers:'+look.pants+'">'+glyph('check',13)+(withNames?'<span>'+name+'</span>':'')+'</button>';
+    return '<button class="swatch outfit-chip" aria-label="'+name+'" title="'+name+'" data-choice="color" data-value="'+id+'" aria-pressed="'+(prefs.color===id)+'" style="--coat:'+look.coat+';--accent:'+look.accent+';--trousers:'+look.pants+'"><span>'+name+'</span></button>';
   }).join('');
 }
 function modelStyle(role,front){
@@ -130,13 +131,26 @@ function modelStyle(role,front){
 }
 function showHomeRider(){
   const home=$('#home-rider'),look=outfitFor(prefs.gender,prefs.color);
+  const role=label(setupOptions.gender.find(([id])=>id===prefs.gender)[1]);
+  const gear=label(setupOptions.gear.find(([id])=>id===prefs.gear)[1]);
   home.querySelector('.fitting-model').setAttribute('style',modelStyle(prefs.gender,false));
-  home.querySelector('.fitting-caption').textContent=outfitName(look)+'  ·  '+t('试穿','Try on');
-  home.setAttribute('aria-label',t('试穿雪服，当前','Open fitting room, ')+outfitName(look));home.hidden=false;
-  $('#coat-name').textContent=outfitName(look);
+  $('#kit-rider').textContent=role+' · '+gear;
+  $('#kit-colour').textContent=outfitName(look);
+  home.style.setProperty('--coat',look.coat);home.style.setProperty('--accent',look.accent);
+  home.setAttribute('aria-label',t('换装，','Change outfit, ')+role+' · '+gear+' · '+outfitName(look));
 }
 function fittingRoom(){
   const turn=fittingFront?t('看背面','Back view'):t('看正面','Front view');
+  if(screen==='home'){
+    const name=outfitName(outfitFor(prefs.gender,prefs.color));
+    const age=prefs.gender==='boy'||prefs.gender==='girl'?' · '+t('5–6 岁','Ages 5–6'):'';
+    return '<header class="lobby-fit-head"><h2>'+t('滑雪装扮','Ski outfit')+'</h2><button class="icon-disc" data-act="close-panel" aria-label="'+t('关闭','Close')+'">'+glyph('close',20)+'</button></header>'+
+      '<div class="lobby-fit-body"><figure class="lobby-fit-preview"><span class="fitting-model" style="'+modelStyle(prefs.gender,fittingFront)+'"></span>'+
+      '<figcaption><strong>'+name+'</strong>'+button('fitting-turn',glyph('rotate',15)+turn,'fitting-turn')+'</figcaption></figure>'+
+      '<div class="lobby-fit-options"><fieldset><legend>'+label('角色')+age+'</legend>'+seg('gender',setupOptions.gender,prefs.gender)+'</fieldset>'+
+      '<fieldset class="fitting-colours"><legend>'+t('雪服配色','Outfit colours')+'</legend><div>'+swatches()+'</div></fieldset>'+
+      '<fieldset><legend>'+t('滑行装备','Equipment')+'</legend>'+seg('gear',setupOptions.gear,prefs.gear)+'</fieldset></div></div>';
+  }
   const roles=setupOptions.gender.map(([id,name])=>{
     const age=['boy','girl'].includes(id)?'<small>'+t('5–6 岁','Ages 5–6')+'</small>':'';
     return '<button class="fitting-role" data-choice="gender" data-value="'+id+'" aria-pressed="'+(prefs.gender===id)+'">'+
@@ -145,43 +159,31 @@ function fittingRoom(){
   return heading('RIDER','角色',t('雪服试穿','Fitting room'))+
     '<div class="fitting-bar">'+seg('gear',setupOptions.gear,prefs.gear)+button('fitting-turn',glyph('rotate',17)+turn,'fitting-turn')+'</div>'+
     '<div class="fitting-rack" role="group" aria-label="'+label('角色')+'">'+roles+'</div>'+
-    '<fieldset class="fitting-colours"><legend>'+t('整套配色','Outfit colours')+'</legend><div>'+swatches(true)+'</div></fieldset>';
+    '<fieldset class="fitting-colours"><legend>'+t('整套配色','Outfit colours')+'</legend><div>'+swatches()+'</div></fieldset>';
 }
-function syncSetupChoice(kind){
-  const control=$('#'+kind+'-choices');
-  for(const b of control.children)b.setAttribute('aria-pressed',String(b.dataset.value===prefs[kind]));
-  if(kind==='gender'){
-    $('#rider-age').hidden=!childSelected();
-    $('#color-choices').innerHTML=swatches();
-  }
-  if(kind!=='resort')showHomeRider();
-  else mini?.select(selectedRoute());
-}
-const childSelected=()=>prefs.gender==='boy'||prefs.gender==='girl';
 function homeChoices(){
-  for(const [kind,options] of Object.entries(setupOptions)){
-    $('#'+kind+'-choices').innerHTML=kind==='color'?swatches():options.map(([id,name,icon])=>choice(kind,id,label(name),prefs[kind],icon)).join('');
+  for(const b of $$('#resort-choices button')){
+    b.textContent=resort(b.dataset.value);
+    b.setAttribute('aria-pressed',String(b.dataset.value===prefs.resort));
   }
-  syncSetupChoice('gender');
-  mini?.select(selectedRoute());
+  showHomeRider();
 }
 function setupText(){
   setLanguage(prefs.language);
   document.title=t('山脊之间 · 万龙与云顶滑雪','Ridgeline · Wanlong & Genting');
   $('#logo').innerHTML=$('.loading-crest').innerHTML=emblem;
-  $('.wordmark>span:last-child').innerHTML=t('山脊之间<small>RIDGELINE</small>','Ridgeline<small>CHONGLI</small>');
-  $('.location').innerHTML='<span></span>'+t('河北 · 崇礼','CHONGLI · HEBEI');
-  $('.start-content h1').innerHTML=t('万龙<span>·</span>云顶','Wanlong<span>·</span>Genting');$('.roman').hidden=prefs.language==='en';
-  $('.intro').textContent=t('从红花梁出发，滑向同一座山的两面。','Two ski resorts on opposite faces of Honghualiang.');
-  const setupLabels={resort:t('出发雪场','Starting resort'),gear:t('滑行装备','Equipment'),gender:label('角色'),color:t('雪服配色','Jacket colour')};
-  for(const el of $$('[data-setup-label]'))el.textContent=setupLabels[el.dataset.setupLabel];
-  $('#rider-age').textContent=t('5–6 岁','Ages 5–6');
+  $('#lobby-name').innerHTML=t('山脊之间<small>RIDGELINE</small>','Ridgeline<small>CHONGLI</small>');
+  $('#lobby-place').textContent=t('河北 · 崇礼','Chongli · Hebei');
+  $('#lobby-title').innerHTML=t('万龙<span>·</span>云顶','Wanlong<span>·</span>Genting');$('.lobby-english').hidden=prefs.language==='en';
+  $('#lobby-intro').textContent=t('从红花梁出发，滑向同一座山的两面。','Two ski resorts on opposite faces of Honghualiang.');
+  $('#resort-label').textContent=t('出发雪场','Starting resort');
+  $('#kit-label').textContent=t('我的装扮','My outfit');$('#kit-change').textContent=t('换装','Change');
   function face(sel,icon,txt){for(const el of $$(sel))el.innerHTML=glyph(icon,18)+txt;}
-  face('[data-act="start"]','mountain',t('进入山顶','Enter summit'));face('.start-actions [data-act="help"]','controls',t('操作指南','Controls'));
-  face('.trial-start','eye',location.hash==='#sansuo'?t('三索上站试景','Third lift art study'):t('同趟试景','Scenery trial'));
-  face('.mini-heading,.narrow-map','map',label('雪场地图'));
-  $('.footer-meta').innerHTML=glyph('mountain',16)+label('红花梁')+' <b>2,110 m</b>';
-  face('.rotate-note','rotate',t('横屏滑行更开阔','Rotate for a wider view'));$('#map-preview').setAttribute('aria-label',t('打开雪场地图','Open trail map'));
+  face('#home [data-act="start"]','lift',t('进入山顶','Enter summit'));
+  face('#home [data-act="help"]','controls',t('操作指南','Controls'));
+  face('#home [data-act="scenery-start"]','eye',location.hash==='#sansuo'?t('三索上站试景','Third lift art study'):t('同趟试景','Scenery trial'));
+  face('#home [data-act="map"]','map',label('雪场地图'));
+  $('#lobby-elevation').innerHTML=glyph('mountain',17)+label('红花梁')+' <i>2,110 m</i>';
   $('.loading-copy p').textContent=t('进入红花梁','Entering Honghualiang');
   $('#gl').setAttribute('aria-label',t('崇礼三维滑雪场','3D Chongli ski area'));$('#hud').setAttribute('aria-label',t('滑行仪表','Skiing instruments'));
   $('#drop-label').textContent=t('落差','Drop');
@@ -221,15 +223,12 @@ function setupText(){
   $('#steering').setAttribute('aria-label',t('左右拖动转弯','Drag to steer'));
   $('#keyboard-hint').innerHTML=t('方向键滑行 <i></i> 鼠标拖动环顾 <i></i> R 回正 <i></i> 空格蓄力跳','Arrows to ski <i></i> Drag to look <i></i> R to face forward <i></i> Hold Space to jump');
   $('#overlay').setAttribute('aria-label',label('设置'));$('.top-tools [data-act="sound"]').title=t('环境音','Environmental sound');
-  $$('.mini-open,[data-glyph]').forEach(el=>el.innerHTML=glyph(el.dataset.glyph));
+  $$('[data-glyph]').forEach(el=>el.innerHTML=glyph(el.dataset.glyph));
   homeChoices();refreshSound();if(world?.sim.route)paintHUD();
 }
 async function ensureData(){
   const loaded=data||await loadMountain();
-  if(!mini){
-    data=loaded;pisteProgress=createPisteProgress(data,read(pisteKey,[]));
-    mini=new TrailMap($('#mini-map'),data,true,pisteProgress);mini.select(selectedRoute());
-  }
+  if(!data){data=loaded;pisteProgress=createPisteProgress(data,read(pisteKey,[]));}
   return data;
 }
 function clearInputs(){
@@ -421,7 +420,7 @@ let discoveryTimer;
 function reportDiscoveries(sim){
   const keys=pisteProgress.finishDiscoveries(sim.splits);
   if(!keys.length)return;
-  store(pisteKey,pisteProgress.snapshot());mini.draw();scheduleCloud();
+  store(pisteKey,pisteProgress.snapshot());scheduleCloud();
   const {ridden,total}=pisteProgress.totals();
   let count=ridden-keys.filter(k=>pisteProgress.publicPistes.has(k)).length;
   for(const key of keys){
@@ -539,7 +538,9 @@ function openPanel(k){
   if(k==='map'&&previousPage!=='map'){
     const r=panelRoute();mapRegion=r?.catalogResort||r?.resort||prefs.resort;mapPicked=false;clearedMarks=null;
   }
+  $('#overlay').classList.toggle('lobby-fitting',screen==='home'&&k==='rider');
   $('#overlay').hidden=false;$('#overlay').setAttribute('role','dialog');$('#overlay').setAttribute('aria-modal','true');
+  $('#overlay').setAttribute('aria-label',screen==='home'&&k==='rider'?t('滑雪装扮','Ski outfit'):label('设置'));
   $('#hud').hidden=true;$('#pause-nav').innerHTML=navMarkup();renderPanel();
   if(k==='records')rankings.load(recordTab);
   if(!previousPage)$('#panel button')?.focus({preventScroll:true});
@@ -628,7 +629,7 @@ function resetMapMarks(){
     clearTimeout(discoveryTimer);discoveryTimer=undefined;discoveryQueue.length=0;$('#piste-discovery').hidden=true;
     announce(t('已清除双雪场的已滑过标记','Cleared skied marks at both resorts'));
   }
-  store(pisteKey,pisteProgress.snapshot());mini.draw();large?.draw();paintMapList();scheduleCloud(100);
+  store(pisteKey,pisteProgress.snapshot());large?.draw();paintMapList();scheduleCloud(100);
 }
 function currentMapActions(){
   const r=panelRoute(),summitExit=screen==='summit'&&r.resort===world.station.side&&Number.isFinite(world.summitHeading(r.id));
@@ -669,7 +670,7 @@ function setChoice(kind,v){
     chosenSetup[kind]=v;prefs[kind]=v;
     if(kind==='resort'){sharedRouteId=null;routeId=v+'-classic';}
     else if(changed&&world?.sim.route)world.changeRider();
-    syncSetupChoice(kind);
+    homeChoices();
   }
   else if(kind==='track'){prefs.track=v;prefs.followMusic=false;prefs.music=true;activateAudio();}
   else if(kind==='assist'){world?.sim.setAssist(v==='on');prefs.assist=v==='on';}
@@ -723,7 +724,7 @@ async function syncCloud(interactive){
       if(clearedMarks&&clearedMarks.pistesResetAt!==merged.pistesResetAt)clearedMarks=null;
       if(page==='map'){large?.draw();paintMapList();}
     }
-    mini?.draw();if((screen==='base'||screen==='lift')&&!page)hudVisible(true);
+    if((screen==='base'||screen==='lift')&&!page)hudVisible(true);
     const mineOnly=activity.devices[device];
     const content={device,...merged,activity:{...activity,devices:mineOnly?{[device]:mineOnly}:{}}};
     if(JSON.stringify(mine?.content)!==JSON.stringify(content)){
@@ -1226,7 +1227,7 @@ function finishBoot(){
     for(const b of $$('[data-start-ready]'))b.disabled=false;
   }
   if(engagementAvailable('cloud'))syncCloud(false);
-  ensureData().then(()=>{const r=data.allRoutes.find(r=>r.id===sharedRouteId);
+  if(sharedRouteId)ensureData().then(()=>{const r=data.allRoutes.find(r=>r.id===sharedRouteId);
     if(r){routeId=r.id;prefs.resort=r.resort;homeChoices();}
   }).catch(()=>{});
 }

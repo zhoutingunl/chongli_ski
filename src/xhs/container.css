@@ -13,7 +13,6 @@
   }
 }
 #boot-status {max-width:24em;color:#fcf1dc;font-size:13px}
-.mast {top:calc(var(--tool-safe-top) + 9px)}
 #hud .game-top, #hud .hud-reading {top:calc(var(--tool-safe-top) + 8px)}
 #hud {--pad-bottom:calc(var(--tool-safe-bottom) + 16px);--pad-left:calc(var(--tool-safe-left) + 15px)}
 #hud .game-top, #hud .ride-actions {right:calc(var(--tool-safe-right) + 15px)}
@@ -30,15 +29,12 @@
 
 button:focus {outline:2px solid #e8c583;outline-offset:2px}
 @supports selector(:focus-visible) {button:focus:not(:focus-visible) {outline:none}}
-.no-flex-gap .start-actions button+button,.no-flex-gap #tray-tools button+button,
-.no-flex-gap .station-actions button+button,.no-flex-gap .base-buttons button+button,
-.no-flex-gap .settings-tools button+button {margin-left:6px}
+.no-flex-gap #tray-tools button+button,.no-flex-gap .station-actions button+button,.no-flex-gap .base-buttons button+button,.no-flex-gap .settings-tools button+button {margin-left:6px}
 .no-flex-gap .steering-tools #near-lift:not([hidden]) {margin-bottom:6px}
 .no-flex-gap .game-top>*+* {margin-top:7px}
 .no-flex-gap #hud:not(.watching) .hud-current .piste {margin-left:10px}
 .no-flex-gap #piste-split {margin-top:4px}
 .no-flex-gap #pause-nav button {margin-bottom:2px}
-.start-choices .swatch::before {height:61%}
 @media (orientation:portrait) and (max-width:850px) {
   #hud .hud-reading {right:calc(var(--tool-safe-right) + 74px)}
   #hud .hud-reading .piste {padding-left:9px}
@@ -48,13 +44,6 @@ button:focus {outline:2px solid #e8c583;outline-offset:2px}
 
 }
 @media (orientation:portrait) and (max-height:570px) {
-  .mast {top:calc(var(--tool-safe-top) + 4px)}
-  .start-content {bottom:67px}
-  .start-content h1 {font-size:42px}
-  .start-content .intro {margin:7px 0 8px}
-  .start-choices {row-gap:4px}
-  .start-actions {margin-top:9px}
-  .home-footer {bottom:12px}
   #hud .ride-actions {height:99px}
   #hud .game-top .hud-tools button {min-height:36px}
 }

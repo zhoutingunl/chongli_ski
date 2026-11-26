@@ -1,10 +1,8 @@
 崇礼 · 山脊之间
 
-开场全景和树木图集使用内置 ImageGen 工具生成。网页内可滑行的山体、雪道与索道采用独立的地理数据。下方保留生成时使用的完整提示。
+树木图集使用内置 ImageGen 工具生成。网页内可滑行的山体、雪道与索道采用独立的地理数据。下方保留生成时使用的完整提示。
 
-ridgeline.webp
-
-Use case: photorealistic-natural. Asset: entire wide, landscape loading/menu backdrop for an immersive Chinese ski simulation. A high-resolution 2.35:1 cinematic winter landscape photograph of the Wanlong / Genting ski area in Chongli, Zhangjiakou, northern China. View from near the top of a groomed snowy piste looking down into layers of characteristic gentle, rounded North Chinese larch and birch ridges; long white pistes visibly cut through the mountainsides, no jagged Alpine pinnacles. Delicate blue-grey and charcoal morning tones, light ivory champagne sunlight on a large expanse of detailed wind-combed corduroy snow in the immediate foreground, slanting sun from right, a luminous band of mountain mist in the distance below a pale steel-blue sky. Dominant real physical closed ski gondola with red-orange lower body, graphite frame, reflective smoky panoramic windows, grip arm and cable running diagonally in the upper RIGHT of frame, some smaller cabins receding down the cable. A modest brown-timber ridge-top lodge with a pitched snowy roof to the right middle distance, fine frost on bare white birches and snow-speckled larch. Tiny distant skiers only for scale. Camera at human eye-level 35mm, panoramic honest travel photography with beautiful deep focus and snow microtexture. Subject gondola fully within composition; center-left is fairly dark quieter forest and snow for readable white UI overlay. Picture occupies the entire frame edge-to-edge. No text, no words, no labels, no typography, no UI, no borders, no collage, no graphic overlays. Horizontal, cinematic still photograph.
+ridgeline.webp 与 ridgeline-wide.webp 取自项目提供的出发大厅设计稿，分别用于常规构图和手机横屏。标题用字来自稿件内的 Noto Serif CJK SC 字体子集，按 SIL Open Font License 1.1 授权。
 
 treeline.webp
 

@@ -30,14 +30,14 @@ test('芍药花追尾在 30、60、120 帧和漏帧时都显示对应时刻的�
       const dt=Math.min(2-time,intervals[i++%intervals.length]);
       frames.advance(dt,{});time+=dt;
       const live=[sim.x,sim.z,sim.offset,sim.automatic.phase];
-      const shown=frames.chasePose();
+      const shown=frames.renderPose();
       const when=Math.max(0,time/physicsStep-1),k=Math.floor(when);
       fields.forEach((key,j)=>{
         const expected=ticks[k][j]+(ticks[k+1][j]-ticks[k][j])*(when-k);
         assert.ok(Math.abs(shown[key]-expected)<1e-7,`${key} at ${time}s`);
       });
       assert.deepEqual([sim.x,sim.z,sim.offset,sim.automatic.phase],live);
-      assert.equal(frames.chasePose().x,shown.x);
+      assert.equal(frames.renderPose().x,shown.x);
     }
   }
 });
@@ -48,21 +48,21 @@ test('跨越角度零点、岔路切换与索道重出发时，追尾使用正�
   sim.heading=Math.PI-.02;sim.automatic.phase=2*Math.PI-.03;
   frames.advance(1.5*physicsStep,{});
   sim.heading=-Math.PI+.02;sim.automatic.phase=.03;
-  let pose=frames.chasePose();
+  let pose=frames.renderPose();
   assert.ok(Math.abs(Math.sin(pose.heading))<1e-8&&Math.cos(pose.heading)<0);
   assert.ok(Math.abs(Math.sin(pose.automatic.phase))<1e-8&&Math.cos(pose.automatic.phase)>0);
   assert.ok(Math.abs(pose.x-(before+sim.x)/2)<1e-8);
 
   const next=mountain.routes.find(r=>r.id==='genting-valley');
   sim.joinLine(next,31);
-  pose=frames.chasePose();
+  pose=frames.renderPose();
   assert.equal(pose.route,next);assert.equal(pose.along,31);
   assert.equal(pose.offset,sim.offset);assert.equal(pose.automatic,sim.automatic);
   sim.mode='lift';
-  assert.equal(frames.chasePose(),sim);
+  assert.equal(frames.renderPose(),sim);
   sim.start(next);frames.reset();
   assert.equal(frames.remainder,0);
-  assert.deepEqual([frames.chasePose().x,frames.chasePose().z],next.points[0]);
+  assert.deepEqual([frames.renderPose().x,frames.renderPose().z],next.points[0]);
 });
 
 test('手动起跳后雪板落回同一帧的雪面，换刃和落地事件由物理只结算一次',()=>{
@@ -71,7 +71,7 @@ test('手动起跳后雪板落回同一帧的雪面，换刃和落地事件由�
   let peak=0,delayedContact=false;
   for(let i=0;i<360;i++){
     frames.advance(1/120,{steer:.25});
-    const pose=frames.chasePose();
+    const pose=frames.renderPose();
     peak=Math.max(peak,pose.airHeight);
     if(!sim.airborne&&pose.airHeight>.002){
       delayedContact=true;
@@ -80,12 +80,12 @@ test('手动起跳后雪板落回同一帧的雪面，换刃和落地事件由�
     if(pose.airHeight>.01)assert.ok(Math.abs(pose.y-pose.ground-pose.airHeight)<.003);
   }
   assert.ok(peak>.08&&delayedContact);
-  assert.equal(frames.chasePose().airborne,false);
+  assert.equal(frames.renderPose().airborne,false);
   assert.equal(sim.feedback.landing,landings+1);
   assert.ok(sim.steer>.20);
 });
 
-test('玉龙道正面滑手按显示时刻连续移动，切往其他机位或索道仍取各自的姿态',()=>{
+test('玉龙道高速滑手在两次物理更新之间连续移动，离开滑行后立即使用索道姿态',()=>{
   const sim=new Descent(mountain,{gear:'ski',assist:true});
   sim.start(mountain.routes.find(r=>r.id==='wanlong-gold'));
   while(sim.along<998&&sim.mode==='run')sim.tick(physicsStep);
@@ -97,16 +97,39 @@ test('玉龙道正面滑手按显示时刻连续移动，切往其他机位或�
   assert.ok(Math.hypot(end.x-start.x,end.z-start.z)>.1);
   for(const fraction of [0,.25,.50,.75]){
     if(fraction)frames.advance(physicsStep/4,{});
-    const front=frames.poseForView('front');
+    const pose=frames.renderPose();
     for(const axis of ['x','y','z']){
-      assert.ok(Math.abs(front[axis]-(start[axis]+fraction*(end[axis]-start[axis])))<1e-8);
+      assert.ok(Math.abs(pose[axis]-(start[axis]+fraction*(end[axis]-start[axis])))<1e-8);
       assert.equal(sim[axis],end[axis]);
     }
-    assert.equal(frames.poseForView('follow'),front);
-    for(const view of ['first','tips','left','right','top','low','far'])assert.equal(frames.poseForView(view),sim);
   }
   sim.mode='lift';
-  assert.equal(frames.poseForView('front'),sim);
+  assert.equal(frames.renderPose(),sim);
   frames.reset();
-  assert.equal(frames.poseForView('follow'),sim);
+  assert.equal(frames.renderPose(),sim);
+});
+
+test('120 Hz 显示单板和双板换刃时每帧都前进，漏帧后继续跟随同一条轨迹',()=>{
+  const jade=mountain.routes.find(r=>r.id==='wanlong-gold');
+  for(const gear of ['ski','board']){
+    const sim=new Descent(mountain,{gear,assist:true});
+    sim.start(jade);
+    while(sim.mode==='run'&&sim.along<998)sim.tick(physicsStep);
+    assert.equal(sim.trail.name,'玉龙道');
+    const frames=new DescentFrames(sim);
+    frames.advance(2*physicsStep,{});
+    const first=frames.renderPose();
+    let lastX=first.x,lastZ=first.z,betweenTicks=0;
+    for(let i=0;i<240;i++){
+      const dt=i===120?.065:1/120;
+      const liveX=sim.x,liveZ=sim.z;
+      frames.advance(dt,{steer:i<120?-.35:.35});
+      const shown=frames.renderPose();
+      const step=Math.hypot(shown.x-lastX,shown.z-lastZ);
+      assert.ok(step>dt*3&&step<dt*45,`${gear} frame ${i} moved ${step} m`);
+      if(sim.x===liveX&&sim.z===liveZ)betweenTicks++;
+      lastX=shown.x;lastZ=shown.z;
+    }
+    assert.ok(betweenTicks>40,`${gear} should cover renders between physical steps`);
+  }
 });

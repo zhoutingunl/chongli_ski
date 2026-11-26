@@ -1,13 +1,14 @@
 {
   "name": "chongli-ridgeline",
-  "version": "1.23.1",
+  "version": "1.24.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "test": "node --test",
     "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "test:browser": "python3 scripts/browser-tests/run.py"
   },
   "dependencies": {
     "three": "0.187.0"

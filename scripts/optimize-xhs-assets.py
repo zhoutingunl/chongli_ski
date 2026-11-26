@@ -7,6 +7,7 @@ from PIL import Image
 assets = Path(argv[1]) / 'assets'
 for relative, width, quality in (
     ('art/ridgeline.webp', 1500, 78),
+    ('art/ridgeline-wide.webp', 1240, 78),
     ('art/fitting-ski.webp', 800, 82),
     ('art/fitting-board.webp', 800, 82),
     ('art/treeline.webp', 1536, 80),

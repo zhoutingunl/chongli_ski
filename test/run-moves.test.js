@@ -124,7 +124,7 @@ test('相同随机种子在不同画面帧率下给出同一组动作和线路�
       const kind=sim.moves.kind;
       if(kind && kind!==prev)picks.push(kind);prev=kind;
       const count=calls;
-      frames.chasePose();frames.chasePose();assert.equal(calls,count);
+      frames.renderPose();frames.renderPose();assert.equal(calls,count);
     }
     return {picks,calls,along:sim.along};
   }

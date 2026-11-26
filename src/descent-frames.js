@@ -49,7 +49,7 @@ export class DescentFrames {
     this.ready=true;
   }
 
-  chasePose(){
+  renderPose(){
     const sim=this.sim,prev=this.previous,frame=this.frame;
     if(!this.ready||sim.mode!=='run')return sim;
     const t=clamp(this.remainder/physicsStep,0,1);
@@ -75,9 +75,5 @@ export class DescentFrames {
       frame.automatic=turns;
     }
     return frame;
-  }
-
-  poseForView(view){
-    return view==='front'||view==='follow'?this.chasePose():this.sim;
   }
 }

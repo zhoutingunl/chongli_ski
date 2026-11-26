@@ -1,10 +1,12 @@
 # 山脊之间 · 万龙与云顶
 
-河北崇礼红花梁的三维滑雪网页。万龙与云顶位于山脊两侧，在同一张地形上相连。手机横屏、竖屏和电脑键盘都可以玩。[直接体验网页版 1.23.1](https://qupfile.cloudvdn.com/chongli-ski_20261126_134053.html)
+河北崇礼红花梁的三维滑雪网页。万龙与云顶位于山脊两侧，在同一张地形上相连。手机横屏、竖屏和电脑键盘都可以玩。[直接体验网页版 1.24.0](https://qupfile.cloudvdn.com/chongli-ski_20261126_155623.html)
 
 ![万龙山顶的第一人称游戏画面，索道站前的雪面上标有金龙道和长龙道](docs/media/wanlong-summit.jpg)
 
-首页可选择出发雪场、单板或双板、角色和雪服配色。点滑手进入「雪服试穿」，可以看正面、背面和整套搭配。男士有宽肩夹克和深色裤装，女士有白色拼接、白雪裤和外露长马尾。约 5–6 岁的男孩背着小背包，女孩留双辫、穿云朵印花雪服，头盔有一对圆耳。儿童使用短雪板和短雪杖。四个角色各有五套配色，换回角色会恢复上次试穿的颜色。初次打开时，出发雪场、雪具、角色和配色各自随机。
+![出发大厅在桌面、手机竖屏和手机横屏的实际画面](docs/media/departure-hall.webp)
+
+首页直接选万龙或云顶，再点「进入山顶」。点「换装」能切换角色、单双板和配色，查看雪服正背面，选择会自动保存。雪场地图、同趟试景和操作指南都可以从首页打开。男士有宽肩夹克和深色裤装，女士有白色拼接、白雪裤和外露长马尾。约 5–6 岁的男孩背着小背包，女孩留双辫、穿云朵印花雪服，头盔有一对圆耳。儿童使用短雪板和短雪杖。四个角色各有五套配色，换回角色会恢复上次试穿的颜色。初次打开时，出发雪场、雪具、角色和配色各自随机。
 
 ![雪服试穿的游戏实拍，从左至右为男士、女士、男孩和女孩](docs/media/rider-fitting.webp)
 
@@ -43,7 +45,7 @@
 
 ![同机位的四组游戏截帧，依次为莫奈雪境、水墨崇礼、云海穿行与梵高星空](docs/media/scenery-trial.webp)
 
-打开三索专用入口，点「三索上站试景」，会从真实索道上站的固定机位进入水墨崇礼。六种艺术画境都可以点「看近树」，端详同一株树的枝条、树皮和覆雪。点「原景对照」会保留当前机位与光雪，点「回滑手机位」回到原处。[万龙三索上站试景](https://qupfile.cloudvdn.com/chongli-ski_20261126_134053.html#sansuo)
+打开三索专用入口，点「三索上站试景」，会从真实索道上站的固定机位进入水墨崇礼。六种艺术画境都可以点「看近树」，端详同一株树的枝条、树皮和覆雪。点「原景对照」会保留当前机位与光雪，点「回滑手机位」回到原处。[万龙三索上站试景](https://qupfile.cloudvdn.com/chongli-ski_20261126_155623.html#sansuo)
 
 ![六种艺术画境在同一站台及同一株近树的游戏实拍](docs/media/third-lift-art.webp)
 
@@ -98,7 +100,7 @@ npm run preview
 | --- | --- |
 | [navigation.test.js](test/navigation.test.js) | 核对两座雪场山顶的镜头和下坡方向，验证单、双板松键滑行、进道前连续改道、岔口路标顺序、反向蹬坡、原地转身和 64 条公众雪道的起终点信息 |
 | [descent.test.js](test/descent.test.js) | 在已知坡度上比较刹车、蓄力起跳和道边陷雪，验证单板与双板自动蹬坡、玩家接管、抵达山脚后停留及重滑 |
-| [descent-frames.test.js](test/descent-frames.test.js) 和 [camera-window.test.js](test/camera-window.test.js) | 用芍药花实测路线检查不同刷新率、漏帧、换道及落地时的追尾位置，验证横竖屏的回转跟随 |
+| [descent-frames.test.js](test/descent-frames.test.js) 和 [camera-window.test.js](test/camera-window.test.js) | 沿芍药花、玉龙道检查单板与双板在不同刷新率、漏帧、转向、换道和落地时的显示位置，验证横竖屏的回转跟随 |
 | [map-routes.test.js](test/map-routes.test.js) | 按四项指标双向排序、雪道自身的长度和垂降、途中改选起点及继续滑行 |
 | [piste-progress.test.js](test/piste-progress.test.js) 和 [ski-engagement.test.js](test/ski-engagement.test.js) | 两条跨场联滑线实际滑行、标记清除与撤销、旧云存档合并与累计数据 |
 | [snow-terrain.test.js](test/snow-terrain.test.js) | 细雪网格与远处地表连续覆盖、移动换块和切换画质、U 型池和蘑菇道 |
@@ -106,6 +108,14 @@ npm run preview
 | [lift-helmet.test.js](test/lift-helmet.test.js) | 索道附近的停稳与光照条件、手和头盔的位置、上车后再次出发，以及四个角色的试穿配色 |
 | [mountain.test.js](test/mountain.test.js) | 检查高程三角面、边界采样、雪道里程与最近点、建筑和树干碰撞，以及随包林地图的尺寸 |
 | [environment.test.js](test/environment.test.js) | 检查昼夜与晴雪周期、四段降雪时长、低角度霞光的抽取和渐变、手选优先级 |
+
+浏览器回归测试会在五种屏幕尺寸上真实点按首页、换装、恢复存档并检查按钮是否重叠。它还会在同一段玉龙道上，以横竖屏、60 Hz 和 120 Hz 回放九个机位，逐帧测量头盔和雪面在屏幕上的抖动。首次运行需安装 Python Playwright 和 Chromium。使用已安装的 Google Chrome 时，可用 `CHROME_CHANNEL=chrome npm run test:browser`。
+
+```sh
+python3 -m pip install playwright
+python3 -m playwright install chromium
+npm run test:browser
+```
 
 只复现万龙选道或儿童姿态时，可以分别运行 `node --test test/navigation.test.js` 或 `node --test test/rider.test.js`。
 

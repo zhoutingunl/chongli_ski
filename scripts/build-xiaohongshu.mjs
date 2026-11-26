@@ -108,15 +108,17 @@ try{
   let html=(await source('index.html'))
     .replace(/^.*(?:rel="canonical"|property="og:image").*\n/gm,'')
     .replace(/<button[^>]+data-act="fullscreen"[^>]*><\/button>/,'')
-    .replace(/<main id="home">[\s\S]*?<\/main>/, home=>home.replace(/(<button)(?=[^>]*data-act="(?:start|scenery-start|help|map|sound)"[^>]*>)/g, '$1 data-start-ready disabled'))
-    .replace('<div class="start-actions">','<p id="boot-status" role="status">正在准备滑雪。长时间未就绪时，请退出后重新打开。</p>\n      <div class="start-actions">')
+    .replace(/<main id="home">[\s\S]*?<\/main>/, home=>home.replace(/<button\b/g,'<button data-start-ready disabled'))
+    .replace('<div class="departure-resort">','<p id="boot-status" role="status">正在准备滑雪。长时间未就绪时，请退出后重新打开。</p>\n        <div class="departure-resort">')
     .replace('</head>','  <link rel="stylesheet" href="./app.css">\n</head>')
     .replace('<script type="module" src="/src/main.js"></script>','<script defer src="./app.js"></script>');
   if(html.includes('type="module"')||!html.includes('./app.js'))throw new Error('Unexpected entry template');
   // Fullscreen is controlled by the container. Keep its element for common text setup.
   html=html.replace('<div class="top-tools">','<div class="top-tools"><button data-act="fullscreen" hidden disabled></button>');
   await writeFile(path.join(stage,'index.html'),html);
-  await writeFile(path.join(stage,'app.css'),adaptStyle(await source('src/style.css'),await source('src/xhs/container.css')));
+  const styles=(await source('src/style.css'))+'\n'+(await source('src/lobby.css'));
+  const license=await source('public/RidgeTitle-OFL.txt');
+  await writeFile(path.join(stage,'app.css'),'/*! '+license+' */\n'+adaptStyle(styles,await source('src/xhs/container.css')));
   const compatibility=await source('src/xhs/compat.js');
   await Promise.all([
     build({...common,entryPoints:['src/main.js'],outfile:path.join(stage,'app.js'),banner:{js:compatibility}}),
@@ -128,7 +130,7 @@ try{
       await mkdir(to,{recursive:true});
       const names=await readdir(from);
       for(const name of names){
-        if(!/\.(png|jpg|webp|json)$/.test(name))continue;
+        if(!/\.(png|jpg|webp|woff|json)$/.test(name))continue;
         if(name.endsWith('.json')){
           const data=JSON.parse(await readFile(path.join(from,name),'utf8')),key=path.basename(name,'.json');
           const heights=data.dem?.heights;
