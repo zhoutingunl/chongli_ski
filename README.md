@@ -144,6 +144,8 @@ node scripts/build-xiaohongshu.mjs
 
 山顶木屋、金花阁、两侧大厅与相连酒店、吊厢和吊椅按实拍特征重建。云顶 1 索南侧到花锚的约 77 米山顶连接段按冬季影像中的开放雪面拟合。角色采用本地三维模型，动作依据滑行实拍调校，双板内外腿的屈伸也参考了[高山滑雪实地运动学研究](https://doi.org/10.3389/fspor.2020.00056)。开场全景、写实树木图集、梵高星空环幕和两张油画雪面使用 ImageGen 生成。六种画境的远树图集可通过 `python3 scripts/bake-art-trees.py` 从三维树形重建。几何与摄影数据可用 `scripts/` 下的脚本重建。[万龙度假区](https://www.wlski.com/) · [云顶金花阁](https://www.secretgardenresorts.com/dinning/?lang=zh-cn) · [完整地理数据署名](public/assets/geo/mountain.json) · [美术来源与生成提示](public/assets/art/credits.txt)
 
+云顶世界酒店与相邻的云顶丽苑是独立于云顶大酒店的建筑群。丽苑八栋楼按公开的六层资料和 OSM 轮廓重建。云顶世界酒店、万龙双龙酒店、盛龙公寓、万龙阅读空间、雪板寄存处及部分无名建筑以地图轮廓为准，未有楼层和立面测绘的细节为估绘。大地图标出已匹配名称的建筑，万龙抵达道路增补了三栋原范围外的 OSM 建筑。地形和滑行路线不随建筑替换而变更。[云顶丽苑项目资料](https://news.dichan.sina.com.cn/news/4a3ce935-4a1f-4288-b299-83c1b76b8a11) · [云顶世界酒店资料](https://s.visitbeijing.com.cn/index.php/hotel/101011126) · [万龙度假区介绍](https://www.visitbeijing.com.cn/article/47QqMGAMxI7)
+
 ## 第三方参考与许可
 
 双板独立贴地、换刃协调和风雪受光参考了 Huisky 的 [Cold Smoke 源码](https://github.com/huiskylabs/cold-smoke/tree/7c9657b3d19d93d048a4152ccc3dbcc33b043778)（MIT，Copyright © 2026 Huisky）。[完整 MIT 许可及版权声明](docs/third-party/cold-smoke-MIT.txt)

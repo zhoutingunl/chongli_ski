@@ -26,7 +26,7 @@ function distAlong(points,s) {
     if(d>s){const t=s/d;return {x:x+t*dx,z:z+t*dz,rx:-dz/d,rz:dx/d};}s-=d;
   }
 }
-export function courseDetails(scene,data,navigation) {
+export function courseDetails(scene,data,navigation,modeledBuildings=new Set()) {
   const directions=createWayfinding(scene,data,navigation?.signs||getSkiSigns(data));
   const poles=[],caps=[],netPos=[],rand=randomGenerator(18359);
   for(const trail of data.trails){
@@ -97,7 +97,7 @@ export function courseDetails(scene,data,navigation) {
   const taken=new Set(data.landmarks.map(l=>l.buildingId).filter(Boolean));
   const walls=[],roofs=[],wallUv=[];
   for(const b of data.buildings){
-    if(taken.has(b.id)||b.footprint.length<4)continue;
+    if(taken.has(b.id)||modeledBuildings.has(b.id)||b.footprint.length<3)continue;
     const pts=b.footprint.slice();if(pts.length>1&&pts[0][0]===pts.at(-1)[0]&&pts[0][1]===pts.at(-1)[1])pts.pop();
     const h=clamp((b.levels||1)*3.2+1.5,4.1,38),y=pts.reduce((a,p)=>a+data.height(...p),0)/pts.length;
     const vectors=pts.map(p=>new THREE.Vector2(...p));

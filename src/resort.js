@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {resortBuildingLabels,resortBuildingSpec} from './resort-buildings.js';
 
 // Local axes for a landmark: the front elevation looks along +Z, one unit is one metre.
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
@@ -30,6 +31,20 @@ function loadTexture(name, data = false) {
   return tex;
 }
 
+function districtLabels() {
+  if(typeof document==='undefined')return null;
+  const canvas=document.createElement('canvas');
+  canvas.width=512;canvas.height=128*resortBuildingLabels.length;
+  const ctx=canvas.getContext('2d');ctx.textAlign='center';ctx.textBaseline='middle';
+  for(const [i,l] of resortBuildingLabels.entries()){
+    const y=128*i;
+    ctx.fillStyle='#f9e9c9';ctx.font='700 48px "PingFang SC","Noto Sans CJK SC",sans-serif';
+    ctx.fillText(l.name,256,y+44,466);
+    ctx.fillStyle='#e4dccb';ctx.font='600 19px sans-serif';ctx.fillText(l.en.toUpperCase(),256,y+93,456);
+  }
+  const map=new THREE.CanvasTexture(canvas);map.colorSpace=THREE.SRGBColorSpace;map.anisotropy=4;return map;
+}
+
 function getMaterial(key) {
   if (materialCache.has(key)) return materialCache.get(key);
   const options = { vertexColors: true, roughness: 0.79, metalness: 0.03 };
@@ -58,6 +73,8 @@ function getMaterial(key) {
     options.alphaTest = 0.3;
     options.roughness = 0.75;
     options.side = THREE.DoubleSide;
+  } else if (key === 'districtLabel') {
+    options.map=districtLabels();options.alphaTest=.27;
   }
   const m = key === 'distant' ? new THREE.MeshLambertMaterial({vertexColors:true,side:THREE.DoubleSide}) : new THREE.MeshStandardMaterial(options);
   if (key === 'cabinGlass') {
@@ -140,8 +157,8 @@ class Builder {
       geo.setAttribute('uv',new THREE.Float32BufferAttribute(buf.uv,2));
       geo.setIndex(buf.ix); geo.computeBoundingSphere();
       const mesh=new THREE.Mesh(geo,getMaterial(key));
-      mesh.castShadow=key!=='distant' && key!=='lettering' && key!=='cabinGlass' && key!=='panorama';
-      mesh.receiveShadow=key!=='lettering';
+      mesh.castShadow=key!=='distant' && key!=='lettering' && key!=='districtLabel' && key!=='cabinGlass' && key!=='panorama';
+      mesh.receiveShadow=key!=='lettering'&&key!=='districtLabel';
       mesh.name=key; g.add(mesh);
     }
     return g;
@@ -436,6 +453,147 @@ function balconyFront(b,center,width,z,base,levels,cols,warm=false) {
       if(k<cols) pane(b,x+pitch/2,y+.68,z+1.38,pitch-.12,.76,'#9faeb1','panorama',(f+k)*.115);
     }
   }
+}
+
+function districtMassing(b,polygon,ground,top,wall) {
+  if(polygon.length<3)return;
+  const plan=polygon.slice();
+  const area=signedPlanArea(plan);
+  if(area>0)plan.reverse();
+  const roof=THREE.ShapeUtils.triangulateShape(plan.map(p=>new THREE.Vector2(...p)),[]);
+  for(const ids of roof){
+    const [p,q,r]=ids.map(i=>[plan[i][0],top,plan[i][1]]);
+    const up=(q[2]-p[2])*(r[0]-p[0])-(q[0]-p[0])*(r[2]-p[2]);
+    b.face('solid',ice,up>0?[p,q,r]:[p,r,q]);
+  }
+  for(let i=0;i<plan.length;i++){
+    const [x,z]=plan[i],[nx,nz]=plan[(i+1)%plan.length];
+    const dx=nx-x,dz=nz-z,length=Math.hypot(dx,dz);
+    if(length<.01)continue;
+    const n=Math.ceil(length/12);
+    for(let j=0;j<n;j++){
+      const u=j/n,v=(j+1)/n,ax=x+dx*u,az=z+dz*u,bx=x+dx*v,bz=z+dz*v;
+      b.face('plaster',wall,[[ax,ground(ax,az),az],[bx,ground(bx,bz),bz],[bx,top,bz],[ax,top,az]]);
+    }
+  }
+}
+
+const districtStyles={
+  world:{floor:3.45,wall:'#a89b89',band:'#5f5550',roof:'#646b6b',glass:'#9bb7bf',annex:true},
+  liyuan:{floor:3.04,wall:'#c6b9a8',band:'#655952',roof:'#5b676c',glass:'#a4bbc3',balconies:true,ridge:true},
+  shuanglong:{floor:3.26,wall:'#d1bea3',band:'#795944',roof:'#6e6862',glass:'#a5b8ba',annex:true},
+  shenglong:{floor:3.20,wall:'#d2cbbc',band:'#5d6267',roof:'#6e7578',glass:'#9db4be',balconies:true},
+  reading:{floor:3.75,wall:'#aa8566',band:'#694f3e',roof:'#657078',glass:'#b4c6ca'},
+  storage:{floor:2.85,wall:'#b3a294',band:'#5a6170',roof:'#737b7d',glass:'#a6bcc1'},
+  annex:{floor:3.16,wall:'#c8b7a5',band:'#746356',roof:'#6d6a66',glass:'#9eb3bb'},
+  service:{floor:3.05,wall:'#b3aaa0',band:'#746b62',roof:'#657277',glass:'#a4b6bd'},
+  chalets:{floor:2.84,wall:'#b09174',band:'#67554b',roof:'#60686b',glass:'#a4b6bd',ridge:true}
+};
+
+function signedPlanArea(plan){
+  return plan.reduce((sum,[x,z],i)=>{
+    const [nx,nz]=plan[(i+1)%plan.length];
+    return sum+x*nz-z*nx;
+  },0);
+}
+
+function pitchedQuad(b,plan,edge,top,tint){
+  const [a,c,d,e]=Array.from({length:4},(_,i)=>plan[(edge+i)%4]);
+  const depth=(Math.hypot(e[0]-a[0],e[1]-a[1])+Math.hypot(d[0]-c[0],d[1]-c[1]))*.5;
+  const ridge=top+Math.min(3.6,depth*.24);
+  const p=[(a[0]+e[0])*.5,ridge,(a[1]+e[1])*.5],q=[(c[0]+d[0])*.5,ridge,(c[1]+d[1])*.5];
+  const at=([x,z])=>[x,top,z];
+  b.face('solid','#dce8ee',[at(a),at(c),q,p]);b.face('solid','#eaf1f3',[p,q,at(d),at(e)]);
+  b.face('plaster',tint,[at(c),at(d),q]);b.face('plaster',tint,[at(e),at(a),p]);
+}
+
+function districtPlate(b,spec,len,entry){
+  const width=Math.min(len*.59,Math.max(5.4,spec.sign.name.length*1.08)),height=width*.22;
+  const y=entry+2.55,v=1-(spec.labelIndex+1)/resortBuildingLabels.length,vTop=v+1/resortBuildingLabels.length;
+  b.box(0,y,.14,width+.20,height+.12,.15,'#444a4b');
+  b.face('districtLabel','#fff9ec',[[-width/2,y-height/2,.22],[width/2,y-height/2,.22],
+    [width/2,y+height/2,.22],[-width/2,y+height/2,.22]],[[0,v],[1,v],[1,vTop],[0,vTop]]);
+}
+
+function districtBuilding(b,building,spec,heightAt){
+  const {x,z}=building;
+  const plan=building.footprint.map(([a,c])=>[a-x,c-z]);
+  if(signedPlanArea(plan)>0)plan.reverse();
+  const grades=building.footprint.map(p=>heightAt(...p)).sort((a,c)=>a-c);
+  const y=grades[Math.floor((grades.length-1)*.34)];
+  const style=districtStyles[spec.style],floors=Math.max(1,Math.min(10,spec.floors)),top=floors*style.floor+.38;
+  const edges=plan.map(([a,c],i)=>{
+    const [u,v]=plan[(i+1)%plan.length],dx=u-a,dz=v-c,len=Math.hypot(dx,dz);
+    return {x:(a+u)*.5,z:(c+v)*.5,dx,dz,len};
+  });
+  const long=edges.reduce((i,e,j)=>e.len>edges[i].len?j:i,0),max=edges[long].len;
+  const front=spec.sign?edges.reduce((best,e,i)=>{
+    if(e.len<Math.min(7,max*.40))return best;
+    const xx=spec.sign.near[0]-x-e.x,zz=spec.sign.near[1]-z-e.z,r=Math.hypot(xx,zz)||1;
+    const score=(-e.dz*xx+e.dx*zz)/(r*e.len)+.39*e.len/max;
+    return score>best.score?{score,i}:best;
+  },{score:-Infinity,i:long}).i:-1;
+  b.pose(0,y,0,0,()=>{
+    districtMassing(b,plan,(u,v)=>Math.min(-.2,heightAt(x+u,z+v)-y-.65),top,style.wall);
+    if(style.ridge&&plan.length===4)pitchedQuad(b,plan,long,top,style.roof);
+    for(const [i,e] of edges.entries()){
+      if(e.len<1.5)continue;
+      const entry=i===front?THREE.MathUtils.clamp(heightAt(x+e.x,z+e.z)-y,0,top-3.6):0;
+      b.pose(e.x,0,e.z,Math.atan2(-e.dz,e.dx),()=>{
+        b.box(0,top-.22,0,e.len,.38,.13,style.roof);
+        b.box(0,.49,.024,e.len,.94,.085,style.band,'stone');
+        if(e.len<3.45)return;
+        const width=e.len-1.0,bays=Math.min(24,Math.max(1,Math.floor(width/(style.balconies?3.85:3.3))));
+        const pitch=width/bays;
+        for(let f=0;f<floors;f++){
+          const h=f*style.floor;
+          const balcony=style.balconies&&e.len>=max*.55&&f>0;
+          if(balcony){
+            b.box(0,h+.25,.43,width,.18,.88,style.band);
+            b.box(0,h+.29,.86,width,.075,.12,'#dbe5e9');
+            b.box(0,h+1.03,.86,width,.068,.07,'#6a7376','metal');
+          }
+          // Separate openings and floor bands are much easier to read at a
+          // distance than the original repeated single-storey painted facade.
+          if((style.annex||style.balconies)&&f>0)b.box(0,h+.19,.053,width,.14,.13,style.band);
+          for(let j=0;j<bays;j++){
+            const at=(j-(bays-1)/2)*pitch;
+            if(i===front&&Math.abs(h+.7-entry)<1.4&&Math.abs(at)<Math.min(e.len*.17,4.6))continue;
+            const ww=Math.min(2.45,pitch*.72),hh=style.floor*.56;
+            if((j+f*3+i)%13===0)pane(b,at,h+style.floor*.56,.09,ww,hh,'#c8baa4','occupiedRoom');
+            else pane(b,at,h+style.floor*.56,.084,ww,hh,style.glass,'glazing',(j*.19+f*.13)%1);
+            if(balcony)pane(b,at,h+.62,.87,pitch*.84,.58,'#93a7af','panorama',(j*.1+f*.07)%1);
+          }
+        }
+        if(i===front){
+          const span=Math.min(e.len*.49,8.2);
+          b.box(0,entry+1.02,.054,span,2.05,.18,'#665b50','metal');
+          glassFront(b,0,.163,span-.30,1.84,entry+.1,Math.max(2,Math.round(span/1.4)),1,'#9cabb0');
+          b.box(0,entry+2.18,.55,span+.52,.21,1.12,style.band);
+          districtPlate(b,spec,e.len,entry);
+        }
+      });
+    }
+  });
+}
+
+export function createResortDistricts(data){
+  const batches=new Map(),modeled=new Set();
+  for(const building of data.buildings){
+    const spec=resortBuildingSpec(building);
+    if(!spec||building.footprint.length<3)continue;
+    const x=Math.floor(building.x/320)*320+160,z=Math.floor(building.z/320)*320+160,key=x+','+z;
+    if(!batches.has(key))batches.set(key,{builder:new Builder(),x,z,ids:[]});
+    const batch=batches.get(key);
+    batch.builder.pose(building.x-x,0,building.z-z,0,()=>districtBuilding(batch.builder,building,spec,data.height));
+    batch.ids.push(building.id);modeled.add(building.id);
+  }
+  const groups=[...batches.values()].map(({builder,x,z,ids})=>{
+    const group=builder.group();
+    group.name='mapped resort district';group.position.set(x,0,z);group.userData.buildingIds=ids;
+    return group;
+  });
+  return {groups,modeled};
 }
 
 function gentingBase(b) {

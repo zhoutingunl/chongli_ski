@@ -8,7 +8,7 @@ import {nearbyLiftStation} from './lift-access.js';
 import {placeLiftSupports} from './lift-supports.js';
 import * as THREE from 'three';
 import {createRider} from './rider.js';
-import {createLandmark,createLift,setResortNight} from './resort.js';
+import {createLandmark,createLift,createResortDistricts,setResortNight} from './resort.js';
 import {Descent} from './simulation.js';
 import {createSkiNavigation} from './navigation.js';
 import {createSky,buildSurface,plantForest,bindScenicBuildings} from './landscape.js';
@@ -66,6 +66,8 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     const focus=box.getCenter(new THREE.Vector3());focus.y=group.position.y+size.y*.46;
     landmarkViews.set(k.id,{focus,yaw:group.rotation.y,distance:Math.max(22,Math.hypot(size.x,size.z)*.70),kind:k.kind});
   }
+  const districts=createResortDistricts(data);
+  for(const group of districts.groups){scene.add(group);landmarks.push(group);}
   const lifts=[];
   for(const lift of data.lifts){
     const points=placeLiftSupports(lift.points,data).map(([x,z])=>new THREE.Vector3(x,data.height(x,z),z));
@@ -79,7 +81,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
   bindScenicBuildings([...landmarks,...lifts.map(l=>l.group)],scenic);
   const helmet=new LiftHelmet();
   const navigation=createSkiNavigation(data);
-  const details=courseDetails(scene,data,navigation);
+  const details=courseDetails(scene,data,navigation,districts.modeled);
   const trailGuide=createTrailGuide(scene,data,renderer,pisteProgress,surface.detail);
   const snowAir=createSnowAir(scene,data),fx=makeSnowFX(scene,data,snowAir);
   let renderLighting,lightingLimited=false;
