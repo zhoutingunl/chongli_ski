@@ -1,3 +1,4 @@
+import {skiGrooves} from './ski-grooves.js';
 import * as THREE from 'three';
 import {clamp,mixAngle,randomGenerator} from './mountain.js';
 import {getSkiSigns} from './navigation.js';
@@ -277,9 +278,9 @@ function snowFan(scene,data,uniforms){
     if(c&&c.force>(c.soft>.55 ? .13 : .20)&&c.speed>1.3){
       const fx=Math.sin(c.heading),fz=-Math.cos(c.heading),rx=-fz*c.side,rz=fx*c.side;
       const offset=(c.skis?c.stance*.5:0)+c.waist*.46,fore=c.length*(.11+.14*Math.abs(c.edge)+.085*c.slip+.070*c.press);
-      const x=c.x+rx*offset+fx*fore,z=c.z+rz*offset+fz*fore;
+      const x=c.work?.rear.x??(c.x+rx*offset+fx*fore),z=c.work?.rear.z??(c.z+rz*offset+fz*fore);
       const d=previous?Math.hypot(x-previous.x,z-previous.z):0;
-      const join=previous&&c.side===previous.side&&c.length===previous.length&&d<3.3&&clock-stamp<.18;
+      const join=previous&&c.side===previous.side&&c.work?.leg===previous.leg&&c.length===previous.length&&d<3.3&&clock-stamp<.18;
       if(!join||d>.19*c.scale||clock-stamp>.085){
         const slices=join?Math.max(1,Math.min(9,Math.ceil(d/.36))):1;if(!join)chain++;
         for(let i=1;i<=slices;i++){
@@ -289,7 +290,7 @@ function snowFan(scene,data,uniforms){
             seed:.55*Math.sin(measure*8.8)+.45*Math.sin(measure*19.75+.27)});
           cursor=(cursor+1)%max;used=Math.min(max,used+1);
         }
-        previous={x,z,side:c.side,length:c.length};stamp=clock;
+        previous={x,z,side:c.side,length:c.length,leg:c.work?.leg};stamp=clock;
       }
     }else previous=null;
     let last=null,pairs=0;
@@ -315,7 +316,7 @@ function snowFan(scene,data,uniforms){
     }
     // Snow packs against the working shovel before it peels into the wake.
     // This close ridge is visible beside the tip in an eye-level camera.
-    if(c&&c.force>.20&&c.speed>1.3){
+    if(c&&!c.work&&c.force>.20&&c.speed>1.3){
       const fx=Math.sin(c.heading),fz=-Math.cos(c.heading),rx=-fz*c.side,rz=fx*c.side;
       const offset=(c.skis?c.stance*.5:0)+c.waist*.49,along=[.025,.20,.345,.465],lift=[.08,.78,1,.10];
       const crest=c.scale*(.035+c.force*(.14+.11*c.soft)),span=c.scale*(.045+c.force*(.15+.11*c.soft));
@@ -375,7 +376,13 @@ function snowParticles(scene,data,random,uniforms,updateScreen){
     const lane=c.skis?bank*c.stance*.5*(random()<.88?1:-1):0;
     const across=lane+bank*c.waist*(.41+.10*random());
     const fore=random()<.30&&c.force>.24?(.26+.145*random()):((random()-.53)*.60+.15*c.press+.12*c.slip),along=c.length*clamp(fore,-.37,.43);
-    const x=lerp(previous?.x??c.x,c.x,f)+rx*across+forward*along,z=lerp(previous?.z??c.z,c.z,f)+rz*across+north*along;
+    let x=lerp(previous?.x??c.x,c.x,f)+rx*across+forward*along,z=lerp(previous?.z??c.z,c.z,f)+rz*across+north*along;
+    if(c.work){
+      const [l,r]=c.cutResponses,total=(l?.spray||0)+(r?.spray||0);
+      const source=total>0?c.workingFeet[random()*total<(l?.spray||0)?0:1]:c.work;
+      const u=random()*.68;
+      x=lerp(source.rear.x,source.boot.x,u);z=lerp(source.rear.z,source.boot.z,u);
+    }
     const size=c.scale,soft=c.soft,pw=Math.min(1.4,strength),root=Math.sqrt(size);
     const out=bank*(.32+pw*(1.25+random()*(fine?3.85:3.12)))*(1+.12*soft)*root;
     const carry=c.speed*(.035+random()*.11+pw*.095)-random()*.30;
@@ -479,7 +486,7 @@ function powderWake(scene,data,random,uniforms,updateScreen){
         const power=i<count?hard:Math.min(1,impact);
         const f=(i+random())/Math.max(1,count+landing),start=previous||c;
         const across=edge+.06+random()*.23,trail=c.length*(.24+random()*.18);
-        const x=lerp(start.x,c.x,f)-vx*trail+sideX*across,z=lerp(start.z,c.z,f)-vz*trail+sideZ*across;
+        const x=c.work?.rear.x??(lerp(start.x,c.x,f)-vx*trail+sideX*across),z=c.work?.rear.z??(lerp(start.z,c.z,f)-vz*trail+sideZ*across);
         const drift=(.68+random()*1.45+power*1.7)*c.scale;
         live.push({x,z,y:data.height(x,z)+(.13+.16*random())*c.scale,age:0,
           vx:sideX*drift+vx*c.speed*.09+wind*.46,vz:sideZ*drift+vz*c.speed*.09+wind*.18,
@@ -508,11 +515,12 @@ function powderWake(scene,data,random,uniforms,updateScreen){
   return {update,clear(){live.length=0;previous=null;bank=0;cloud.visible=false;geo.setDrawRange(0,0);}};
 }
 
-export function makeSnowFX(scene,data,snowAir){
+export function makeSnowFX(scene,data,snowAir,grooveMaterial){
   const random=randomGenerator(6127),screen={value:720},night={value:0},viewport=new THREE.Vector2();
   const uniforms={screen,night,squall:{value:0},solar:{value:0},snowSky:{value:0},sunColor:{value:new THREE.Color()},haze:{value:0},keyDir:{value:new THREE.Vector3(.36,.75,.55).normalize()},snowGrain:{value:powderGrain()}};
   const updateScreen=renderer=>{screen.value=renderer.getDrawingBufferSize(viewport).y;};
   const tracks=snowTracks(scene,data,uniforms),fan=snowFan(scene,data,uniforms),particles=snowParticles(scene,data,random,uniforms,updateScreen);
+  const grooves=grooveMaterial?skiGrooves(scene,data,grooveMaterial):null;
   const wake=powderWake(scene,data,randomGenerator(6419),uniforms,updateScreen);
   const flakeCount=1100,flakes=new Float32Array(flakeCount*3),specks=new Float32Array(flakeCount*3);
   for(let i=0;i<flakeCount;i++){
@@ -560,8 +568,8 @@ export function makeSnowFX(scene,data,snowAir){
   }
   return {
     snowfall,
-    reset(){tracks.clear();fan.clear();particles.clear();wake.clear();hadSnow=wasAirborne=movingSnow=false;},
-    update(p,dt,weather,view,dimensions){
+    reset(){grooves?.reset();tracks.clear();fan.clear();particles.clear();wake.clear();hadSnow=wasAirborne=movingSnow=false;},
+    update(p,dt,weather,view,dimensions,feet){
       night.value=weather?.nightAmount??0;uniforms.haze.value=scene.fog?.density??0;
       if(weather?.dir)uniforms.keyDir.value.fromArray(weather.dir);
       const sunlight=weather?.sunAmount??0;
@@ -570,12 +578,27 @@ export function makeSnowFX(scene,data,snowAir){
       if(weather?.sun)uniforms.sunColor.value.setHex(weather.sun);
       snowfall(dt,weather,view);
       if(p.mode!=='run'){
-        if(movingSnow){tracks.lift();fan.clear();particles.clear();wake.clear();movingSnow=false;}wasAirborne=false;return;
+        if(movingSnow){grooves?.lift();tracks.lift();fan.clear();particles.clear();wake.clear();movingSnow=false;}wasAirborne=false;return;
       }
       movingSnow=true;
       const inAir=!!p.airborne||(p.airHeight||0)>.04,impact=!inAir&&wasAirborne?(p.impact??p.landing??.45):0;
-      const contact=!inAir&&(p.speed>.35||impact>.12)?snowContact(p,dimensions):null;
-      if(contact&&p.speed>.35)tracks.draw(contact);else tracks.lift();
+      let contact=!inAir&&(p.speed>.35||impact>.12)?snowContact(p,dimensions):null;
+      const groomed=grooves&&contact?.skis&&feet?.length===2&&p.onTrail&&(!p.snowTerrain||p.snowTerrain.kind==='groomed');
+      if(groomed){
+        grooves.update(feet,p,dimensions,dt);tracks.lift();
+        const [left,right]=grooves.response;
+        const strong=right&&(!left||right.spray>left.spray)?1:0;
+        const active=feet[strong],response=grooves.response[strong];
+        if(response){
+          contact.force=response.spray;contact.slip=response.slip;
+          contact.heading=Math.atan2(active.forward.x,-active.forward.z);
+          contact.work=active;
+          contact.workingFeet=feet;contact.cutResponses=grooves.response;
+          if(Math.abs(response.sideSpeed)>.45)contact.side=Math.sign(response.sideSpeed);
+        }else contact=null;
+      }else{
+        grooves?.lift();if(contact&&p.speed>.35)tracks.draw(contact);else tracks.lift();
+      }
       fan.update(contact,dt);particles.update(contact,dt,impact);wake.update(contact,dt,impact,weather?.wind);wasAirborne=inAir;
     }
   };

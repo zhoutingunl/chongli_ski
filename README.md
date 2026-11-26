@@ -151,6 +151,7 @@ node scripts/build-xiaohongshu.mjs
 | Cold Smoke 源码参考 | 本仓库实现 |
 | --- | --- |
 | [双板接触](https://github.com/huiskylabs/cold-smoke/blob/7c9657b3d19d93d048a4152ccc3dbcc33b043778/src/08j_solver.js) | [雪具与角色](src/rider.js)分别用万龙云顶的地形约束两块板的板底，压坡时让踝、膝、髋随各脚的位置屈伸。 |
+| [雪痕](https://github.com/huiskylabs/cold-smoke/blob/7c9657b3d19d93d048a4152ccc3dbcc33b043778/src/17_tracks.js)与[喷雪](https://github.com/huiskylabs/cold-smoke/blob/7c9657b3d19d93d048a4152ccc3dbcc33b043778/src/10_spray.js) | 压雪道上的双板各自用靴下低刃和板尾定位雪槽。横滑时用连续两帧刃段扫过的区域压平雪纹，按板尾横向速度和估算载荷扬雪。 |
 | [转弯动作阶段](https://github.com/huiskylabs/cold-smoke/blob/7c9657b3d19d93d048a4152ccc3dbcc33b043778/src/06c_mocap.js) | [动作驱动](src/ski-kinematics.js)从实时侧向负载和换刃变化驱动现有骨架，儿童和成人使用各自的屈伸幅度。 |
 | [空中动作与落地时机](https://github.com/huiskylabs/cold-smoke/blob/7c9657b3d19d93d048a4152ccc3dbcc33b043778/src/07_game.js) | [滑行动作](src/run-moves.js)从当前雪板前方采样选择凸坡和落点，按剩余腾空时间收回动作。选择下一组弯形时避开刚完成的一组。 |
 | [山脊风雪](https://github.com/huiskylabs/cold-smoke/blob/7c9657b3d19d93d048a4152ccc3dbcc33b043778/src/11b_wind.js)及[体积光](https://github.com/huiskylabs/cold-smoke/blob/7c9657b3d19d93d048a4152ccc3dbcc33b043778/src/15_shafts.js) | [贴地雪尘](src/snow-air.js)根据迎风坡、背风坡、地形和树冠遮挡改变亮度。[光照合成](src/snow-light-shafts.js)依据地形遮住太阳的程度调整逆光辉光。支持的浏览器在自动和高画质下按场景深度合成林间光束，高画质的体积光以各轴四分之一分辨率计算。 |

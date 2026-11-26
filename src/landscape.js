@@ -148,15 +148,17 @@ const ridgeShadowGLSL=`
     return sunHorizon.w*smoothstep(sunHorizon.z-.035,sunHorizon.z+.060,horizon);
   }
 `;
-function snowMaterial(uniforms,far,refined=false) {
+function snowMaterial(uniforms,far,refined=false,cut=false) {
   const mat=new THREE.MeshLambertMaterial({color:0xffffff});
-  mat.customProgramCacheKey=()=>far?'distant-snow-v3':refined?'terrain-snow-v1':'near-snow-v6';
+  if(cut)Object.assign(mat,{transparent:true,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1,side:THREE.DoubleSide,forceSinglePass:true});
+  mat.customProgramCacheKey=()=>cut?'packed-grooves-v1':far?'distant-snow-v3':refined?'terrain-snow-v1':'near-snow-v6';
   mat.onBeforeCompile=s=>{
     Object.assign(s.uniforms,uniforms);
     s.vertexShader='varying vec3 vGround;\n'+s.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvGround=position;');
+    if(cut)s.vertexShader='attribute vec4 edgeCut; varying vec4 vEdgeCut;\n'+s.vertexShader.replace('vGround=position;','vGround=position;vEdgeCut=edgeCut;');
     if(refined)s.vertexShader='attribute vec3 snowRelief; varying vec3 vSnowRelief;\n'+s.vertexShader.replace('vGround=position;', 'vGround=position; vSnowRelief=snowRelief;');
     s.fragmentShader=`varying vec3 vGround;
-      ${refined?'varying vec3 vSnowRelief;':''}
+      ${refined?'varying vec3 vSnowRelief;':''} ${cut?'varying vec4 vEdgeCut;':''}
       uniform sampler2D trailMask,ortho,crystals,lampMap; uniform float pisteLights; uniform vec4 lowSun; uniform float hasOrtho; uniform vec4 terrainBounds;
       uniform vec3 ridgeAir,hazeAir,horizonAir; uniform vec4 airSun; uniform float aerialStrength; uniform vec3 solarTint;
       uniform vec3 shadowStarts[${shadowBones.length}]; uniform vec2 shadowEnds[${shadowBones.length}]; uniform vec4 shadowArea;
@@ -208,6 +210,20 @@ function snowMaterial(uniforms,far,refined=false) {
       float grooming=mix(.38,.86,smoothstep(.26,.69,noise21(p*.108+vec2(18.,-7.))));
       float pisteFinish=course*(1.-sculpt.z);
       float teeth=pisteFinish*detail*grooming*(1.-smoothstep(.80,2.85,fwidth(phase)));
+      ${cut?`
+      float side=vEdgeCut.x,load=vEdgeCut.y,distToEdge=abs(side);
+      float bed=1.-smoothstep(.72,1.18,distToEdge);
+      float scuff=vEdgeCut.w;
+      float edgeWall=exp(-abs(side-.80*sign(vEdgeCut.z))*6.)*step(.5,abs(vEdgeCut.z));
+      float bite=smoothstep(.06,.79,load);
+      teeth*=1.-bed*(.88+.10*bite);
+      diffuseColor.a=(1.-smoothstep(1.,1.34,distToEdge))*smoothstep(0.,.14,load);
+      if(abs(vEdgeCut.z)<.01){
+        diffuseColor.a*=scuff*.70;
+        local*=1.-bed*(.018+.040*bite);
+      }else{
+        local*=1.-bed*(.030+.078*bite)-edgeWall*(.085+.14*bite);
+      }`:''}
       float ridge=sin(phase),flute=cos(phase)*(.85-.23*ridge);
       float grain=(noise21(p*7.6)-.5)*(1.-smoothstep(8.,30.,dist));
       vec2 relief=texture2D(crystals,p*.47).rg*2.-1.16;
@@ -221,6 +237,7 @@ function snowMaterial(uniforms,far,refined=false) {
       local+=vec3(.083,.100,.126)*windSculpt*mix(1.,.26,pisteFinish)*(1.-smoothstep(35.,190.,dist));
       vec2 snowSlope=(relief*mix(.58,.35,pisteFinish)+broad*mix(.50,.28,pisteFinish))*(1.-smoothstep(28.,105.,dist))
         -crossTrail*(teeth*flute*.105);
+      ${cut?'snowSlope*=1.-bed*(.70+.22*bite);':''}
       vec2 iceGrid=p*6.4+vec2(7.13,18.2);
       float icePixel=facetFootprint(iceGrid);
       float shimmerPixel=facetFootprint(iceGrid*.36);
@@ -538,7 +555,7 @@ export async function buildSurface(scene,data,scenicUniforms) {
     }
     area.set(root.x,root.z,span+.45,strength*(span>10?.58:.82));
   }
-  return {setRiderShadow,detail,locate:detail?.locate,setLight(env){
+  return {grooveMaterial:snowMaterial(uniforms,false,false,true),setRiderShadow,detail,locate:detail?.locate,setLight(env){
     uniforms.moonShadow.value=env.sceneId==='moon'?.86*env.moonAmount*(env.sceneStrength??1):0;
     setSnowSun(uniforms.lowSun.value,env);uniforms.pisteLights.value=env.lampAmount||0;fixtures.setLight(env);
     const day=1-env.nightAmount,haze=env.snowAmount;

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {skiLoad,biteDepth,surfaceNormal,newSkiContact,edgeFraction} from './edge-contact.js';
 import {outfitFor} from './wardrobe.js';
 import {followSkiTerrain, followTurn, seatSki} from './ski-kinematics.js';
 
@@ -1129,6 +1130,14 @@ export function createRider(options = {}) {
     baseSections.set(node,sections);
     return node;
   }
+  const skiFeet=board?[]:[newSkiContact(-1),newSkiContact(1)];
+  const localNormal=v3(),lateralAxis=v3(),rigRotation=new THREE.Quaternion();
+  // The binding sits at z=0. The nearest waist section in this mesh is at +5 cm.
+  function rail(plank,section,side,nose,tail,out){
+    const base=section.base+nose*section.frontFlex+tail*section.rearFlex;
+    return out.set(section.half*side,base,section.z).applyQuaternion(plank.quaternion)
+      .add(plank.position).applyMatrix4(groundMatrix);
+  }
   const deck = board ? plankModel('Snowboard',0) : null;
   const limbs = [];
   for (const s of [-1, 1]) {
@@ -1203,6 +1212,66 @@ export function createRider(options = {}) {
       }
     }
     return closest;
+  }
+
+  function settleWorkingEdge(plank,mark,frontLoad,tailLoad,roll,lift,weight,pressure,softness){
+    const sections=baseSections.get(plank),waist=sections[9];
+    const heightAt=snow.map.height;
+    rail(plank,waist,0,frontLoad,tailLoad,mark.boot);
+    const n=surfaceNormal(heightAt,mark.boot,mark.normal,.12*size);
+    // Cancel residual cross-slope at THIS boot before applying its edge angle.
+    rig.getWorldQuaternion(rigRotation);
+    lateralAxis.set(1,0,0).applyQuaternion(plank.quaternion).applyQuaternion(rigRotation);
+    const actual=Math.asin(clamp(lateralAxis.dot(n),-1,1));
+    plank.rotation.z+=roll-actual;
+    rail(plank,waist,-1,frontLoad,tailLoad,mark.left);
+    rail(plank,waist,1,frontLoad,tailLoad,mark.right);
+    let rise=lateralAxis.subVectors(mark.right,mark.left).dot(n);
+    let a=edgeFraction(rise,waist.half*2*size);
+    mark.boot.lerpVectors(mark.left,mark.right,a);
+    // As the DEM changes grade the rig can still point along the previous
+    // tangent. Seat the ski fore-and-aft about its boot before translating
+    // it down; otherwise a single embedded shovel can hold the waist up.
+    const gap=point=>(point.y-heightAt(point.x,point.z))*n.y;
+    rail(plank,sections[5],2*a-1,frontLoad,tailLoad,mark.fore);
+    rail(plank,sections[12],2*a-1,frontLoad,tailLoad,mark.rear);
+    const frontGap=gap(mark.fore),backGap=gap(mark.rear);
+    if(Math.min(frontGap,backGap)-gap(mark.boot)<-.014*size){
+      const length=mark.fore.distanceTo(mark.rear);
+      plank.rotation.x+=clamp(Math.atan2(backGap-frontGap,length),-.17,.17);
+      rail(plank,waist,-1,frontLoad,tailLoad,mark.left);
+      rail(plank,waist,1,frontLoad,tailLoad,mark.right);
+      rise=lateralAxis.subVectors(mark.right,mark.left).dot(n);
+      a=edgeFraction(rise,waist.half*2*size);
+    }
+    mark.edgeRise=rise;
+    mark.edgeAngle=Math.asin(clamp(rise/(2*waist.half*size),-1,1));
+    mark.boot.lerpVectors(mark.left,mark.right,a);
+    const clearance=(mark.boot.y-heightAt(mark.boot.x,mark.boot.z))*n.y;
+    const depth=biteDepth(weight,pressure,softness,size);
+    // Preserve genuine unloading, steps and lifted inside skis. Limit the
+    // correction on a crest so a shovel cannot be driven through it.
+    const desired=lift*size-depth;
+    const maxPress=(.026+.008*(softness))*size;
+    let correction=desired-clearance;
+    if(correction<0){
+      const closest=runningClearance(plank,frontLoad,tailLoad,0)*risePerUnit*n.y-snowSink*n.y;
+      correction=Math.min(0,Math.max(correction,-maxPress-closest));
+    }
+    localNormal.copy(n).applyQuaternion(rigRotation.invert()).multiplyScalar(correction/size);
+    plank.position.add(localNormal);
+    // Publish the very same flexed underside that the boots and knee IK use.
+    rail(plank,waist,-1,frontLoad,tailLoad,mark.left);
+    rail(plank,waist,1,frontLoad,tailLoad,mark.right);
+    mark.boot.lerpVectors(mark.left,mark.right,a);
+    rail(plank,sections[6],2*a-1,frontLoad,tailLoad,mark.fore);
+    rail(plank,sections[11],2*a-1,frontLoad,tailLoad,mark.rear);
+    rail(plank,sections[0],2*a-1,frontLoad,tailLoad,mark.nose);
+    mark.forward.subVectors(mark.fore,mark.rear).projectOnPlane(n).normalize();
+    mark.across.crossVectors(mark.forward,n).normalize();
+    mark.clearance=(mark.boot.y-heightAt(mark.boot.x,mark.boot.z))*n.y;
+    mark.weight=weight;
+    mark.active=mark.clearance<.005*size && lift*size<.021*size;
   }
 
   // Estimate the longitudinal mass centre in the equipment frame. A bent
@@ -1635,6 +1704,7 @@ export function createRider(options = {}) {
     const swap = drive ? state.bankSwap || 0 : 0;
     readPiste(snow,state,speed,(drive || junior || !board) && !inFlight);
     groundMatrix=null;
+    for(const foot of skiFeet)foot.active=false;
     const onRelief=state.snowTerrain?.kind&&state.snowTerrain.kind!=='groomed';
     if ((!board || junior || onRelief) && snow.available) {
       snowSink=state.snowSink || 0;
@@ -1823,6 +1893,10 @@ export function createRider(options = {}) {
           const lift=Math.max(0,step)*.026+insideLoad*turnCycle.transfer*.014+.108*stepUp;
           const height=plank.position.y+.0015+lift-runningClearance(plank,frontLoad,tailLoad,0);
           plank.position.y=seatSki(limb,height,dt,snapPose||incomingAir>.005);
+          if(groundMatrix && drive && state.onTrail && !onRelief){
+            const mark=skiFeet[s<0?0:1];
+            settleWorkingEdge(plank,mark,frontLoad,tailLoad,roll,lift,skiLoad(s,edge,pressure),pressure,state.snowSoftness||0);
+          }
         } else {
           limb.contactY=plank.position.y;
         }
@@ -2037,5 +2111,5 @@ export function createRider(options = {}) {
 
   if (junior) rig.scale.setScalar(size);
   update();
-  return { group, dimensions, update, setVisibility, eyePosition, tipPosition, shadowPose, dispose };
+  return { group, dimensions, skiFeet, update, setVisibility, eyePosition, tipPosition, shadowPose, dispose };
 }

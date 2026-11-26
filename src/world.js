@@ -81,7 +81,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
   const navigation=createSkiNavigation(data);
   const details=courseDetails(scene,data,navigation);
   const trailGuide=createTrailGuide(scene,data,renderer,pisteProgress,surface.detail);
-  const snowAir=createSnowAir(scene,data),fx=makeSnowFX(scene,data,snowAir);
+  const snowAir=createSnowAir(scene,data),fx=makeSnowFX(scene,data,snowAir,surface.grooveMaterial);
   let renderLighting,lightingLimited=false;
   let rider=createRider(opts);scene.add(rider.group);bindScenicBuildings([rider.group],scenic,true);
   const sim=new Descent(data,opts,rider.dimensions);
@@ -579,7 +579,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     const pose=descentFrames.renderPose();
     if(!paused){
       updateAvatar(dt,pose);
-      fx.update(pose,dt,conditions,camera.position,rider.dimensions);
+      fx.update(pose,dt,conditions,camera.position,rider.dimensions,rider.skiFeet);
     }
     if(!trial?.frozen)moveCamera(dt,pose);
     treesLag+=dt;if(treesLag>.40){refreshLOD();treesLag=0;}
