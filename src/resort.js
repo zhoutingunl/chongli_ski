@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {crowdColours,daylightTraffic,passengerManifest} from './piste-traffic.js';
 
 // Local axes for a landmark: the front elevation looks along +Z, one unit is one metre.
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
@@ -884,9 +885,35 @@ function vehicleTemplate(style,resort,far) {
   return vehicleTemplates.get(key);
 }
 
+// Shared seated passengers sit on the actual bench, with a clear middle aisle in cabins.
+const passengerModels=new Map();
+function passengerModel(colour,openChair){
+  const key=colour+'-'+Number(openChair);
+  if(passengerModels.has(key))return passengerModels.get(key);
+  const b=new Builder(),coat=crowdColours[colour],pants='#263746',helmet='#374754';
+  const link=(a,z,r,t,top=r)=>b.rod(a,z,r,t,'solid',8,top);
+  link([0,.00,-.04],[0,.31,-.05],.155,coat,.209);
+  link([0,.31,-.05],[0,.49,-.014],.209,coat,.122);
+  link([0,.485,.004],[0,.64,.022],.094,'#bc9079',.113);
+  link([0,.60,.012],[0,.70,.004],.119,helmet,.139);
+  link([0,.70,.004],[0,.764,-.003],.139,helmet,.092);
+  b.box(0,.641,.119,.209,.052,.042,'#447387');
+  b.box(0,.29,.133,.21,.035,.036,'#dedfcb');
+  for(const s of [-1,1]){
+    link([s*.158,.372,-.002],[s*.218,.131,.077],.078,coat,.064);
+    link([s*.218,.131,.077],[s*.14,.097,.231],.062,coat,.052);
+    b.box(s*.143,.094,.218,.090,.077,.102,helmet);
+    link([s*.088,.023,-.032],[s*.119,-.041,.29],.104,pants,.082);
+    link([s*.119,-.041,.29],[s*.132,-.394,.295],.081,pants,.059);
+    b.box(s*.132,-.423,.34,.129,.135,.245,helmet);
+    if(openChair)b.box(s*.132,-.501,.311,.069,.023,1.33,'#546b73');
+  }
+  const model=b.group().children[0];passengerModels.set(key,model);return model;
+}
+
 // points follow the order of travel, normally from the lower station to the upper station.
 // position returned by seatAt and getRide is the passenger's eye position on the rising rope.
-export function createLift({points,resort='wanlong',type,kind,id='',name='',bubble=false,mixed=false,heightAt,validatedSupports=false}) {
+export function createLift({points,resort='wanlong',type,kind,id='',name='',bubble=false,mixed=false,heightAt,validatedSupports=false,random=Math.random}) {
   const line=prepareLine(points,heightAt,validatedSupports),group=new THREE.Group();group.name=name||`${resort}-lift`;
   const locateStructures=lineStructures(line,resort,group);
   group.add(wire(line));
@@ -917,12 +944,37 @@ export function createLift({points,resort='wanlong',type,kind,id='',name='',bubb
     let style=mode==='chair'?(hood?'bubble':'chair'):'cabin';
     if(mixed && i%3!==0) style=hood?'bubble':'chair';
     if(style==='cabin' && resort==='wanlong' && i%4===1) style='gold';
-    carriers.push({offset:i/count*line.loopLength,hi:fleet(style,false),lo:fleet(style,true)});
+    const chairSeat=style==='chair'||style==='bubble';
+    carriers.push({offset:i/count*line.loopLength,hi:fleet(style,false),lo:fleet(style,true),
+      chairSeat,passengers:[],trip:null,seatChance:0});
   }
   const pos=V(0,0,0),dir=V(0,0,0), carrier=new THREE.Object3D();
   const speed=resort==='genting'?5.0:5.65;
   let phaseOffset=0;
-  function update(time,observer,occupiedT=null,travelDirection=1) {
+  const seat=new THREE.Object3D(),worldSeat=new THREE.Matrix4(),riders=new Map();
+  function fillSeats(car,index,trip,probability,occupied){
+    if(car.trip!==trip){
+      car.trip=trip;car.seatChance=probability;car.passengers=passengerManifest(random,4);
+    }
+    for(let j=0;j<car.passengers.length;j++){
+      const p=car.passengers[j];
+      if(p.ticket>=car.seatChance||(occupied&&car.chairSeat&&j===1))continue;
+      const cabin=!car.chairSeat;
+      if(cabin)seat.position.set(j%2?.48:-.48,-3.115,j<2?-.63:.63);
+      else seat.position.set((j-1.5)*.68,-2.90,-.07);
+      seat.rotation.y=cabin&&j>=2?Math.PI:.035*Math.sin(index+j);
+      seat.scale.setScalar(p.scale);seat.updateMatrix();worldSeat.multiplyMatrices(carrier.matrix,seat.matrix);
+      const template=passengerModel(p.coat,car.chairSeat);
+      let mesh=riders.get(template);
+      if(!mesh){
+        mesh=new THREE.InstancedMesh(template.geometry,template.material,count*4);
+        mesh.name='Seated lift guests';mesh.count=0;mesh.boundingSphere=bounds;
+        mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);riders.set(template,mesh);group.add(mesh);
+      }
+      mesh.setMatrixAt(mesh.count++,worldSeat);
+    }
+  }
+  function update(time,observer,occupiedT=null,travelDirection=1,night=null) {
     if(!group.visible) return;
     const view=observer?.isCamera?observer.position:observer;
     const visibleVolume=carrierFrustum(observer);
@@ -933,9 +985,12 @@ export function createLift({points,resort='wanlong',type,kind,id='',name='',bubb
       const along=clamp01(occupiedT)*line.length;
       phaseOffset=(travelDirection<0 ? 2*line.length+line.arc-along : along)-time*speed;
     }
+    const {seatChance}=daylightTraffic(night);
+    for(const mesh of riders.values())mesh.count=0;
     for(const batch of styles.values()) batch.used=0;
     for(let i=0;i<carriers.length;i++) {
-      const car=carriers[i]; line.sample(car.offset+time*speed+phaseOffset,pos,dir);
+      const car=carriers[i],distance=car.offset+time*speed+phaseOffset;
+      line.sample(distance,pos,dir);
       const d2=view?pos.distanceToSquared(view):150*150;
       if(d2>2850*2850 || (d2>24*24 && visibleVolume && !visibleVolume.containsPoint(pos))) continue;
       const batch=d2<65*65?car.hi:car.lo;
@@ -943,9 +998,14 @@ export function createLift({points,resort='wanlong',type,kind,id='',name='',bubb
       carrier.rotation.y=Math.atan2(dir.x,dir.z);
       carrier.rotation.z=Math.sin(time*.68+i*1.23)*.011;
       carrier.updateMatrix();
+      if(d2<75*75&&night!=null){
+        const trip=Math.floor(distance/(line.loopLength*.5));
+        fillSeats(car,i,trip,seatChance,i===0&&Number.isFinite(occupiedT));
+      }
       for(const mesh of batch.meshes) mesh.setMatrixAt(batch.used,carrier.matrix);
       batch.used++;
     }
+    for(const mesh of riders.values()){mesh.visible=mesh.count>0;if(mesh.count)mesh.instanceMatrix.needsUpdate=true;}
     for(const batch of styles.values()) for(const mesh of batch.meshes) {
       mesh.count=batch.used;mesh.visible=batch.used>0;
       if(batch.used) mesh.instanceMatrix.needsUpdate=true;

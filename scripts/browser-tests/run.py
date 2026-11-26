@@ -46,7 +46,10 @@ def check_lobby(browser, base):
             assert panel.locator('[data-choice=gender]').count() == 4
             panel.locator('[data-choice=gender][data-value=girl]').click()
             panel.locator('[data-choice=gear][data-value=board]').click()
-            colour = panel.locator('[data-choice=color]').last
+            swatches = panel.locator('[data-choice=color]')
+            rows = swatches.evaluate_all('buttons=>buttons.map(b=>Math.round(b.getBoundingClientRect().top))')
+            assert len(rows) == 6 and rows[0] == rows[1] == rows[2] < rows[3] == rows[4] == rows[5], rows
+            colour = swatches.last
             name = colour.get_attribute('aria-label')
             colour.click()
             preview = panel.locator('.lobby-fit-preview .fitting-model')

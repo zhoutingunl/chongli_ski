@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {collisionPose} from './piste-traffic.js';
 import {skiLoad,biteDepth,surfaceNormal,newSkiContact,edgeFraction} from './edge-contact.js';
 import {outfitFor} from './wardrobe.js';
 import {followSkiTerrain, followTurn, seatSki} from './ski-kinematics.js';
@@ -1150,9 +1151,8 @@ export function createRider(options = {}) {
       foot = makePart(plank, prefix + 'boot', b => buildBoot(b,m,palette,s,true,junior));
       foot.position.copy(binding.position); foot.rotation.copy(binding.rotation);
     } else {
-      foot = makePart(plank, prefix + 'boot and binding', b => {
-        buildBoot(b,m,palette,s,false,junior); buildBinding(b,m,palette,s,false);
-      });
+      foot = makePart(plank, prefix + 'boot and binding', b => buildBoot(b,m,palette,s,false,junior));
+      binding = makePart(plank, prefix + 'ski binding', b => buildBinding(b,m,palette,s,false));
     }
     const [thigh, shin] = tailoredLimb(rig, prefix + 'trouser leg', cutThigh, .132,
       b => legGarment(b, m, palette, s, cutThigh, cutShin));
@@ -1405,14 +1405,18 @@ export function createRider(options = {}) {
       push*Math.sin(stridePhase*TAU)*.082 - pivot*(small ? .32 : .20) -
       (board ? 0 : turnCycle.sign*turnCycle.press*(small ? .104 : .082));
     const chestYaw=hipYaw+clamp(upperYaw-hipYaw,board ? -.60 : -.44,board ? .60 : .44);
+    const collision=state.traffic?.playerHit;
+    const refit=collision?collisionPose(collision.age,collision.released):null;
+    const fold=refit?.reach||0,flinch=(refit?.recoil||0)*(collision?.side||1);
+    pelvis.position.y-=.255*fold;pelvis.position.x+=.070*flinch;
     const gradeCredit=Math.max(0,posed.grade)*.090;
     const pelvicFlex=.063+.061*fast+.105*force+.184*tuck+.128*charge+.129*land+.027*trim+.076*pace+.17*race;
-    const chestFlex=.090+.122*fast+.152*force+.439*tuck+.213*charge+.235*land+
+    const chestFlex=.090+.65*fold+.122*fast+.152*force+.439*tuck+.213*charge+.235*land+
       (board ? .051*toe-.047*heel : .058*trim)-gradeCredit+.145*pace+(external ? .044*moving+.02*steep : 0)+race*(juniorSkier?.28:.34);
     const cross=Math.sin(state.roll || 0)*moving;
     pelvis.rotation.set(-pelvicFlex,hipYaw,board ? (.064*trim+.042*outsidePose.entry-.039*outsidePose.exit) : 0,'YXZ');
     leanQ.setFromAxisAngle(leanAxis,arc*(board ? .48 : juniorSkier ? .64 : .51)+cross*.053+insideSign*deep*(board?.37:.14));pelvis.quaternion.premultiply(leanQ);
-    torso.rotation.set(-chestFlex,chestYaw,board ? -.066*trim : 0,'YXZ');
+    torso.rotation.set(-chestFlex,chestYaw,(board ? -.066*trim : 0)+flinch*.31,'YXZ');
     leanQ.setFromAxisAngle(leanAxis,torsoArc*(board ? (small ? .51 : .46) : juniorSkier ? .67 : .34)-change*.045+cross*.067+insideSign*deep*(board?.94:.22));
     torso.quaternion.premultiply(leanQ);
     if(board && external){
@@ -1571,6 +1575,11 @@ export function createRider(options = {}) {
       if((board && rearPress>.001) || apex>.001){
         handOffset.set(s*(board?.39:.24),.02,-.10+s*.09).add(jointOrigin);
         wristGoal.lerp(handOffset,Math.max(rearPress*.80,apex*.90));
+      }
+      if(fold){
+        handOffset.copy(ankle);
+        handOffset.x+=s*.045;handOffset.y+=.035;handOffset.z-=.05;
+        wristGoal.lerp(handOffset,fold*(s===collision.side?1:.82));
       }
       if (limb.pole) {
         oldTip.copy(limb.poleDirection).multiplyScalar(poleLength*limb.pole.scale.y).add(limb.pole.position);
@@ -1835,6 +1844,8 @@ export function createRider(options = {}) {
       const stroke = Math.sin(phase*TAU), poling = push*stroke;
       const recovered = phase>.53 ? Math.sin((phase-.53)/.47*Math.PI) : 0;
       const timing = board ? (s<0 ? frontEdge : rearEdge) : supportedEdge;
+      foot.position.y-=limb.stepIntoBinding||0;
+      limb.stepIntoBinding=0;
       if (board) {
         const turnInBoot = s<0 ? -1.22 : -1.66;
         const torsionHere = -s*twist;
@@ -1902,6 +1913,12 @@ export function createRider(options = {}) {
         }
       }
 
+      const hit=state.traffic?.playerHit;
+      if(hit?.released&&(board||hit.side===s)){
+        const phase=clamp((hit.age-2.03-(board&&s>0?.24:0))/.66,0,1);
+        limb.stepIntoBinding=Math.sin(Math.PI*phase)**2*.105;
+        foot.position.y+=limb.stepIntoBinding;
+      }
       bootRotation.multiplyQuaternions(plank.quaternion,foot.quaternion);
       bootInverse.copy(bootRotation).invert();
       ankle.set(0,.196,.030).applyQuaternion(foot.quaternion).add(foot.position);
@@ -2035,11 +2052,40 @@ export function createRider(options = {}) {
     if(hair){
       hair.rotation.set(-.042*moving-.035*air,.045*edge+.012*moving*Math.sin(time*3.4),.08*edge);
     }
+    moveReleasedDeck(state.traffic?.playerHit);
     wearHelmet(helmetProgress);
   }
 
   const decks = [...new Set(limbs.map(limb => limb.plank))];
   const noseWeights = decks.map(plank => plank.children[0].morphTargetInfluences);
+  // Move only the loose deck and its bindings. The boot stays in the leg IK.
+  const hardware=decks.map(plank=>{
+    const parts=plank.children.filter(node=>node.isMesh).map(mesh=>{mesh.updateMatrix();return {mesh,rest:mesh.matrix.clone()};});
+    for(const limb of limbs.filter(limb=>limb.plank===plank)){
+      for(const mesh of limb.binding.children){
+        mesh.updateMatrix();parts.push({mesh,rest:mesh.matrix.clone(),binding:limb.binding});
+      }
+    }
+    return parts;
+  });
+  const releaseMatrix=new THREE.Matrix4(),hardwareMatrix=new THREE.Matrix4(),relativeMatrix=new THREE.Matrix4();
+  let deckWasLoose=false;
+  function moveReleasedDeck(hit){
+    if(!hit?.released&&!deckWasLoose)return;
+    const pose=collisionPose(hit?.age,hit?.released),side=hit?.side||1;
+    for(let i=0;i<decks.length;i++){
+      const displaced=board||limbs[i].s===side?pose.loose:0;
+      releaseMatrix.makeRotationY(side*displaced*.57).setPosition(side*displaced*.88,.045*displaced,-displaced*.40);
+      for(const {mesh,rest,binding} of hardware[i]){
+        if(binding){
+          binding.updateMatrix();relativeMatrix.copy(binding.matrix).invert().multiply(releaseMatrix).multiply(binding.matrix);
+        }else relativeMatrix.copy(releaseMatrix);
+        hardwareMatrix.multiplyMatrices(relativeMatrix,rest).decompose(mesh.position,mesh.quaternion,mesh.scale);
+      }
+      if(displaced&&skiFeet[i])skiFeet[i].active=false;
+    }
+    deckWasLoose=!!hit?.released;
+  }
   const nosePoint = v3();
   let visibility = 'body';
 

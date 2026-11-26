@@ -5,6 +5,8 @@ function checkRenderedEdges(){
   if(frame)cancelAnimationFrame(frame);
   frame=0;
   start(data.allRoutes.find(r=>r.id==='wanlong-gold'));
+  // Keep this pixel-difference fixture on the same arc every run.
+  sim.traffic.populate=()=>{};sim.traffic.actors=[];
   const along=674,f=sim.route.glideFrame(along);
   sim.x=f.x;sim.z=f.z;sim.heading=sim.travelHeading=sim.guideHeading=f.angle;
   sim.speed=84/3.6;sim.automatic.idle=3;sim.automatic.phase=1.7;

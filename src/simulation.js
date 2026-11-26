@@ -31,13 +31,14 @@ export class Descent {
     this.snowSink = 0; this.snowSoftness = .14; this.groundLoad = 0;
   }
 
-  start(route) {
+  start(route,keepGuests=false) {
+    this.traffic?.reset(keepGuests);
     this.upperGuide=null;
     this.moves.reset();
     this.automatic=new AutomaticTurns();this.autoSkating=false;this.straightTuck=0;this.route = route; this.mode = 'run'; this.gear = this.opts.gear;
     this.junctions=this.navigation?.stationsOn(route)||[];
     this.pisteVisits=new Map();this.splits=new PisteSplits();this.continuedFrom=null;
-    this.feedback={landing:0,tree:0};
+    this.feedback={landing:0,tree:0,skier:0};
     this.offPisteRest=this.runoutRest=0;
     this.lastTreeHit=-Infinity;
     this.recoveryReady=false;
@@ -90,8 +91,11 @@ export class Descent {
     return area;
   }
 
+  dismissRecovery() { this.offPisteRest=0; this.recoveryReady=false; }
+
   beginJump() {
-    if (this.mode !== 'run' || this.airborne || this.jumpCooldown > 0 || this.charging) return false;
+    this.dismissRecovery();
+    if (this.mode !== 'run' || this.traffic?.playerHit?.released || this.airborne || this.jumpCooldown > 0 || this.charging) return false;
     this.charging = true; this.charge = 0;
     return true;
   }
@@ -276,6 +280,17 @@ export class Descent {
   }
 
   step(dt, input) {
+    const traffic=this.traffic;
+    if(traffic){
+      traffic.advance(dt,this);
+      const steering=Math.abs(input.steer||0)>.16;
+      traffic.manualTime=steering?.55:Math.max(0,traffic.manualTime-dt);
+      if(traffic.playerHit?.released){
+        this.elapsed+=dt;this.dismissRecovery();
+        this.edge*=Math.exp(-dt*7);this.curve*=Math.exp(-dt*7);this.impact*=Math.exp(-dt*6);
+        return;
+      }
+    }
     const continueValley=this.route.destination==='genting'?input.boost:input.steer<-.16;
     if(continueValley&&!input.brake&&this.route.length-this.along<90&&this.navigation?.valleyExit(this)){
       this.continueAtBase();
@@ -384,9 +399,10 @@ export class Descent {
       const here=this.route.glideFrame(this.along),ahead=this.route.glideFrame(this.along+Math.max(13,planarSpeed*.95));
       const clear=Math.min(smooth(remaining,24,61),junction?smooth(junction.along-this.along,9,32+planarSpeed*.62):1);
       const {offset:lane,speed:laneVelocity,load:guidedArc}=this.automatic.line(planarSpeed,width,grade,crossGrade,angleBetween(here.angle,ahead.angle),clear,dt,this.moves);
-      const steeringGain = this.automatic.active ? automaticCentreGain : .24;
-      const recentre = (lane-this.offset)*(steeringGain+.47*smooth(Math.abs(this.offset),width*.55,width*1.04));
-      const pull = edgeAcceleration(this.steer*planarSpeed*.59 + laneVelocity + recentre,this.edgeSpeed,planarSpeed,grip);
+      const passLane=traffic&&!traffic.manualTime&&!airborne?traffic.avoidance(this,lane,width,planarSpeed):null;
+      const steeringGain = passLane!=null?1.85:this.automatic.active ? automaticCentreGain : .24;
+      const recentre = ((passLane??lane)-this.offset)*(steeringGain+.47*smooth(Math.abs(this.offset),width*.55,width*1.04));
+      const pull = edgeAcceleration(this.steer*planarSpeed*.59 + (passLane==null?laneVelocity:0) + recentre,this.edgeSpeed,planarSpeed,grip);
       const traction = airborne ? .06 : 1;
       const maxLat = (.90 + planarSpeed*planarSpeed / radius * .78) * traction;
       this.edgeSpeed += clamp(pull*dt, -maxLat*dt, maxLat*dt);
@@ -405,12 +421,13 @@ export class Descent {
       }
       this.along+=stride;
       const decay=Math.exp(-distance/13);this.branchShiftX*=decay;this.branchShiftZ*=decay;
+      if(traffic&&!traffic.manualTime&&!airborne)this.offset=traffic.clearLane(this,f,width);
       this.x = f.x - f.dz*this.offset+this.branchShiftX; this.z = f.z + f.dx*this.offset+this.branchShiftZ; this.planIndex = f.index;
       const look = this.route.frame(Math.min(this.route.length,this.along+Math.max(5,planarSpeed*.80)));
       this.guideHeading=f.angle;
       const anticipateLimit=this.automatic.active?.48:.76;
       const anticipate = clamp(angleBetween(f.angle,look.angle)*planarSpeed*.093,-anticipateLimit,anticipateLimit);
-      this.guideLean = approach(this.guideLean,clamp(anticipate+guidedArc,-.80,.80),5.8,dt);
+      this.guideLean = approach(this.guideLean,clamp(anticipate+(passLane==null?guidedArc:pull*.095),-.80,.80),5.8,dt);
       if (Math.hypot(this.x-oldX,this.z-oldZ)>.0001) this.travelHeading = Math.atan2(this.x-oldX,-(this.z-oldZ));
     } else {
       const gravityYaw = clamp(-G*crossGrade*normal/Math.max(3.1,planarSpeed),-.7,.7) *
@@ -444,6 +461,18 @@ export class Descent {
       }
     }
 
+    if(traffic&&!blocked){
+      const manual=!this.opts.assist||traffic.manualTime>0;
+      const hit=traffic.contact(this,oldX,oldZ,dt,manual);
+      if(hit){
+        this.feedback.skier++;this.impact=Math.max(this.impact,.83);this.edgeSpeed=0;
+        this.speed*=hit.released?0:.48;this.moves.reset();this.cancelJump();
+        if(hit.released){
+          this.push=this.press=this.skid=this.pressure=this.spray=0;
+          this.boost=this.brake=this.trim=this.steer=0;
+        }
+      }
+    }
     const desiredSlip = this.cutSide*this.skid*(board ? 1.22 : 1.10) + this.edge*.036;
     this.heading = mixAngle(this.heading, this.travelHeading+desiredSlip, 1-Math.exp(-dt*(airborne?3:9.3)));
     this.slipAngle = angleBetween(this.travelHeading,this.heading);
@@ -523,9 +552,10 @@ export class Descent {
     const sinkTarget = this.airborne ? 0 : depth+(contact?.sink??0);
     this.snowSink = approach(this.snowSink, sinkTarget, this.airborne ? 30 : sinkTarget>this.snowSink ? 16 : 8, dt);
     const stopped=!this.airborne&&this.speed<.65;
-    const canRecover=!this.onTrail&&!this.airborne&&!input.boost&&this.speed<10/3.6;
+    const operating=input.boost||input.brake||this.charging||Math.abs(input.steer||0)>.15||Math.abs(input.trim||0)>.15;
+    const canRecover=!this.onTrail&&!this.airborne&&!operating&&this.speed<15/3.6;
     this.offPisteRest=canRecover?this.offPisteRest+dt:0;
-    this.recoveryReady=this.offPisteRest>=3-1e-8;
+    this.recoveryReady=this.offPisteRest>=2-1e-8;
 
     const stoppedAtForecourt=stopped&&this.travel>25&&baseRange<=92&&atWanlongForecourt(this.data,this.route,this.x,this.z);
     this.runoutRest=stoppedAtForecourt?this.runoutRest+dt:0;
