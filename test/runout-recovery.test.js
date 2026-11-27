@@ -107,7 +107,7 @@ test('玉龙道左转可连续滑入娇龙道，山脚停留后也能从原地�
     }
     assert.ok(stations.has('三索'));assert.ok(stations.has('七索（新）'));
     assert.equal(sim.mode,'finished');assert.ok(sim.travel>3000&&sim.elapsed>170);
-    assert.equal(sim.continueAtBase(),false);
+    assert.ok(sim.continueAtBase());assert.equal(sim.freeSnowfront,true);
   }
 });
 
@@ -133,6 +133,6 @@ test('云顶三索与大厅雪面可以连续接一索，上车前可停留，�
     assert.equal(sim.mode,'finished');assert.ok(sim.travel>2460);
     const gondola=nearbyLiftStation(data,sim);
     assert.equal(gondola.lift.name,'1索');assert.ok(sim.navigation.isSummitStation(gondola.lift));
-    assert.equal(sim.continueAtBase(),false);
+    assert.ok(sim.continueAtBase());assert.equal(sim.route.approach.target,'风铃草');
   }
 });

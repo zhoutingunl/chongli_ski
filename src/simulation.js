@@ -43,7 +43,7 @@ export class Descent {
     this.lastTreeHit=-Infinity;
     this.recoveryReady=false;
     this.passedJunctions=new Set();this.requestedTurn=null;
-    this.handSteering=false;this.neutralTime=0;this.courseCheck=0;
+    this.handSteering=false;this.freeSnowfront=false;this.neutralTime=0;this.courseCheck=0;
     if(route.departedJunction)this.passedJunctions.add(route.departedJunction);
     this.branchShiftX=this.branchShiftZ=0;
     this.along = this.offset = this.edgeSpeed = this.speed = this.maxSpeed = 0;
@@ -86,7 +86,7 @@ export class Descent {
 
   get approach() {
     const area=this.route?.approach;
-    if(!area || this.along>=area.endDistance-.05)return null;
+    if(!area || this.freeSnowfront || this.along>=area.endDistance-.05)return null;
     if(!this.guided){const p=this.route.at(this.along);if(Math.hypot(this.x-p.x,this.z-p.z)>22)return null;}
     return area;
   }
@@ -143,27 +143,29 @@ export class Descent {
     const offset=-(this.x-f.x)*f.dz+(this.z-f.z)*f.dx;
     this.branchShiftX=this.x-(f.x-f.dz*offset);this.branchShiftZ=this.z-(f.z+f.dx*offset);
     this.edgeSpeed=this.speed*Math.sin(angleBetween(f.angle,this.travelHeading));
-    if(route!==this.route){
+    if(route!==this.route||this.freeSnowfront){
       this.moves.reset();
       this.junctions=this.navigation?.stationsOn(route)||[];
       this.requestedTurn=null;this.passedJunctions.clear();
     }
+    this.freeSnowfront=false;
     this.offset=offset;this.along=along;this.planIndex=f.index;this.route=route;
   }
 
-  continueAtBase(){
+  continueAtBase(next=this.navigation?.valleyLine(this),openHeading=this.travelHeading){
     if(!['finished','run'].includes(this.mode)||this.airborne)return false;
-    const next=this.navigation?.valleyLine(this);
-    if(!next)return false;
     const stopped=this.mode==='finished';
+    if(!next&&(!stopped||!Number.isFinite(openHeading)))return false;
     this.continuedFrom??={id:this.route.id,name:this.route.name};
     this.mode='run';
     if(stopped){
-      this.heading=this.travelHeading=next.frame(0).angle;
+      this.heading=this.travelHeading=next?next.frame(0).angle:openHeading;
       this.speed=2.15;this.push=.75;
     }
-    this.joinLine(next,0);
-    this.handSteering=!this.opts.assist||(!stopped&&next.finishKind!=='lift-link');this.neutralTime=0;this.courseCheck=.5;
+    if(next)this.joinLine(next,0);
+    else{this.freeSnowfront=true;this.junctions=[];this.requestedTurn=null;}
+    this.handSteering=!next||!this.opts.assist;
+    this.neutralTime=0;this.courseCheck=.5;
     this.automatic=new AutomaticTurns();this.autoSkating=false;this.straightTuck=0;
     this.moves.reset();
     this.runoutRest=this.offPisteRest=0;this.recoveryReady=false;
@@ -292,7 +294,9 @@ export class Descent {
       }
     }
     const continueValley=this.route.destination==='genting'?input.boost:input.steer<-.16;
-    if(continueValley&&!input.brake&&this.route.length-this.along<90&&this.navigation?.valleyExit(this)){
+    // A requested lift transfer stops at its platform, even if accelerate is
+    // still held. The next descent from that platform needs a new input.
+    if(continueValley&&!input.brake&&!this.freeSnowfront&&this.route.finishKind!=='lift-link'&&this.route.length-this.along<90){
       this.continueAtBase();
     }
     this.updateLine(input,dt);
@@ -382,7 +386,7 @@ export class Descent {
       this.speed = clamp(oldSpeed + acceleration*dt,0,34.5);
       // Ease out on the snow front before coming to rest. Free skiers can pass
       // beside this area and continue across the hill.
-      if(remaining<220 && (assisted || baseRange<80)){
+      if(!this.freeSnowfront&&remaining<220 && (assisted || baseRange<80)){
         const stopLimit=Math.min(Math.sqrt(6.6*runout),1.45*runout);
         this.speed=Math.min(this.speed,stopLimit);
       }
@@ -560,7 +564,7 @@ export class Descent {
     const stoppedAtForecourt=stopped&&this.travel>25&&baseRange<=92&&atWanlongForecourt(this.data,this.route,this.x,this.z);
     this.runoutRest=stoppedAtForecourt?this.runoutRest+dt:0;
     const reachedEnd=assisted?this.route.length-this.along<=.32&&baseRange<56:remaining<45&&baseRange<=18.4;
-    const atBase=reachedEnd||this.runoutRest>1.2;
+    const atBase=!this.freeSnowfront&&(reachedEnd||this.runoutRest>1.2);
     if(atBase&&!this.airborne){
       this.splits.finish();
       this.moves.reset();

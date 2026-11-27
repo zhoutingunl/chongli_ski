@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 from urllib.request import urlopen
 from playwright.sync_api import sync_playwright
 from edge_probe import check_rendered_edges
+from runouts import check_runouts
 
 ROOT = Path(__file__).resolve().parents[2]
 VIEWS = ('front', 'follow', 'low', 'left', 'right', 'top', 'far', 'first', 'tips')
@@ -150,9 +151,10 @@ def main():
         else: raise RuntimeError('Vite did not become ready')
         with sync_playwright() as pw:
             browser = pw.chromium.launch(channel=os.environ.get('CHROME_CHANNEL') or None,
-                                         args=['--ignore-gpu-blocklist','--enable-unsafe-swiftshader'])
+                                         args=['--mute-audio','--ignore-gpu-blocklist','--enable-unsafe-swiftshader'])
             try:
                 check_lobby(browser, base)
+                check_runouts(browser, base)
                 check_cameras(browser, base)
                 check_rendered_edges(browser, base)
             finally:

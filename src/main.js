@@ -210,7 +210,7 @@ function setupText(){
   $('#base-actions').setAttribute('aria-label',t('山脚停留','Base area'));
   $('#base-hint').textContent=t('拖动转身环顾','Drag to turn and look around');
   $('#base-result').textContent=t('本趟成绩','Run stats');
-  $('#base-continue-text').textContent=t('滑往娇龙道','Ski to Jiao Dragon');
+  $('#base-continue-text').textContent=t('沿雪面继续滑','Continue on the snow');
   $('#career-distance-label').textContent=t('累计滑行里程','Lifetime distance');
   $('#career-visits-label').textContent=t('雪道滑行次数','Piste visits');
   $('#tray-photo-label').textContent=t('拍照','Photo');
@@ -282,17 +282,22 @@ function hudVisible(show){
   $('#hud').classList.toggle('has-lift-summary',screen==='lift'&&!$('#lift-summary').hidden);
   if(screen==='base'){
     const sim=world.sim,hall=data.landmarks.find(l=>l.id===sim.route.destination+'-hall');
-    const exit=sim.navigation?.valleyExit(sim);
-    $('#base-actions [data-act="continue-base"]').hidden=!exit;
-    baseExitDirection=null;baseExitHeading=null;
-    if(exit&&sim.route.destination==='wanlong'){
-      const plan=sim.navigation.valleyLine(sim);
-      if(plan)baseExitHeading=plan.frame(Math.min(3,plan.length)).angle;
+    baseExitLine=sim.navigation?.valleyLine(sim)??null;
+    basePisteLine=baseExitLine?.finishKind==='lift-link'?sim.navigation.valleyLine(sim,true):null;
+    const alternate=$('#base-actions [data-act="continue-piste"]');
+    alternate.hidden=!basePisteLine;
+    if(basePisteLine){
+      const {target,targetEn}=basePisteLine.approach;
+      alternate.textContent=t('滑往'+target,'Ski to '+targetEn);
     }
-    paintBaseExit(sim);
+    baseExitDirection=null;
+    paintBaseExit();
     const atHall=hall&&Math.hypot(hall.x-sim.x,hall.z-sim.z)<320;
     $('#base-actions [data-act="look-hall"]').hidden=!atHall;
-    $('#base-lift-text').textContent=sim.route.finishKind==='lift-link'?t('乘一索直达山顶','Ride Gondola 1 to summit'):sim.route.finishKind==='training-runout'?t('前往最近索道','Go to nearest lift'):t('乘缆车上山','Ride lift up');
+    const lift=world.nearbyStation;
+    $('#base-lift-text').textContent=sim.route.finishKind==='lift-link'?t('乘一索直达山顶','Ride Gondola 1 to summit'):
+      sim.route.finishKind==='training-runout'?t('前往最近索道','Go to nearest lift'):
+      lift?t('乘'+lift.name+'上山','Ride '+label(lift.name,'en')):t('乘缆车上山','Ride lift up');
   }
   paintCameraTray();$('#near-lift').hidden=true;
   if(watching()){
@@ -348,8 +353,8 @@ function pushOff(direction,preferred=screen==='summit'?summitChoice||undefined:u
   recorded=false;screen='run';tray=false;routeId=route.id;
   tilt.calibrate();hudVisible(true);paintHUD();refreshMusic();return true;
 }
-function continueDescent(){
-  if(screen!=='base'||page||!world||world.beforeDeparture(continueDescent)||!world.continueAtBase())return false;
+function continueDescent(line=baseExitLine){
+  if(screen!=='base'||page||!world||world.beforeDeparture(()=>continueDescent(line))||!world.continueAtBase(line))return false;
   screen='run';tray=recorded=false;routeId=world.sim.route.id;
   clearInputs();tilt.calibrate();hudVisible(true);paintHUD();refreshMusic();return true;
 }
@@ -378,6 +383,18 @@ function saveActivity(sim,force=false){
 function checkpoint(){
   if(screen==='run'&&world)saveActivity(world.sim,true);
 }
+function saveDescent(sim){
+  const records=read(recordKey,[]);
+  const when=lastArrival?.visits===sim.pisteVisits?lastArrival.when:new Date().toISOString();
+  lastArrival={visits:sim.pisteVisits,when};
+  const first=sim.continuedFrom,route=sim.route,continued=first&&first.id!==route.id;
+  const record={activityTracked:true,sessionId:when,when,routeId:continued?first.id+'+'+route.id:route.id,
+    name:continued?first.name+' → '+route.name:route.name,resort:route.destination,gear:prefs.gear,
+    time:Math.round(sim.elapsed),max:sim.maxSpeed*3.6,dist:sim.travel,drop:Math.round(sim.startY-sim.ground)};
+  const previous=records.findIndex(r=>r.sessionId===when);
+  if(previous<0)records.push(record);else records[previous]=record;
+  store(recordKey,records.slice(-100));
+}
 function worldEvent(type,arg){
   if(type==='grove'){groveFeedback(arg);paintScenicControls(trial,screen,world?.sim,prefs);return;}
   if(screen==='run'&&(type==='hud'||type==='finish'))saveActivity(arg,type==='finish');
@@ -403,17 +420,8 @@ function worldEvent(type,arg){
     if(screen==='run'&&arg.route?.id!==routeId)routeId=arg.route.id;
     paintHUD();sound.update(screen==='lift'?3:arg.speed,(arg.skid||0)*.65+(arg.brake||0)*.6,document.hidden);refreshMusic();}
   if(type==='finish'&&!recorded){
-    recorded=true;screen='base';tray=false;const records=read(recordKey,[]);
-    const sameRun=lastArrival?.visits===arg.pisteVisits;
-    const when=sameRun?lastArrival.when:new Date().toISOString();
-    lastArrival={visits:arg.pisteVisits,when};
-    const prev=records.findIndex(r=>r.sessionId===when);
-    const first=arg.continuedFrom;
-    const record={activityTracked:true,sessionId:when,when,routeId:first?first.id+'+'+arg.route.id:arg.route.id,
-      name:first?first.name+' → '+arg.route.name:arg.route.name,resort:arg.route.destination,gear:prefs.gear,
-      time:Math.round(arg.elapsed),max:arg.maxSpeed*3.6,dist:arg.travel,drop:Math.round(arg.startY-arg.ground)};
-    if(prev<0)records.push(record);else records[prev]=record;
-    store(recordKey,records.slice(-100));gameVibration('heavy');scheduleCloud(3000);clearInputs();hudVisible(true);paintHUD();refreshMusic();
+    recorded=true;screen='base';tray=false;saveDescent(arg);
+    gameVibration('heavy');scheduleCloud(3000);clearInputs();hudVisible(true);paintHUD();refreshMusic();
   }
   if(type==='disembark'){routeId=arg.route.id;screen=arg.mode;recorded=false;summitChoice='';
     hudVisible(true);paintHUD();refreshMusic();announce(arg.mode==='summit'?t('已到山顶，可环顾或选道','At the summit. Look around or choose a trail.'):t('已到站，可环顾或乘回程索道','At the station. Look around or take the return lift.'));}
@@ -466,16 +474,20 @@ function showLiftSummary(sim){
   $('#lift-average').textContent=totals.average.toFixed(1)+' km/h';
   $('#lift-peak').textContent=totals.peak.toFixed(1)+' km/h';
 }
-let baseExitHeading=null,baseExitDirection=null;
-function paintBaseExit(sim){
+let baseExitLine=null,basePisteLine=null,baseExitDirection=null;
+function paintBaseExit(){
   const control=$('#base-continue-text'),icon=control.previousElementSibling;
-  if(sim.route.destination==='genting'){control.textContent=t('滑往一索下站','Ski to Gondola 1');icon.textContent='↑';return;}
-  const delta=baseExitHeading-world.facing,angle=Math.atan2(Math.sin(delta),Math.cos(delta));
-  const dir=baseExitHeading===null?'up':Math.abs(angle)>2.56?'down':Math.abs(angle)<.48?'up':angle<0?'left':'right';
-  const turns={left:['左转滑入娇龙道','Turn left onto Jiao Dragon','↰'],right:['右转滑入娇龙道','Turn right onto Jiao Dragon','↱'],
-    up:['滑往娇龙道','Ski to Jiao Dragon','↑'],down:['转身滑入娇龙道','Turn back onto Jiao Dragon','↶']};
+  if(!baseExitLine){
+    baseExitDirection='up';icon.textContent='↑';
+    control.textContent=t('沿雪面继续滑','Continue on the snow');return;
+  }
+  const delta=baseExitLine.frame(0).angle-world.facing,angle=Math.atan2(Math.sin(delta),Math.cos(delta));
+  const dir=Math.abs(angle)>2.56?'down':Math.abs(angle)<.48?'up':angle<0?'left':'right';
+  const turns={left:['左转滑往','Turn left to ','↰'],right:['右转滑往','Turn right to ','↱'],
+    up:['滑往','Ski to ','↑'],down:['转身滑往','Turn back to ','↶']};
   baseExitDirection=dir;
-  control.textContent=t(turns[dir][0],turns[dir][1]);icon.textContent=turns[dir][2];
+  const {target,targetEn}=baseExitLine.approach;
+  control.textContent=t(turns[dir][0]+target,turns[dir][1]+targetEn);icon.textContent=turns[dir][2];
 }
 function paintHUD(){
   if(!world?.sim.route)return;
@@ -484,7 +496,7 @@ function paintHUD(){
   $('#speed').textContent=Math.round(speed*3.6);$('#speed-bar').style.width=clamp(speed/28*100,0,100)+'%';
   $('#drop').textContent=station?0:Math.max(0,Math.round(s.startY-(lift?s.ground:s.y)));
   $('#run-distance').textContent=skiDistance(s.travel);
-  if(screen==='base')paintBaseExit(s);
+  if(screen==='base')paintBaseExit();
   paintSplit(s.splits);
   const bare=s.trail?.name?.replace(/[（(].*$/,'');let grade=label(difficultyName[s.trail?.difficulty]||'道外');
   const approach=screen==='run'?s.approach:null;
@@ -503,6 +515,7 @@ function paintHUD(){
   $('#gradient').textContent=station?(station.summit?t('山顶停留','At the summit'):t('站台停留','At the station')):lift?dir:t('坡度 ','Grade ')+d+'° · '+(climbText|| (d<9?t('缓坡','Gentle'):d<20?t('中坡','Moderate'):t('陡坡','Steep')));
   $('#progress').textContent=station?'':lift?Math.round(lift.progress*100)+'%':resort(r.destination)+t('方向 · ',' · ')+Math.round(100*s.along/r.length)+'% · '+formatTime(s.elapsed);
   if(approach)$('#progress').textContent=t('通往','Towards ')+t(approach.target,approach.targetEn)+' · '+formatTime(s.elapsed);
+  if(screen==='run'&&s.freeSnowfront)$('#progress').textContent=t('山脚自由滑行','Free skiing at the base')+' · '+formatTime(s.elapsed);
   $('#world-clock').textContent=info.clock;$('#weather-name').textContent=$('#weather-compact').textContent=label(info.weatherName)+' · '+label(info.timeName);
   const icon=info.resolvedWeather==='heavy'?'heavy':info.resolvedWeather==='light'?'snow':({day:'sun',noon:'noon',evening:'evening',sunset:'dusk',twilight:'twilight',night:'night',aurora:'aurora',dawn:'dawn'}[info.resolvedTime]||'sun');
   if($('#weather-icon').dataset.icon!==icon){$('#weather-icon').innerHTML=glyph(icon);$('#weather-icon').dataset.icon=icon;}
@@ -1034,6 +1047,7 @@ function action(a){
   }
   if(a==='launch-trail'&&screen==='trailhead')return launch(world.sim.route);
   if(a==='continue-base')return continueDescent();
+  if(a==='continue-piste'&&basePisteLine)return continueDescent(basePisteLine);
   if(a==='look-hall'&&screen==='base'){world.lookAtBaseHall();return;}
   if(a==='clear-marks')return resetMapMarks();
   if(a==='apply-route'||a==='join-map-route'){
@@ -1062,7 +1076,7 @@ function action(a){
   }
   if(a==='lift'){
     if(!world?.beginRide())return;
-
+    if(screen==='run'&&world.sim.continuedFrom)saveDescent(world.sim);
     if(screen==='run'||screen==='base'){saveActivity(world.sim,true);scheduleCloud(3000);}
     reportDiscoveries(world.sim);showLiftSummary(world.sim);screen='lift';page='';clearInputs();$('#overlay').hidden=true;world.pause(false);hudVisible(true);paintHUD();refreshMusic();return;
   }

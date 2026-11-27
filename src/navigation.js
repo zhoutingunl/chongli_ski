@@ -1,5 +1,6 @@
 import {clamp, SkiRoute} from './mountain.js';
 import {label} from './language.js';
+import {arrivalLift} from './lift-access.js';
 
 const navigators = new WeakMap();
 const distance = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
@@ -807,7 +808,14 @@ export function createSkiNavigation(data) {
       if(options.length===arms.length&&options.every(o=>o.up<.12))break;
     }
     if(!best)return null;
-    const {foot,options}=best,heading=options[0].heading;
+    const {foot,options}=best;
+    // On a satellite chair, face a downhill outlet serving another lift when
+    // available. The rider can still turn back onto the lap they just rode.
+    if(!isSummitStation(lift)){
+      const onward=options.findIndex(o=>arrivalLift(data,o.plan)?.id!==lift.id);
+      if(onward>0)options.unshift(options.splice(onward,1)[0]);
+    }
+    const heading=options[0].heading;
     // Separate labels for trails which initially share a few metres of apron.
     // The arrow still points at the surveyed exit; only its lettering fans out.
     const fan=[...options].sort((a,b)=>angleDiff(heading,a.heading)-angleDiff(heading,b.heading));
@@ -893,7 +901,11 @@ export function createSkiNavigation(data) {
       if(!plan||seen.has(plan))return;
       seen.add(plan);
       const at=plan.closest(x,z);
-      if(at.distance>width || at.along>limit+2 || plan.length-at.along<.75)return;
+      const remaining=plan.length-at.along;
+      if(at.distance>width || at.along>limit+2 || remaining<.75)return;
+      // Several itineraries can end on the same snow front. Their last few
+      // metres must not pull a rider who just left that finish back into it.
+      if(sim.freeSnowfront && (remaining<90 || distance([x,z],plan.points.at(-1))<95))return;
       const ahead=pair(plan.at(at.along+reach));
       const angle=plan.frame(at.along).angle,error=Math.abs(angleDiff(h,angle));
       if(error>(apron?1.13:.90))return;
@@ -924,7 +936,7 @@ export function createSkiNavigation(data) {
     }
     // While carving off Jade Dragon the old centreline is still under the
     // boots. Reacquire the connected traverse when the skis point into it.
-    if(route.valleyEntry&&sim.along<55&&route.closest(x,z).distance<22){
+    if(!sim.freeSnowfront&&route.valleyEntry&&sim.along<55&&route.closest(x,z).distance<22){
       consider(route,24);return best;
     }
     // A manually selected or spliced course may contain an unmarked connector.
@@ -990,48 +1002,71 @@ export function createSkiNavigation(data) {
     }
     return nearest?.site||null;
   }
-  // Jade Dragon and the snow-front traverse share a surveyed node at Wanlong.
-  // Other valley finishes (including the far end of the traverse) stay distinct.
-  const traverse=byId.get('wanlong-piste-19');
+  // Snow fronts are often shared by many named itineraries. Resolve the
+  // outlet from the geometry of the finish, including competition runouts.
   const gondola=data.lifts.find(lift=>lift.id==='w469393391');
   const chair=data.lifts.find(lift=>lift.id==='w678934779');
   const plaza=gondola&&chair&&{id:'genting-base-link',name:'云顶一索连接区',resort:'genting',destination:'genting',
     difficulty:'easy',finishKind:'lift-link',finishLiftId:gondola.id};
-  function valleyExit(sim){
-    if(!sim.route||sim.route.finishKind==='lift-link')return null;
-    if(plaza&&sim.route.destination==='genting'&&sim.route.finishKind!=='training-runout'){
-      const end=sim.route.points.at(-1),foot=[sim.x,sim.z];
-      if(distance(end,chair.points[0])<85 && distance(foot,end)<(sim.mode==='finished'?95:35) &&
-        distance(foot,gondola.points[0])>30)return plaza;
+  const runoutStructures=[...structures,...(data.water||[]).map(w=>structure(w.footprint))];
+  const outletCache=new Map();
+  function downstreamOutlet(route){
+    const end=route.points.at(-1),side=route.destination,key=side+'/'+pointKey(end);
+    if(outletCache.has(key))return outletCache.get(key);
+    let outlet=null;
+    for(const hit of nearestSegments(end,data.trails,side)){
+      if(hit.distance>200)break;
+      const line=network.lines.get(hit.trail.id);
+      const join=line.distances[hit.end-1]+hit.t*(line.distances[hit.end]-line.distances[hit.end-1]);
+      if(line.length-join<20)continue;
+      const section=data.snowSection(hit.trail,hit.end-1)||hit.trail;
+      const named=data.pisteRoutes?.find(r=>r.name===section.name&&r.primaryTrailIds?.includes(line.id));
+      const onward=network.routeOnEdge(line,hit.end-1,named?.id);
+      if(!onward||onward.destination!==side)continue;
+      const finish=onward.points.at(-1);
+      // A different trail ID may lead straight back into this same plaza.
+      if(distance(end,finish)<225 || data.height(...end)-data.height(...finish)<10)continue;
+      const plan=connectPiste(end,hit,onward);
+      if(plan){outlet={line,onward};break;}
     }
-    if(!traverse||!sim.route||sim.route.destination!=='wanlong'||sim.route.finishKind==='training-runout')return null;
-    const junction=traverse.points[0];
-    if(distance(sim.route.points.at(-1),junction)>12 ||
-        Math.hypot(sim.x-junction[0],sim.z-junction[1])>(sim.mode==='finished'?94:36))return null;
-    return traverse;
+    outletCache.set(key,outlet);return outlet;
   }
-  function valleyLine(sim){
-    const source=valleyExit(sim);
-    if(!source)return null;
-    const foot=[sim.x,sim.z];
-    if(source===plaza){
-      const points=clearConnector(foot,stationExit(gondola,'bottom'),structures);
-      if(!points||points.length<2)return null;
-      const route=makeRoute(plaza,points,[],data);
-      route.approach={name:plaza.name,en:'Genting base traverse',target:'一索下站',targetEn:'Gondola 1',endDistance:route.length+.1};
-      route.valleyEntry=true;
-      return route;
+  function connectPiste(foot,hit,onward){
+    const plan=selectLocalRoute(data,byId,graph,goals,runoutStructures,onward.resort,foot,0,onward.id,hit);
+    if(!plan||!samePoint(plan.points.at(-1),onward.points.at(-1)))return null;
+    const approach=plan.approach.endDistance;
+    if(approach>225)return null;
+    let previous=data.height(...foot),ascent=0;
+    const steps=Math.max(1,Math.ceil(approach/3));
+    for(let i=1;i<=steps;i++){
+      const p=plan.at(approach*i/steps),y=data.height(p.x,p.z);
+      ascent+=Math.max(0,y-previous);previous=y;
     }
-    const at=source.closest(...foot);
-    const entry=source.at(at.along+26);
-    const points=clearConnector(foot,pair(entry),structures);
-    if(!points)return null;
-    const legs=[],next=append(points,source.points[entry.index+1]);
-    appendLeg(legs,source.legs[0].trailId,0,next);
-    appendSlice(points,legs,source,entry.index+1);
-    const plan=stopOutsideTerminal(makeRoute(source,points,legs,data),structures,data);
-    plan.valleyEntry=true;
-    return plan;
+    if(ascent>6)return null;
+    const route=safeRun(plan),section=data.snowSection(hit.trail,hit.end-1)||hit.trail;
+    const target=section.kind==='access'?onward.name:section.name;
+    route.approach={name:'雪道连接区',en:'Piste link',target,targetEn:label(target,'en'),endDistance:Math.min(approach,route.length)};
+    route.valleyEntry=true;return route;
+  }
+  function valleyLine(sim,pisteOnly=false){
+    if(!sim.route||sim.freeSnowfront)return null;
+    const {route}=sim,foot=[sim.x,sim.z],end=route.points.at(-1);
+    if(distance(foot,end)>(sim.mode==='finished'?95:36))return null;
+    const hotelFront=plaza&&route.destination==='genting'&&
+      (distance(end,chair.points[0])<85||distance(end,gondola.points[0])<175);
+    if(!pisteOnly&&hotelFront&&route.finishKind!=='lift-link'&&distance(foot,gondola.points[0])>30){
+      const points=clearConnector(foot,stationExit(gondola,'bottom'),runoutStructures);
+      if(points&&points.length>1){
+        const transfer=makeRoute(plaza,points,[],data);
+        transfer.approach={name:plaza.name,en:'Genting base traverse',target:'一索下站',targetEn:'Gondola 1',endDistance:transfer.length+.1};
+        transfer.valleyEntry=true;
+        return transfer;
+      }
+    }
+    const outlet=downstreamOutlet(route);
+    if(!outlet)return null;
+    const [hit]=nearestSegments(foot,[outlet.line],route.destination);
+    return connectPiste(foot,hit,outlet.onward);
   }
   function recoveryLine(sim){
     const foot=[sim.x,sim.z],candidates=[];
@@ -1062,7 +1097,7 @@ export function createSkiNavigation(data) {
     }
     return best;
   }
-  const nav={signs,stationsOn,changeBranch,departure,summitHeading,stationExit,upperStation,isSummitStation,guidanceOn,guidance,safeRun,alignTravel,nearbyChoices,recoveryLine,valleyExit,valleyLine,canonical:id=>network.routeFor(id)};
+  const nav={signs,stationsOn,changeBranch,departure,summitHeading,stationExit,upperStation,isSummitStation,guidanceOn,guidance,safeRun,alignTravel,nearbyChoices,recoveryLine,valleyLine,canonical:id=>network.routeFor(id)};
   navigators.set(data,nav);return nav;
 }
 

@@ -574,7 +574,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
         const eye=ride.lift.seatAt(ride.t,ride.dir);sim.x=eye.x;sim.z=eye.z;sim.y=eye.y;
         if(ride.dir>0?ride.t>=.997:ride.t<=.003)leaveRide();
       }else if(sim.mode==='run'&&!waiting){
-        details.setRoute(sim.route);
+        details.setRoute(sim.freeSnowfront?null:sim.route);
         descentFrames.advance(dt,input);
         if(sim.mode==='finished'){
           parkFacing(camHeading+lookYaw,sim.travelHeading);
@@ -655,10 +655,10 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     get nextFlag(){return details.nextFlag(sim.along);},
     get conditions(){return conditions;},
     get station(){return station;},
-    continueAtBase(){
-      if(!sim.continueAtBase())return false;
+    continueAtBase(line){
+      if(!sim.continueAtBase(line,baseTurn?.yaw??sim.travelHeading))return false;
       baseTurn=null;sim.pivotRate=0;camHeading=sim.travelHeading;resetLook();
-      fx.reset();snap=true;treesLag=1;details.setRoute(sim.route);showScene();return true;
+      fx.reset();snap=true;treesLag=1;details.setRoute(sim.freeSnowfront?null:sim.route);showScene();return true;
     },
     recoverToPiste(){
       if(!sim.recoverToPiste())return false;

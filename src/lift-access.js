@@ -21,7 +21,7 @@ export function atWanlongForecourt(data,route,x,z){
 export function nearbyLiftStation(data,sim){
   if(!sim.route||!['run','finished'].includes(sim.mode))return null;
   const {route,x,z}=sim;
-  if(sim.mode==='finished'||(!sim.airborne&&sim.speed<3&&atWanlongForecourt(data,route,x,z))){
+  if(sim.mode==='finished'||(!sim.freeSnowfront&&!sim.airborne&&sim.speed<3&&atWanlongForecourt(data,route,x,z))){
     const lift=arrivalLift(data,route);
     if(lift)return {lift,end:'bottom'};
   }

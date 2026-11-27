@@ -320,8 +320,8 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
     },
     get conditions(){return conditions;},
     get station(){return station;},
-    continueAtBase(){
-      if(!sim.continueAtBase())return false;
+    continueAtBase(line){
+      if(!sim.continueAtBase(line,this.facing))return false;
       resetView();draw();kick();return true;
     },
     recoverToPiste(){
