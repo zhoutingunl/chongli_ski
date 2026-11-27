@@ -397,7 +397,7 @@ export function bindScenicBuildings(groups,u,actor=false){
   const seen=new Set();
   for(const group of groups)group.traverse(mesh=>{
     const m=mesh.material;
-    if(!mesh.isMesh||!m||m.userData.surface==='lettering'||seen.has(m)||(!m.isMeshStandardMaterial&&!m.isMeshLambertMaterial))return;
+    if(!mesh.isMesh||!m||m.userData.surface==='lettering'||m.userData.surface==='districtLabel'||seen.has(m)||(!m.isMeshStandardMaterial&&!m.isMeshLambertMaterial))return;
     seen.add(m);
     const compile=m.onBeforeCompile,key=m.customProgramCacheKey();
     m.customProgramCacheKey=()=>key+'-scenic-resort';

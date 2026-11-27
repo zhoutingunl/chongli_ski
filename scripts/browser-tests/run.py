@@ -159,7 +159,11 @@ def main():
                 browser.close()
     finally:
         proc.terminate()
-        proc.wait(timeout=8)
+        try:
+            proc.wait(timeout=8)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
 
 
 if __name__ == '__main__':

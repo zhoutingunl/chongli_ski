@@ -76,6 +76,9 @@ function getMaterial(key) {
     options.side = THREE.DoubleSide;
   } else if (key === 'districtLabel') {
     options.map=districtLabels();options.alphaTest=.27;
+    options.polygonOffset=true;
+    options.polygonOffsetFactor=-1;
+    options.polygonOffsetUnits=-2;
   }
   const m = key === 'distant' ? new THREE.MeshLambertMaterial({vertexColors:true,side:THREE.DoubleSide}) : new THREE.MeshStandardMaterial(options);
   if (key === 'cabinGlass') {
@@ -516,17 +519,21 @@ function districtPlate(b,spec,len,entry){
     [width/2,y+height/2,.22],[-width/2,y+height/2,.22]],[[0,v],[1,v],[1,vTop],[0,vTop]]);
 }
 
-function districtBuilding(b,building,spec,heightAt){
+function districtBuilding(batch,building,spec,heightAt){
   const {x,z}=building;
   const plan=building.footprint.map(([a,c])=>[a-x,c-z]);
   if(signedPlanArea(plan)>0)plan.reverse();
   const grades=building.footprint.map(p=>heightAt(...p)).sort((a,c)=>a-c);
-  const y=grades[Math.floor((grades.length-1)*.34)];
   const style=districtStyles[spec.style],floors=Math.max(1,Math.min(10,spec.floors)),top=floors*style.floor+.38;
+  let highest=heightAt(x,z);
   const edges=plan.map(([a,c],i)=>{
     const [u,v]=plan[(i+1)%plan.length],dx=u-a,dz=v-c,len=Math.hypot(dx,dz);
+    const steps=Math.max(1,Math.ceil(len/4));
+    for(let j=0;j<steps;j++)highest=Math.max(highest,heightAt(x+a+dx*j/steps,z+c+dz*j/steps));
     return {x:(a+u)*.5,z:(c+v)*.5,dx,dz,len};
   });
+  // Keep an uphill storey exposed while the foundation steps down to the snow.
+  const y=Math.max(grades[Math.floor((grades.length-1)*.34)],highest+3.8-top);
   const long=edges.reduce((i,e,j)=>e.len>edges[i].len?j:i,0),max=edges[long].len;
   const front=spec.sign?edges.reduce((best,e,i)=>{
     if(e.len<Math.min(7,max*.40))return best;
@@ -534,12 +541,15 @@ function districtBuilding(b,building,spec,heightAt){
     const score=(-e.dz*xx+e.dx*zz)/(r*e.len)+.39*e.len/max;
     return score>best.score?{score,i}:best;
   },{score:-Infinity,i:long}).i:-1;
-  b.pose(0,y,0,0,()=>{
-    districtMassing(b,plan,(u,v)=>Math.min(-.2,heightAt(x+u,z+v)-y-.65),top,style.wall);
-    if(style.ridge&&plan.length===4)pitchedQuad(b,plan,long,top,style.roof);
+  const shell=batch.shell,b=batch.facades;
+  shell.pose(x-batch.x,y,z-batch.z,0,()=>{
+    districtMassing(shell,plan,(u,v)=>Math.min(-.2,heightAt(x+u,z+v)-y-.65),top,style.wall);
+    if(style.ridge&&plan.length===4)pitchedQuad(shell,plan,long,top,style.roof);
+  });
+  b.pose(x-batch.x,y,z-batch.z,0,()=>{
     for(const [i,e] of edges.entries()){
       if(e.len<1.5)continue;
-      const entry=i===front?THREE.MathUtils.clamp(heightAt(x+e.x,z+e.z)-y,0,top-3.6):0;
+      const entry=i===front?heightAt(x+e.x,z+e.z)-y:0;
       b.pose(e.x,0,e.z,Math.atan2(-e.dz,e.dx),()=>{
         b.box(0,top-.22,0,e.len,.38,.13,style.roof);
         b.box(0,.49,.024,e.len,.94,.085,style.band,'stone');
@@ -584,17 +594,29 @@ export function createResortDistricts(data){
     const spec=resortBuildingSpec(building);
     if(!spec||building.footprint.length<3)continue;
     const x=Math.floor(building.x/320)*320+160,z=Math.floor(building.z/320)*320+160,key=x+','+z;
-    if(!batches.has(key))batches.set(key,{builder:new Builder(),x,z,ids:[]});
+    if(!batches.has(key))batches.set(key,{shell:new Builder(),facades:new Builder(),x,z,ids:[]});
     const batch=batches.get(key);
-    batch.builder.pose(building.x-x,0,building.z-z,0,()=>districtBuilding(batch.builder,building,spec,data.height));
+    districtBuilding(batch,building,spec,data.height);
     batch.ids.push(building.id);modeled.add(building.id);
   }
-  const groups=[...batches.values()].map(({builder,x,z,ids})=>{
-    const group=builder.group();
-    group.name='mapped resort district';group.position.set(x,0,z);group.userData.buildingIds=ids;
+  const districts=[];
+  const groups=[...batches.values()].map(({shell,facades,x,z,ids})=>{
+    const group=shell.group(),detail=facades.group();
+    detail.name='balconies, windows and signs';
+    group.add(detail);group.name='mapped resort district';group.position.set(x,0,z);group.userData.buildingIds=ids;
+    const bounds=new THREE.Box3().setFromObject(group);
+    districts.push({detail,bounds});
     return group;
   });
-  return {groups,modeled};
+  function locate(x,z,quality){
+    const range=quality==='lite'?320:620;
+    for(const {detail,bounds} of districts){
+      const dx=Math.max(bounds.min.x-x,0,x-bounds.max.x);
+      const dz=Math.max(bounds.min.z-z,0,z-bounds.max.z);
+      detail.visible=dx*dx+dz*dz<range*range;
+    }
+  }
+  return {groups,modeled,locate};
 }
 
 function gentingBase(b) {

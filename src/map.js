@@ -33,6 +33,7 @@ export class TrailMap {
   constructor(canvas,data,mini=false,progress=null) {
     this.el=canvas; this.ctx=canvas.getContext('2d'); this.data=data; this.mini=mini;this.progress=progress;
     this.box=pisteBounds(data);
+    this.buildingPlaces=mini?[]:resortBuildingPlaces(data.buildings);
     this.lines=data.contourLines ||= contours(data,this.box);
     this.zoom=1; this.panX=0; this.panZ=0; this.points=new Map();
     if(!mini) this.enablePan();
@@ -110,6 +111,7 @@ export class TrailMap {
     const occupied=[];
     for(const l of points){
       const x=px(l.x),z=pz(l.z),base=l.kind==='hall';
+      if(!mini&&(x<0||x>w||z<0||z>h))continue;
       if(!base){c.strokeStyle='#f2e2b8';c.strokeRect(x-2.5,z-2.5,5,5);}
       const fontSize=mini?11:base?15:12;
       c.font=(base?'500 ':'')+fontSize+'px "PingFang SC","Microsoft YaHei",sans-serif';
@@ -123,7 +125,7 @@ export class TrailMap {
     }
     if(!mini){
       c.font='11px "PingFang SC","Microsoft YaHei",sans-serif';c.textBaseline='middle';
-      for(const l of resortBuildingPlaces(this.data.buildings)){
+      for(const l of this.buildingPlaces){
         const x=px(l.x),z=pz(l.z);
         if(x<5||x>w-5||z<5||z>h-5)continue;
         c.fillStyle='#dbc69f';c.fillRect(x-2,z-2,4,4);
