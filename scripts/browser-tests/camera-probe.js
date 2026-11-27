@@ -53,6 +53,8 @@ export function measureCamera(view, hz) {
   options.view = view;
   const {sim} = world;
   const route = data.allRoutes.find(r => r.id === 'wanlong-gold');
+  let trafficSeed=76;
+  sim.traffic.random=()=>((trafficSeed=(Math.imul(trafficSeed,1664525)+1013904223)>>>0)/2**32);
   let seed = 29;
   sim.moves.random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 2 ** 32);
   world.start(route);

@@ -10,6 +10,8 @@ import * as THREE from 'three';
 import {createRider} from './rider.js';
 import {createLandmark,createLift,createResortDistricts,setResortNight} from './resort.js';
 import {Descent} from './simulation.js';
+import {PisteTraffic} from './piste-traffic.js';
+import {createPisteGuests} from './piste-guests.js';
 import {createSkiNavigation} from './navigation.js';
 import {createSky,buildSurface,plantForest,bindScenicBuildings} from './landscape.js';
 import {createMountainClimate} from './environment.js';
@@ -83,10 +85,12 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
   const navigation=createSkiNavigation(data);
   const details=courseDetails(scene,data,navigation,districts.modeled);
   const trailGuide=createTrailGuide(scene,data,renderer,pisteProgress,surface.detail);
-  const snowAir=createSnowAir(scene,data),fx=makeSnowFX(scene,data,snowAir);
+  const snowAir=createSnowAir(scene,data),fx=makeSnowFX(scene,data,snowAir,surface.grooveMaterial);
   let renderLighting,lightingLimited=false;
   let rider=createRider(opts);scene.add(rider.group);bindScenicBuildings([rider.group],scenic,true);
   const sim=new Descent(data,opts,rider.dimensions);
+  sim.traffic=new PisteTraffic(data);
+  const guests=createPisteGuests(scene,data);
   const descentFrames=new DescentFrames(sim);
   const yawQ=new THREE.Quaternion(),tiltQ=new THREE.Quaternion(),surfNorm=new THREE.Vector3(),want=new THREE.Vector3(),look=new THREE.Vector3(),target=new THREE.Vector3();
   let active=false,paused=false,ride=null,clock=0,prev=0,lastUI=0,treesLag=1,camHeading=0,snap=true,frame=0,graphicsScale=1;
@@ -150,7 +154,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
       if(fraction>=1)transition=null;
       else conditions=blendScenery(transition.from,conditions,fraction);
     }
-    const e=conditions;
+    const e=conditions;sim.traffic.night=e.nightAmount;
     applySceneryUniforms(scenic,e);iceDust(e,isMiniTool||opts.quality==='lite');
     sky.apply(e);forest.setLight(e);surface.setLight(e);setResortNight(e.lampAmount);
     scene.fog.color.set(e.fog);scene.fog.density=e.density*(.69+.31*e.snowAmount);sun.color.set(e.sun);sun.intensity=e.light;
@@ -362,8 +366,8 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     }
     for(const g of landmarks)g.visible=Math.hypot(g.position.x-camera.position.x,g.position.z-camera.position.z)<(opts.quality==='lite'?1800:3400);
   }
-  function resetScene(route){
-    sim.start(route);station=null;ride=null;paused=false;active=true;resetLook();
+  function resetScene(route,keepGuests=false){
+    sim.start(route,keepGuests);station=null;ride=null;paused=false;active=true;resetLook();
     baseTurn=null;sim.pivotRate=0;
     snap=true;treesLag=1;lastUI=prev=0;
     input.trim=input.steer=0;input.boost=input.brake=false;fx.reset();snowAir.reset();
@@ -417,7 +421,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     const route=station.trailhead&&!turn&&!facingFork?sim.route:navigation.departure(station.side,sim.x,sim.z,requested,preferred,guide);
     if(!route)return null;
     const wasHead=opts.view==='first',oldPitch=headPitch,oldLookPitch=lookPitch;
-    resetScene(route);sim.upperGuide=guide;environment();
+    resetScene(route,true);sim.upperGuide=guide;environment();
     if(!Number.isFinite(routeHeading))sim.freeHeading(guide?route.frame(0).angle:requested);
     sim.speed=sim.maxSpeed=2.15;sim.push=.75;
     details.setRoute(route);camHeading=poseHeading;headPitch=oldPitch;
@@ -563,6 +567,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
       clock+=dt;climateAge+=dt;climate.advance(dt,opts.time,opts.weather,sim.mode==='run');
       if(transition||climateAge>.15){environment();climateAge=0;}
       const waiting=helmet.update(dt,sim,input,data,conditions.resolvedTime);
+      if(sim.mode!=='run'||waiting)sim.traffic.advance(dt,sim);
       if(ride){
         ride.t=clamp(ride.t+dt*ride.dir*ride.lift.speed/ride.lift.length,.003,.997);
         const eye=ride.lift.seatAt(ride.t,ride.dir);sim.x=eye.x;sim.z=eye.z;sim.y=eye.y;
@@ -576,14 +581,15 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
         }
       }
       if(baseTurn)turnInPlace(dt);
-      for(const l of lifts)if(l.group.visible)l.update(clock,camera,ride?.lift===l ? ride.t : null,ride?.dir);
+      for(const l of lifts)if(l.group.visible)l.update(clock,camera,ride?.lift===l ? ride.t : null,ride?.dir,conditions.nightAmount);
     }
     const pose=descentFrames.renderPose();
     if(!paused){
       updateAvatar(dt,pose);
-      fx.update(pose,dt,conditions,camera.position,rider.dimensions);
+      fx.update(pose,dt,conditions,camera.position,rider.dimensions,rider.skiFeet);
     }
     if(!trial?.frozen)moveCamera(dt,pose);
+    guests.draw(sim.traffic.actors,camera.position);
     treesLag+=dt;if(treesLag>.40){refreshLOD();treesLag=0;}
     if(trial?.frozen&&trial.fromThirdLift)trailGuide.hide();
     else trailGuide.update(sim,navigation,opts.language,camera);

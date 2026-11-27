@@ -271,10 +271,10 @@
 #grove-status{grid-column:1/-1;color:#efdfbb;font:12px/1.3 var(--sans)}
 
 /* The same contact sheet supplies the full-length trailhead figure and the four fitting-room views. */
-.fitting-model{display:block;width:100%;background-size:500% 800%;background-repeat:no-repeat;pointer-events:none}
+.fitting-model{display:block;width:100%;background-size:600% 800%;background-repeat:no-repeat;pointer-events:none}
 .fitting-model::before{content:"";display:block;padding-top:142.857143%}
 .outfit-chip::before{background:linear-gradient(120deg,var(--coat) 0%,var(--coat) 53%,var(--accent) 54%,var(--accent) 73%,var(--trousers) 74%)}
-.fitting-bar,.fitting-colours>div{display:flex;align-items:center;flex-wrap:wrap}
+.fitting-bar{display:flex;align-items:center;flex-wrap:wrap}
 .fitting-bar{justify-content:space-between;margin-bottom:12px}
 .fitting-turn{display:inline-flex;align-items:center;gap:6px;min-height:38px;color:#f3ddaf;font:14px var(--sans)}
 .fitting-rack{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}
@@ -286,7 +286,7 @@
 .fitting-tag small{margin-left:5px;font:10px var(--sans)}
 .fitting-colours{margin:16px 0 2px}
 .fitting-colours legend{margin-bottom:6px;color:#d9e3e5;font:13px var(--sans)}
-.fitting-colours>div{gap:4px 6px}
+.fitting-colours>div{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px 6px;max-width:490px}.fitting-colours .outfit-chip span{min-width:0;line-height:1.1}.fitting-colours .outfit-chip::before{width:14px;flex-shrink:0}
 .fitting-colours .outfit-chip{width:auto;height:36px;display:inline-flex;align-items:center;position:relative;gap:7px;padding:3px 9px;border:1px solid #b2c6cc55;border-radius:4px;background:#20323d;color:#edf2f0;font:13px var(--sans)}
 .outfit-chip::before{content:"";width:21px;height:19px;border-radius:3px;border:1px solid #ffffff68}
 .fitting-colours .outfit-chip svg{display:none}

@@ -127,7 +127,7 @@ function swatches(){
 function modelStyle(role,front){
   const key=role===prefs.gender?prefs.color:fittingColour(role,prefs.outfits);
   const x=colourKeys.indexOf(key),y=riderRoles.indexOf(role)*2+Number(front);
-  return 'background-image:url('+fittingAtlas(prefs.gear)+');background-position:'+25*x+'% '+(y*100/7)+'%';
+  return 'background-image:url('+fittingAtlas(prefs.gear)+');background-position:'+(100*x/(colourKeys.length-1))+'% '+(y*100/7)+'%';
 }
 function showHomeRider(){
   const home=$('#home-rider'),look=outfitFor(prefs.gender,prefs.color);
@@ -251,6 +251,9 @@ function updateInputs(){
     world.input.trim=active?clamp(trim+Number(keys.has('KeyI'))-Number(keys.has('KeyK')),-1,1):0;
     world.input.brake=active&&(holds.has('brake')||(physical.has('down')&&!backDepart));
     world.input.boost=active&&(holds.has('boost')||physical.has('up'));
+    if(active&&(physical.size||holds.size||keys.has('Space')||Math.abs(world.input.steer)>.15||Math.abs(world.input.trim)>.15)){
+      world.sim.dismissRecovery();$('#recover-piste').hidden=true;
+    }
   }
   for(const b of $$('.dir-key'))b.classList.toggle('active',physical.has(b.dataset.drive));
   for(const b of $$('[data-hold]'))b.classList.toggle('active',active&&(b.dataset.hold==='jump'?(holds.has('jump')||keys.has('Space')):!!world?.input[b.dataset.hold]));
@@ -385,13 +388,14 @@ function worldEvent(type,arg){
     }
   }
   if(type==='hud'&&screen==='run'){
-    if(arg.feedback&&(!feedback||feedback.source!==arg.feedback))feedback={source:arg.feedback,landing:0,tree:0};
+    if(arg.feedback&&(!feedback||feedback.source!==arg.feedback))feedback={source:arg.feedback,landing:0,tree:0,skier:0};
     if(feedback&&arg.feedback===feedback.source){
       const tree=arg.feedback.tree>feedback.tree,landing=arg.feedback.landing>feedback.landing;
-      if((tree||landing)&&performance.now()-feedbackTime>240){
-        gameVibration(tree?'medium':'light');feedbackTime=performance.now();
+      const skier=arg.feedback.skier>feedback.skier;
+      if((tree||landing||skier)&&performance.now()-feedbackTime>240){
+        gameVibration(tree||skier?'medium':'light');feedbackTime=performance.now();
       }
-      feedback.tree=arg.feedback.tree;feedback.landing=arg.feedback.landing;
+      feedback.tree=arg.feedback.tree;feedback.landing=arg.feedback.landing;feedback.skier=arg.feedback.skier;
     }
   }
   if((type==='hud'||type==='finish')&&screen==='run')reportDiscoveries(arg);

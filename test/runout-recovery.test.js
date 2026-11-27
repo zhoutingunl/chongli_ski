@@ -30,10 +30,10 @@ test('长龙道滑手停在山脚大厅边仍可乘一索，并在安全雪面�
   assert.equal(nearbyLiftStation(data,skierAt(-748,-1390))?.lift.id,undefined);
 });
 
-test('道外低速持续三秒才提示，恢复落在最近雪道且不增加已滑距离',()=>{
+test('道外低速持续两秒才提示，恢复落在最近雪道且不增加已滑距离',()=>{
   const sim=skierAt(-350,-420);
   assert.equal(sim.onTrail,false);
-  for(let step=0;step<269;step++){
+  for(let step=0;step<179;step++){
     sim.speed=1.2;
     sim.tick(1/90);
   }
@@ -49,28 +49,20 @@ test('道外低速持续三秒才提示，恢复落在最近雪道且不增加�
   assert.deepEqual([sim.travel,sim.elapsed,sim.pisteVisits],[travel,elapsed,pisteVisits]);
 });
 
-test('按加速、速度回到十公里每小时以上或进入雪道，返回按钮撤下并重新计时',()=>{
+test('道外提示在操作或加速后收起，释放并再次连续低于十五公里时速才出现',()=>{
   const sim=skierAt(-350,-420);
-  sim.tick(3,{brake:true});
-  assert.equal(sim.recoveryReady,true);
-  sim.tick(1/90,{boost:true});
-  assert.equal(sim.recoveryReady,false);
-  sim.tick(2.99,{brake:true});
-  assert.equal(sim.recoveryReady,false);
-  sim.tick(.02,{brake:true});
-  assert.equal(sim.recoveryReady,true);
-  sim.speed=4;
-  sim.tick(1/90);
-  assert.equal(sim.recoveryReady,false);
-  sim.speed=1.2;
-  sim.tick(3,{brake:true});
-  assert.equal(sim.recoveryReady,true);
+  const coast=(n,speed,input={})=>{for(let i=0;i<n;i++){sim.speed=speed;sim.tick(1/90,input);}};
+  for(const control of [{boost:true},{brake:true},{steer:.7},{trim:-.8}]){
+    coast(180,3.5);assert.equal(sim.recoveryReady,true);
+    coast(181,1,control);assert.equal(sim.recoveryReady,false);
+    coast(179,3.5);assert.equal(sim.recoveryReady,false);
+    coast(1,3.5);assert.equal(sim.recoveryReady,true);
+    coast(1,4.4);assert.equal(sim.recoveryReady,false);
+  }
+  coast(180,1);sim.beginJump();assert.equal(sim.recoveryReady,false);sim.cancelJump();
   const trail=data.trails.find(t=>t.name==='金龙道');
-  [sim.x,sim.z]=trail.points[2];
-  sim.y=sim.ground=data.height(sim.x,sim.z);
-  sim.tick(1/90,{brake:true});
-  assert.equal(sim.onTrail,true);
-  assert.equal(sim.recoveryReady,false);
+  [sim.x,sim.z]=trail.points[2];sim.y=sim.ground=data.height(sim.x,sim.z);
+  coast(1,1);assert.equal(sim.onTrail,true);assert.equal(sim.recoveryReady,false);
 });
 
 test('沿线支柱避开所有雪道净空，索道上下站保持原坐标',()=>{

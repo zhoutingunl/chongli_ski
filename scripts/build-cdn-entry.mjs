@@ -6,8 +6,8 @@ import {gzipSync} from 'node:zlib';
 // Wrap a standalone release HTML in a small CDN entry. A range retry on a
 // mobile connection only repeats its missing block. The full HTML also works
 // independently, and provides the payload for browsers without gzip streams.
-const [source,stamp]=process.argv.slice(2);
-if(!source||!/^\d{8}_\d{6}$/.test(stamp))throw Error('Expected standalone HTML path and YYYYMMDD_HHMMSS');
+const [source,stamp,mode]=process.argv.slice(2);
+if(!source||!/^\d{8}_\d{6}$/.test(stamp)||(mode&&mode!=='--parts'))throw Error('Expected standalone HTML path and YYYYMMDD_HHMMSS');
 const html=await readFile(source), packed=gzipSync(html,{level:9});
 const compressed='chongli-snow_'+stamp+'.bin', entry='chongli-ski_'+stamp+'.html';
 const asset=(name,data)=>({name,bytes:data.length,hash:createHash('sha256').update(data).digest('hex')});
@@ -103,13 +103,76 @@ async function openGame(files){
   retry.addEventListener('click',load);await load();
 }
 
+// Individual CDN objects also work on mobile networks that reset long responses
+// or serve a cached whole object in response to every byte-range request.
+async function openParts(files){
+  const meter=document.querySelector('progress'),status=document.querySelector('output'),retry=document.querySelector('button');
+  const received=new Array(files.parts.length);
+  meter.max=files.bytes;
+  async function fetchOne(i){
+    const part=files.parts[i];
+    for(let attempt=0;;attempt++){
+      const control=typeof AbortController==='function'?new AbortController():null;
+      const timer=setTimeout(()=>control?.abort(),55000);
+      try{
+        const response=await fetch(part.name,control?{signal:control.signal}:undefined);
+        if(!response.ok)throw Error('Download interrupted');
+        const data=new Uint8Array(await response.arrayBuffer());
+        if(data.length!==part.bytes)throw Error('Incomplete block');
+        if(window.crypto?.subtle){
+          const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',data));
+          if(Array.from(digest,v=>v.toString(16).padStart(2,'0')).join('')!==part.hash)throw Error('Invalid block');
+        }
+        received[i]=data;meter.value+=data.length;status.textContent=Math.round(100*meter.value/files.bytes)+'%';return;
+      }catch(error){
+        if(attempt>=2)throw error;
+      }finally{clearTimeout(timer);}
+    }
+  }
+  async function load(){
+    retry.hidden=true;let next=0,failed=false;
+    async function worker(){
+      while(!failed&&next<received.length){
+        const i=next++;if(received[i])continue;
+        try{await fetchOne(i);}catch{failed=true;}
+      }
+    }
+    try{
+      await Promise.all(Array.from({length:4},worker));
+      if(failed)throw Error('Download interrupted');
+      const blob=new Blob(received);
+      const content=typeof DecompressionStream==='function'&&typeof blob.stream==='function'
+        ?await new Response(blob.stream().pipeThrough(new DecompressionStream('gzip'))).text()
+        :new TextDecoder().decode(inflateSnow.gunzipSync(new Uint8Array(await new Response(blob).arrayBuffer())));
+      document.open();document.write(content);document.close();
+    }catch{
+      status.textContent='连接中断 · '+Math.round(100*meter.value/files.bytes)+'%';retry.hidden=false;
+    }
+  }
+  retry.addEventListener('click',load);await load();
+}
+const folder=dirname(source),pieces=[];
+let loader='('+openGame.toString()+')('+JSON.stringify(manifest)+')';
+if(mode==='--parts'){
+  const {build}=await import('esbuild');
+  const {fileURLToPath}=await import('node:url');
+  const compression=await build({stdin:{contents:"export {gunzipSync} from 'three/examples/jsm/libs/fflate.module.js';",
+    resolveDir:fileURLToPath(new URL('../',import.meta.url))},bundle:true,format:'iife',globalName:'inflateSnow',
+    minify:true,legalComments:'inline',write:false,target:'es2017'});
+  const size=160*1024;
+  for(let offset=0;offset<packed.length;offset+=size){
+    const part=packed.subarray(offset,offset+size),name='chongli-snow-'+pieces.length+'_'+stamp+'.bin';
+    pieces.push(asset(name,part));await writeFile(join(folder,name),part,{flag:'wx'});
+  }
+  loader=compression.outputFiles[0].text+'\n('+openParts.toString()+')('+JSON.stringify({parts:pieces,bytes:packed.length})+')';
+}
+
 const documentSource=`<!doctype html><html lang="zh-CN"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#192a31">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,${favicon}"><title>山脊之间 · 万龙与云顶滑雪</title><meta name="description" content="从崇礼红花梁出发，在万龙与云顶之间联滑。">
 <style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:linear-gradient(155deg,#253e4a,#111f28);color:#f5f3eb;font:15px system-ui,sans-serif}main{width:min(74vw,330px)}h1{font:normal 38px Georgia,serif;letter-spacing:.14em;margin:0 0 24px}p{display:flex;justify-content:space-between}output{font-variant-numeric:tabular-nums;color:#edce99}progress{width:100%;height:4px;accent-color:#edce99}button{margin-top:18px;color:#1c303a;background:#edce99;border:0;border-radius:4px;padding:10px 18px}</style>
 <main><h1>山脊之间</h1><p>载入崇礼雪场 <output>0%</output></p><progress></progress><button hidden>继续载入</button></main>
-<script>(${openGame.toString()})(${JSON.stringify(manifest)})</script></html>`;
-const folder=dirname(source);
-await writeFile(join(folder,compressed),packed,{flag:'wx'});
+<script>${loader}</script></html>`;
+if(!pieces.length)await writeFile(join(folder,compressed),packed,{flag:'wx'});
 await writeFile(join(folder,entry),documentSource,{flag:'wx'});
-console.log(JSON.stringify({entry,compressed,bytes:packed.length,cdn:'https://qupfile.cloudvdn.com/'+entry}));
+console.log(JSON.stringify({entry,...(pieces.length?{parts:pieces.map(p=>p.name)}:{compressed}),bytes:packed.length,cdn:'https://qupfile.cloudvdn.com/'+entry}));

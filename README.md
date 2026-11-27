@@ -1,12 +1,16 @@
 # 山脊之间 · 万龙与云顶
 
-河北崇礼红花梁的三维滑雪网页。万龙与云顶位于山脊两侧，在同一张地形上相连。手机横屏、竖屏和电脑键盘都可以玩。[直接体验网页版 1.24.0](https://qupfile.cloudvdn.com/chongli-ski_20261126_155623.html)
+河北崇礼红花梁的三维滑雪网页。万龙与云顶位于山脊两侧，在同一张地形上相连。手机横屏、竖屏和电脑键盘都可以玩。[直接体验网页版 1.25.0](https://qupfile.cloudvdn.com/chongli-ski_20261127_043432.html)
 
 ![万龙山顶的第一人称游戏画面，索道站前的雪面上标有金龙道和长龙道](docs/media/wanlong-summit.jpg)
 
 ![出发大厅在桌面、手机竖屏和手机横屏的实际画面](docs/media/departure-hall.webp)
 
-首页直接选万龙或云顶，再点「进入山顶」。点「换装」能切换角色、单双板和配色，查看雪服正背面，选择会自动保存。雪场地图、同趟试景和操作指南都可以从首页打开。男士有宽肩夹克和深色裤装，女士有白色拼接、白雪裤和外露长马尾。约 5–6 岁的男孩背着小背包，女孩留双辫、穿云朵印花雪服，头盔有一对圆耳。儿童使用短雪板和短雪杖。四个角色各有五套配色，换回角色会恢复上次试穿的颜色。初次打开时，出发雪场、雪具、角色和配色各自随机。
+首页直接选万龙或云顶，再点「进入山顶」。点「换装」能切换角色、单双板和配色，查看雪服正背面，选择会自动保存。雪场地图、同趟试景和操作指南都可以从首页打开。男士有宽肩夹克和深色裤装，女士有白色拼接、白雪裤和外露长马尾。约 5–6 岁的男孩背着小背包，女孩留双辫、穿云朵印花雪服，头盔有一对圆耳。儿童使用短雪板和短雪杖。四个角色各有六套配色，分两行展示，换回角色会恢复上次试穿的颜色。初次打开时，出发雪场、雪具、角色和配色各自随机。
+
+雪道上会遇到沿弧线下滑的双板、单板雪友，也有人在道边坐下聊天。白天人多，夜场稀疏。循线滑行会预判前方雪友的位置并绕行。手动相撞会失衡减速，重碰可能让一只雪板脱离，滑手会弯腰找板、踩回固定器再出发。双板刻滑时，承重侧的板刃会在压雪纹上切出窄槽。吊椅和吊厢里的乘客会坐到下一站。
+
+离开雪道后，速度连续两秒低于 15 km/h 会显示「返回最近雪道」。按方向、加速、刹车或跳跃键会立即收起提示，松手后重新计时。
 
 ![雪服试穿的游戏实拍，从左至右为男士、女士、男孩和女孩](docs/media/rider-fitting.webp)
 
@@ -45,7 +49,7 @@
 
 ![同机位的四组游戏截帧，依次为莫奈雪境、水墨崇礼、云海穿行与梵高星空](docs/media/scenery-trial.webp)
 
-打开三索专用入口，点「三索上站试景」，会从真实索道上站的固定机位进入水墨崇礼。六种艺术画境都可以点「看近树」，端详同一株树的枝条、树皮和覆雪。点「原景对照」会保留当前机位与光雪，点「回滑手机位」回到原处。[万龙三索上站试景](https://qupfile.cloudvdn.com/chongli-ski_20261126_155623.html#sansuo)
+打开三索专用入口，点「三索上站试景」，会从真实索道上站的固定机位进入水墨崇礼。六种艺术画境都可以点「看近树」，端详同一株树的枝条、树皮和覆雪。点「原景对照」会保留当前机位与光雪，点「回滑手机位」回到原处。[万龙三索上站试景](https://qupfile.cloudvdn.com/chongli-ski_20261127_043432.html#sansuo)
 
 ![六种艺术画境在同一站台及同一株近树的游戏实拍](docs/media/third-lift-art.webp)
 
@@ -70,6 +74,8 @@ npm run dev
 npm run build
 npm run preview
 ```
+
+使用七牛 CDN 发布已有的单文件网页时，运行 `node scripts/build-cdn-entry.mjs <单文件网页路径> <YYYYMMDD_HHMMSS> --parts`。将生成的入口和所有同时间戳的 `.bin` 文件放在同一 CDN 目录。手机遇到断线会单独重试缺失的分块。
 
 ## 操作
 
@@ -105,6 +111,7 @@ npm run preview
 | [piste-progress.test.js](test/piste-progress.test.js) 和 [ski-engagement.test.js](test/ski-engagement.test.js) | 两条跨场联滑线实际滑行、标记清除与撤销、旧云存档合并与累计数据 |
 | [snow-terrain.test.js](test/snow-terrain.test.js) | 细雪网格与远处地表连续覆盖、移动换块和切换画质、U 型池和蘑菇道 |
 | [rider.test.js](test/rider.test.js) | 对比成人与儿童雪具，测量男孩、女孩直滑、加速和左右换刃时的姿态 |
+| [piste-traffic.test.js](test/piste-traffic.test.js) | 实际滑行中避开多名雪友、手动碰撞与掉板重穿、时段更替和缆车换客、六套配色及道外救援 |
 | [lift-helmet.test.js](test/lift-helmet.test.js) | 索道附近的停稳与光照条件、手和头盔的位置、上车后再次出发，以及四个角色的试穿配色 |
 | [mountain.test.js](test/mountain.test.js) | 检查高程三角面、边界采样、雪道里程与最近点、建筑和树干碰撞，以及随包林地图的尺寸 |
 | [environment.test.js](test/environment.test.js) | 检查昼夜与晴雪周期、四段降雪时长、低角度霞光的抽取和渐变、手选优先级 |
@@ -153,6 +160,7 @@ node scripts/build-xiaohongshu.mjs
 | Cold Smoke 源码参考 | 本仓库实现 |
 | --- | --- |
 | [双板接触](https://github.com/huiskylabs/cold-smoke/blob/7c9657b3d19d93d048a4152ccc3dbcc33b043778/src/08j_solver.js) | [雪具与角色](src/rider.js)分别用万龙云顶的地形约束两块板的板底，压坡时让踝、膝、髋随各脚的位置屈伸。 |
+| [雪痕](https://github.com/huiskylabs/cold-smoke/blob/7c9657b3d19d93d048a4152ccc3dbcc33b043778/src/17_tracks.js)与[喷雪](https://github.com/huiskylabs/cold-smoke/blob/7c9657b3d19d93d048a4152ccc3dbcc33b043778/src/10_spray.js) | 压雪道上的双板各自用靴下低刃和板尾定位雪槽。横滑时用连续两帧刃段扫过的区域压平雪纹，按板尾横向速度和估算载荷扬雪。 |
 | [转弯动作阶段](https://github.com/huiskylabs/cold-smoke/blob/7c9657b3d19d93d048a4152ccc3dbcc33b043778/src/06c_mocap.js) | [动作驱动](src/ski-kinematics.js)从实时侧向负载和换刃变化驱动现有骨架，儿童和成人使用各自的屈伸幅度。 |
 | [空中动作与落地时机](https://github.com/huiskylabs/cold-smoke/blob/7c9657b3d19d93d048a4152ccc3dbcc33b043778/src/07_game.js) | [滑行动作](src/run-moves.js)从当前雪板前方采样选择凸坡和落点，按剩余腾空时间收回动作。选择下一组弯形时避开刚完成的一组。 |
 | [山脊风雪](https://github.com/huiskylabs/cold-smoke/blob/7c9657b3d19d93d048a4152ccc3dbcc33b043778/src/11b_wind.js)及[体积光](https://github.com/huiskylabs/cold-smoke/blob/7c9657b3d19d93d048a4152ccc3dbcc33b043778/src/15_shafts.js) | [贴地雪尘](src/snow-air.js)根据迎风坡、背风坡、地形和树冠遮挡改变亮度。[光照合成](src/snow-light-shafts.js)依据地形遮住太阳的程度调整逆光辉光。支持的浏览器在自动和高画质下按场景深度合成林间光束，高画质的体积光以各轴四分之一分辨率计算。 |

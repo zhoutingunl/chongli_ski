@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import {collisionPose} from './piste-traffic.js';
+import {skiLoad,biteDepth,surfaceNormal,newSkiContact,edgeFraction} from './edge-contact.js';
 import {outfitFor} from './wardrobe.js';
 import {followSkiTerrain, followTurn, seatSki} from './ski-kinematics.js';
 
@@ -1129,6 +1131,14 @@ export function createRider(options = {}) {
     baseSections.set(node,sections);
     return node;
   }
+  const skiFeet=board?[]:[newSkiContact(-1),newSkiContact(1)];
+  const localNormal=v3(),lateralAxis=v3(),rigRotation=new THREE.Quaternion();
+  // The binding sits at z=0. The nearest waist section in this mesh is at +5 cm.
+  function rail(plank,section,side,nose,tail,out){
+    const base=section.base+nose*section.frontFlex+tail*section.rearFlex;
+    return out.set(section.half*side,base,section.z).applyQuaternion(plank.quaternion)
+      .add(plank.position).applyMatrix4(groundMatrix);
+  }
   const deck = board ? plankModel('Snowboard',0) : null;
   const limbs = [];
   for (const s of [-1, 1]) {
@@ -1141,9 +1151,8 @@ export function createRider(options = {}) {
       foot = makePart(plank, prefix + 'boot', b => buildBoot(b,m,palette,s,true,junior));
       foot.position.copy(binding.position); foot.rotation.copy(binding.rotation);
     } else {
-      foot = makePart(plank, prefix + 'boot and binding', b => {
-        buildBoot(b,m,palette,s,false,junior); buildBinding(b,m,palette,s,false);
-      });
+      foot = makePart(plank, prefix + 'boot and binding', b => buildBoot(b,m,palette,s,false,junior));
+      binding = makePart(plank, prefix + 'ski binding', b => buildBinding(b,m,palette,s,false));
     }
     const [thigh, shin] = tailoredLimb(rig, prefix + 'trouser leg', cutThigh, .132,
       b => legGarment(b, m, palette, s, cutThigh, cutShin));
@@ -1203,6 +1212,66 @@ export function createRider(options = {}) {
       }
     }
     return closest;
+  }
+
+  function settleWorkingEdge(plank,mark,frontLoad,tailLoad,roll,lift,weight,pressure,softness){
+    const sections=baseSections.get(plank),waist=sections[9];
+    const heightAt=snow.map.height;
+    rail(plank,waist,0,frontLoad,tailLoad,mark.boot);
+    const n=surfaceNormal(heightAt,mark.boot,mark.normal,.12*size);
+    // Cancel residual cross-slope at THIS boot before applying its edge angle.
+    rig.getWorldQuaternion(rigRotation);
+    lateralAxis.set(1,0,0).applyQuaternion(plank.quaternion).applyQuaternion(rigRotation);
+    const actual=Math.asin(clamp(lateralAxis.dot(n),-1,1));
+    plank.rotation.z+=roll-actual;
+    rail(plank,waist,-1,frontLoad,tailLoad,mark.left);
+    rail(plank,waist,1,frontLoad,tailLoad,mark.right);
+    let rise=lateralAxis.subVectors(mark.right,mark.left).dot(n);
+    let a=edgeFraction(rise,waist.half*2*size);
+    mark.boot.lerpVectors(mark.left,mark.right,a);
+    // As the DEM changes grade the rig can still point along the previous
+    // tangent. Seat the ski fore-and-aft about its boot before translating
+    // it down; otherwise a single embedded shovel can hold the waist up.
+    const gap=point=>(point.y-heightAt(point.x,point.z))*n.y;
+    rail(plank,sections[5],2*a-1,frontLoad,tailLoad,mark.fore);
+    rail(plank,sections[12],2*a-1,frontLoad,tailLoad,mark.rear);
+    const frontGap=gap(mark.fore),backGap=gap(mark.rear);
+    if(Math.min(frontGap,backGap)-gap(mark.boot)<-.014*size){
+      const length=mark.fore.distanceTo(mark.rear);
+      plank.rotation.x+=clamp(Math.atan2(backGap-frontGap,length),-.17,.17);
+      rail(plank,waist,-1,frontLoad,tailLoad,mark.left);
+      rail(plank,waist,1,frontLoad,tailLoad,mark.right);
+      rise=lateralAxis.subVectors(mark.right,mark.left).dot(n);
+      a=edgeFraction(rise,waist.half*2*size);
+    }
+    mark.edgeRise=rise;
+    mark.edgeAngle=Math.asin(clamp(rise/(2*waist.half*size),-1,1));
+    mark.boot.lerpVectors(mark.left,mark.right,a);
+    const clearance=(mark.boot.y-heightAt(mark.boot.x,mark.boot.z))*n.y;
+    const depth=biteDepth(weight,pressure,softness,size);
+    // Preserve genuine unloading, steps and lifted inside skis. Limit the
+    // correction on a crest so a shovel cannot be driven through it.
+    const desired=lift*size-depth;
+    const maxPress=(.026+.008*(softness))*size;
+    let correction=desired-clearance;
+    if(correction<0){
+      const closest=runningClearance(plank,frontLoad,tailLoad,0)*risePerUnit*n.y-snowSink*n.y;
+      correction=Math.min(0,Math.max(correction,-maxPress-closest));
+    }
+    localNormal.copy(n).applyQuaternion(rigRotation.invert()).multiplyScalar(correction/size);
+    plank.position.add(localNormal);
+    // Publish the very same flexed underside that the boots and knee IK use.
+    rail(plank,waist,-1,frontLoad,tailLoad,mark.left);
+    rail(plank,waist,1,frontLoad,tailLoad,mark.right);
+    mark.boot.lerpVectors(mark.left,mark.right,a);
+    rail(plank,sections[6],2*a-1,frontLoad,tailLoad,mark.fore);
+    rail(plank,sections[11],2*a-1,frontLoad,tailLoad,mark.rear);
+    rail(plank,sections[0],2*a-1,frontLoad,tailLoad,mark.nose);
+    mark.forward.subVectors(mark.fore,mark.rear).projectOnPlane(n).normalize();
+    mark.across.crossVectors(mark.forward,n).normalize();
+    mark.clearance=(mark.boot.y-heightAt(mark.boot.x,mark.boot.z))*n.y;
+    mark.weight=weight;
+    mark.active=mark.clearance<.005*size && lift*size<.021*size;
   }
 
   // Estimate the longitudinal mass centre in the equipment frame. A bent
@@ -1336,14 +1405,18 @@ export function createRider(options = {}) {
       push*Math.sin(stridePhase*TAU)*.082 - pivot*(small ? .32 : .20) -
       (board ? 0 : turnCycle.sign*turnCycle.press*(small ? .104 : .082));
     const chestYaw=hipYaw+clamp(upperYaw-hipYaw,board ? -.60 : -.44,board ? .60 : .44);
+    const collision=state.traffic?.playerHit;
+    const refit=collision?collisionPose(collision.age,collision.released):null;
+    const fold=refit?.reach||0,flinch=(refit?.recoil||0)*(collision?.side||1);
+    pelvis.position.y-=.255*fold;pelvis.position.x+=.070*flinch;
     const gradeCredit=Math.max(0,posed.grade)*.090;
     const pelvicFlex=.063+.061*fast+.105*force+.184*tuck+.128*charge+.129*land+.027*trim+.076*pace+.17*race;
-    const chestFlex=.090+.122*fast+.152*force+.439*tuck+.213*charge+.235*land+
+    const chestFlex=.090+.65*fold+.122*fast+.152*force+.439*tuck+.213*charge+.235*land+
       (board ? .051*toe-.047*heel : .058*trim)-gradeCredit+.145*pace+(external ? .044*moving+.02*steep : 0)+race*(juniorSkier?.28:.34);
     const cross=Math.sin(state.roll || 0)*moving;
     pelvis.rotation.set(-pelvicFlex,hipYaw,board ? (.064*trim+.042*outsidePose.entry-.039*outsidePose.exit) : 0,'YXZ');
     leanQ.setFromAxisAngle(leanAxis,arc*(board ? .48 : juniorSkier ? .64 : .51)+cross*.053+insideSign*deep*(board?.37:.14));pelvis.quaternion.premultiply(leanQ);
-    torso.rotation.set(-chestFlex,chestYaw,board ? -.066*trim : 0,'YXZ');
+    torso.rotation.set(-chestFlex,chestYaw,(board ? -.066*trim : 0)+flinch*.31,'YXZ');
     leanQ.setFromAxisAngle(leanAxis,torsoArc*(board ? (small ? .51 : .46) : juniorSkier ? .67 : .34)-change*.045+cross*.067+insideSign*deep*(board?.94:.22));
     torso.quaternion.premultiply(leanQ);
     if(board && external){
@@ -1503,6 +1576,11 @@ export function createRider(options = {}) {
         handOffset.set(s*(board?.39:.24),.02,-.10+s*.09).add(jointOrigin);
         wristGoal.lerp(handOffset,Math.max(rearPress*.80,apex*.90));
       }
+      if(fold){
+        handOffset.copy(ankle);
+        handOffset.x+=s*.045;handOffset.y+=.035;handOffset.z-=.05;
+        wristGoal.lerp(handOffset,fold*(s===collision.side?1:.82));
+      }
       if (limb.pole) {
         oldTip.copy(limb.poleDirection).multiplyScalar(poleLength*limb.pole.scale.y).add(limb.pole.position);
         if (limb.plant) {
@@ -1635,6 +1713,7 @@ export function createRider(options = {}) {
     const swap = drive ? state.bankSwap || 0 : 0;
     readPiste(snow,state,speed,(drive || junior || !board) && !inFlight);
     groundMatrix=null;
+    for(const foot of skiFeet)foot.active=false;
     const onRelief=state.snowTerrain?.kind&&state.snowTerrain.kind!=='groomed';
     if ((!board || junior || onRelief) && snow.available) {
       snowSink=state.snowSink || 0;
@@ -1765,6 +1844,8 @@ export function createRider(options = {}) {
       const stroke = Math.sin(phase*TAU), poling = push*stroke;
       const recovered = phase>.53 ? Math.sin((phase-.53)/.47*Math.PI) : 0;
       const timing = board ? (s<0 ? frontEdge : rearEdge) : supportedEdge;
+      foot.position.y-=limb.stepIntoBinding||0;
+      limb.stepIntoBinding=0;
       if (board) {
         const turnInBoot = s<0 ? -1.22 : -1.66;
         const torsionHere = -s*twist;
@@ -1823,11 +1904,21 @@ export function createRider(options = {}) {
           const lift=Math.max(0,step)*.026+insideLoad*turnCycle.transfer*.014+.108*stepUp;
           const height=plank.position.y+.0015+lift-runningClearance(plank,frontLoad,tailLoad,0);
           plank.position.y=seatSki(limb,height,dt,snapPose||incomingAir>.005);
+          if(groundMatrix && drive && state.onTrail && !onRelief){
+            const mark=skiFeet[s<0?0:1];
+            settleWorkingEdge(plank,mark,frontLoad,tailLoad,roll,lift,skiLoad(s,edge,pressure),pressure,state.snowSoftness||0);
+          }
         } else {
           limb.contactY=plank.position.y;
         }
       }
 
+      const hit=state.traffic?.playerHit;
+      if(hit?.released&&(board||hit.side===s)){
+        const phase=clamp((hit.age-2.03-(board&&s>0?.24:0))/.66,0,1);
+        limb.stepIntoBinding=Math.sin(Math.PI*phase)**2*.105;
+        foot.position.y+=limb.stepIntoBinding;
+      }
       bootRotation.multiplyQuaternions(plank.quaternion,foot.quaternion);
       bootInverse.copy(bootRotation).invert();
       ankle.set(0,.196,.030).applyQuaternion(foot.quaternion).add(foot.position);
@@ -1961,11 +2052,40 @@ export function createRider(options = {}) {
     if(hair){
       hair.rotation.set(-.042*moving-.035*air,.045*edge+.012*moving*Math.sin(time*3.4),.08*edge);
     }
+    moveReleasedDeck(state.traffic?.playerHit);
     wearHelmet(helmetProgress);
   }
 
   const decks = [...new Set(limbs.map(limb => limb.plank))];
   const noseWeights = decks.map(plank => plank.children[0].morphTargetInfluences);
+  // Move only the loose deck and its bindings. The boot stays in the leg IK.
+  const hardware=decks.map(plank=>{
+    const parts=plank.children.filter(node=>node.isMesh).map(mesh=>{mesh.updateMatrix();return {mesh,rest:mesh.matrix.clone()};});
+    for(const limb of limbs.filter(limb=>limb.plank===plank)){
+      for(const mesh of limb.binding.children){
+        mesh.updateMatrix();parts.push({mesh,rest:mesh.matrix.clone(),binding:limb.binding});
+      }
+    }
+    return parts;
+  });
+  const releaseMatrix=new THREE.Matrix4(),hardwareMatrix=new THREE.Matrix4(),relativeMatrix=new THREE.Matrix4();
+  let deckWasLoose=false;
+  function moveReleasedDeck(hit){
+    if(!hit?.released&&!deckWasLoose)return;
+    const pose=collisionPose(hit?.age,hit?.released),side=hit?.side||1;
+    for(let i=0;i<decks.length;i++){
+      const displaced=board||limbs[i].s===side?pose.loose:0;
+      releaseMatrix.makeRotationY(side*displaced*.57).setPosition(side*displaced*.88,.045*displaced,-displaced*.40);
+      for(const {mesh,rest,binding} of hardware[i]){
+        if(binding){
+          binding.updateMatrix();relativeMatrix.copy(binding.matrix).invert().multiply(releaseMatrix).multiply(binding.matrix);
+        }else relativeMatrix.copy(releaseMatrix);
+        hardwareMatrix.multiplyMatrices(relativeMatrix,rest).decompose(mesh.position,mesh.quaternion,mesh.scale);
+      }
+      if(displaced&&skiFeet[i])skiFeet[i].active=false;
+    }
+    deckWasLoose=!!hit?.released;
+  }
   const nosePoint = v3();
   let visibility = 'body';
 
@@ -2037,5 +2157,5 @@ export function createRider(options = {}) {
 
   if (junior) rig.scale.setScalar(size);
   update();
-  return { group, dimensions, update, setVisibility, eyePosition, tipPosition, shadowPose, dispose };
+  return { group, dimensions, skiFeet, update, setVisibility, eyePosition, tipPosition, shadowPose, dispose };
 }

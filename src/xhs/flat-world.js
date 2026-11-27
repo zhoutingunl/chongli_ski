@@ -2,6 +2,7 @@ import {outfitFor} from '../wardrobe.js';
 import {LiftHelmet} from '../lift-helmet.js';
 import {nearbyLiftStation} from '../lift-access.js';
 import {Descent} from '../simulation.js';
+import {PisteTraffic,crowdColours,collisionPose,daylightTraffic,passengerManifest} from '../piste-traffic.js';
 import {GlideCamera,previewGlide,usesCameraWindow} from '../camera-window.js';
 import {createSkiNavigation} from '../navigation.js';
 import {createMountainClimate} from '../environment.js';
@@ -26,22 +27,26 @@ function drawRiderMarker(ctx,opts,sim,x,y,heading,removed) {
   }
   ctx.save();ctx.translate(x,y-Math.min(12,(sim.airHeight||0)*12));ctx.rotate(heading);
   if(child)ctx.scale(.83,.83);
+  const hit=sim.traffic?.playerHit,pose=collisionPose(hit?.age,hit?.released),side=hit?.side||1;
   if(gear==='board'){
+    ctx.save();ctx.translate(side*pose.loose*10,-pose.loose*4);ctx.rotate(side*pose.turn*.57);
     const deckAngle=-edge*.065+(moves?.airPose||0)*(moves?.side||1)*.50;
     oval(0,0,4.7,15-balance*2,deckAngle,outline);oval(0,0,3.5,13.8-balance*2,deckAngle,deck);
-    line(-2.5,-3,2,-5,outline,2.4);line(-2,4,2.7,5,outline,2.4);
+    line(-2.5,-3,2,-5,outline,2.4);line(-2,4,2.7,5,outline,2.4);ctx.restore();
   }else for(const s of [-1,1]){
+    ctx.save();
+    if(s===side){ctx.translate(side*pose.loose*10,-pose.loose*4);ctx.rotate(side*pose.turn*.57);}
     const toe=s*(3.4-(child?1.6:.7)*brake);
     const advance=balance*Math.max(0,s*edge)*4;
-    line(s*(3.4+brake),10-advance,toe,-15-advance,outline,3.3);line(s*(3.4+brake),10-advance,toe,-15-advance,deck,1.7);
+    line(s*(3.4+brake),10-advance,toe,-15-advance,outline,3.3);line(s*(3.4+brake),10-advance,toe,-15-advance,deck,1.7);ctx.restore();
   }
   const tilt=gear==='board'?.80-edge*.22:edge*.18;
-  ctx.translate(carve*3,gear==='board'?balance*2:0);
+  ctx.translate(carve*3+side*pose.recoil*3,(gear==='board'?balance*2:0)-pose.reach*2);
   ctx.save();ctx.translate(edge*1.35,0);ctx.rotate(tilt);
   const width=child?5.2:5.6,arm=width+2+Math.abs(edge)*(child?3:1.8);
   for(const s of [-1,1]){
     const tap=(moves?.shortTurns||0)*Math.max(0,s*Math.cos(sim.automatic?.phase||0))**4;
-    const tip=s*(arm+Math.abs(carve)*3.2),front=-2.8-2.8*pace+s*edge*2.5-(gear==='ski'?tap*3:0);
+    const tip=s*(arm+Math.abs(carve)*3.2-pose.reach*4),front=-2.8-pose.reach*4-2.8*pace+s*edge*2.5-(gear==='ski'?tap*3:0);
     line(s*width,-1,tip,front,outline,2.8);
     if(gear!=='board')line(tip,front,tip+s*(2-.8*pace),front+8+6*pace,'#607378',.95);
   }
@@ -70,8 +75,9 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
   let yaw=0,zoom=1,panX=0,panY=0,frame=0,last=0,hudAge=0,snowMarks=[];
   const glideCamera=new GlideCamera();
   let previewRoute=null,mapHeading=0,lookUntil=0;
+  sim.traffic=new PisteTraffic(data);
   let conditions=climate.sample(opts.time,opts.weather);
-  const refreshClimate=()=>{conditions=climate.sample(opts.time,opts.weather);};
+  const refreshClimate=()=>{conditions=climate.sample(opts.time,opts.weather);sim.traffic.night=conditions.nightAmount;};
   function gates(route,at,side,lift,end='top',summit=false){
     sim.start(route);Object.assign(sim,{mode:summit?'summit':'station',x:at.position[0],z:at.position[1],heading:at.heading,travelHeading:at.heading,trail:null});
     sim.y=sim.ground=sim.startY=data.height(sim.x,sim.z);
@@ -86,8 +92,8 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
   function resetView(){
     previewRoute=null;lookUntil=0;canvas.hidden=false;active=true;paused=false;last=0;yaw=0;zoom=1;panX=panY=0;snowMarks=[];
   }
-  function start(route){helmet.reset();
-    sim.start(navigation.safeRun(route));refreshClimate();station=ride=null;resetView();draw();kick();
+  function start(route,keepGuests=false){helmet.reset();
+    sim.start(navigation.safeRun(route),keepGuests);refreshClimate();station=ride=null;resetView();draw();kick();
   }
   function trailhead(route){
     helmet.reset();
@@ -101,7 +107,7 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
     const guide=station.guide;
     const route=station.trailhead&&!turn?sim.route:navigation.departure(station.side,sim.x,sim.z,angle,preferred,guide);
     if(!route)return null;
-    start(route);sim.upperGuide=guide;if(!Number.isFinite(heading))sim.freeHeading(guide?route.frame(0).angle:angle);sim.speed=2.15;
+    start(route,true);sim.upperGuide=guide;if(!Number.isFinite(heading))sim.freeHeading(guide?route.frame(0).angle:angle);sim.speed=2.15;
     return sim.route;
   }
   function nearestStation(){
@@ -120,7 +126,7 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
       line.push({x,z,bx,bz,length});
     }
     const length=line.reduce((sum,part)=>sum+part.length,0);
-    ride={lift,line,length,along:end==='top'?length:0,dir:end==='top'?-1:1,speed:5.8};
+    ride={lift,line,length,along:end==='top'?length:0,dir:end==='top'?-1:1,speed:5.8,passengers:passengerManifest(Math.random,3),seatChance:daylightTraffic(conditions.nightAmount).seatChance};
     station=null;sim.mode='lift';sim.speed=0;paused=false;last=0;kick();return true;
   }
   function leaveRide(){
@@ -205,8 +211,30 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
       if(place.kind==='hall'||place.kind==='lodge')ctx.fillText(label(place.name),px+8,py+4);
     }
     if(snowMarks.length>1)trace(snowMarks,night?'#7b9cb4':'#7d9cae',1.4);
+    for(const guest of sim.traffic.actors){
+      const [ax,ay]=position(guest.x,guest.z);
+      if(ax<0||ay<0||ax>w||ay>h)continue;
+      ctx.save();ctx.translate(ax,ay);ctx.rotate(guest.heading+bearing);ctx.globalAlpha=guest.opacity;
+      const contact=collisionPose(guest.reaction?.age,guest.reaction?.released);
+      ctx.strokeStyle='#243344';ctx.lineWidth=guest.gear==='ski'?1:2.2;
+      const boardX=contact.loose*5;
+      for(const side of guest.gear==='ski'?[-1,1]:[0]){
+        const edge=side*1.6+boardX;ctx.beginPath();ctx.moveTo(edge,-4);ctx.lineTo(edge,4);ctx.stroke();
+      }
+      ctx.fillStyle=crowdColours[guest.coat];ctx.beginPath();ctx.arc(0,guest.seated?2:0,2.7,0,Math.PI*2);ctx.fill();
+      ctx.restore();
+    }
     const [px,py]=position(sim.x,sim.z), heading=sim.heading+bearing;
-    drawRiderMarker(ctx,opts,sim,px,py,heading,helmet.progress);
+    if(ride){
+      ctx.fillStyle=night?'#a4b2c1':'#4a6172';ctx.fillRect(px-12,py-6,24,12);
+      const chance=ride.seatChance;
+      const places=[-8,2,8];
+      ride.passengers.forEach((guest,i)=>{
+        if(guest.ticket>=chance)return;
+        ctx.fillStyle=crowdColours[guest.coat];ctx.beginPath();ctx.arc(px+places[i],py,2.4,0,Math.PI*2);ctx.fill();
+      });
+      ctx.fillStyle=outfitFor(opts.gender,opts.color).coat;ctx.beginPath();ctx.arc(px-3,py,2.5,0,Math.PI*2);ctx.fill();
+    }else drawRiderMarker(ctx,opts,sim,px,py,heading,helmet.progress);
     const marker=navigation.nearbyChoices(sim);
     if(marker){
       ctx.save();ctx.font='bold 13px sans-serif';ctx.textAlign='center';ctx.lineWidth=3;
@@ -243,6 +271,8 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
     if(!paused){
       climate.advance(dt,opts.time,opts.weather,sim.mode==='run');yaw+=input.lookX*dt*1.75;
       const waiting=helmet.update(dt,sim,input,data,conditions.resolvedTime);
+      sim.traffic.night=conditions.nightAmount;
+      if(sim.mode!=='run'||waiting)sim.traffic.advance(dt,sim);
       if(ride)moveLift(dt);
       else if(sim.mode==='run'&&!waiting){
         sim.tick(dt,input);
