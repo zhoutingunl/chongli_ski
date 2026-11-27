@@ -1,6 +1,6 @@
 # 山脊之间 · 万龙与云顶
 
-河北崇礼红花梁的三维滑雪网页。万龙与云顶位于山脊两侧，在同一张地形上相连。手机横屏、竖屏和电脑键盘都可以玩。[直接体验网页版 1.25.0](https://qupfile.cloudvdn.com/chongli-ski_20261127_043432.html)
+河北崇礼红花梁的三维滑雪网页。万龙与云顶位于山脊两侧，在同一张地形上相连。手机横屏、竖屏和电脑键盘都可以玩。[直接体验网页版 1.26.0](https://qupfile.cloudvdn.com/chongli-ski_20261127_104251.html)
 
 ![万龙山顶的第一人称游戏画面，索道站前的雪面上标有金龙道和长龙道](docs/media/wanlong-summit.jpg)
 
@@ -49,7 +49,7 @@
 
 ![同机位的四组游戏截帧，依次为莫奈雪境、水墨崇礼、云海穿行与梵高星空](docs/media/scenery-trial.webp)
 
-打开三索专用入口，点「三索上站试景」，会从真实索道上站的固定机位进入水墨崇礼。六种艺术画境都可以点「看近树」，端详同一株树的枝条、树皮和覆雪。点「原景对照」会保留当前机位与光雪，点「回滑手机位」回到原处。[万龙三索上站试景](https://qupfile.cloudvdn.com/chongli-ski_20261127_043432.html#sansuo)
+打开三索专用入口，点「三索上站试景」，会从真实索道上站的固定机位进入水墨崇礼。六种艺术画境都可以点「看近树」，端详同一株树的枝条、树皮和覆雪。点「原景对照」会保留当前机位与光雪，点「回滑手机位」回到原处。[万龙三索上站试景](https://qupfile.cloudvdn.com/chongli-ski_20261127_104251.html#sansuo)
 
 ![六种艺术画境在同一站台及同一株近树的游戏实拍](docs/media/third-lift-art.webp)
 
@@ -150,6 +150,8 @@ node scripts/build-xiaohongshu.mjs
 近区地形约 10 公里见方，以 32 米间距采样。外围约 49 公里的高程网格间距为 240 米。游戏提供万龙、云顶各 32 条公众雪道、八条组合线路及 13 条索道。59 条公众雪道使用独立测线，柳兰、金莲花采用共用走廊，雾龙、赤龙、花苜蓿依据雪场图估绘。雾龙道可以从地图进入起点。缺少测量值的雪道宽度采用估算。冬季真彩色影像摄于 2025 年 1 月 21 日，树群分布参考 2021 年林地分类。[高程来源](https://registry.opendata.aws/terrain-tiles/) · [雪道与建筑测绘及 ODbL](https://www.openstreetmap.org/copyright) · [Copernicus Sentinel-2](https://dataspace.copernicus.eu/) · [ESA WorldCover](https://esa-worldcover.org/en)
 
 山顶木屋、金花阁、两侧大厅与相连酒店、吊厢和吊椅按实拍特征重建。云顶 1 索南侧到花锚的约 77 米山顶连接段按冬季影像中的开放雪面拟合。角色采用本地三维模型，动作依据滑行实拍调校，双板内外腿的屈伸也参考了[高山滑雪实地运动学研究](https://doi.org/10.3389/fspor.2020.00056)。开场全景、写实树木图集、梵高星空环幕和两张油画雪面使用 ImageGen 生成。六种画境的远树图集可通过 `python3 scripts/bake-art-trees.py` 从三维树形重建。几何与摄影数据可用 `scripts/` 下的脚本重建。[万龙度假区](https://www.wlski.com/) · [云顶金花阁](https://www.secretgardenresorts.com/dinning/?lang=zh-cn) · [完整地理数据署名](public/assets/geo/mountain.json) · [美术来源与生成提示](public/assets/art/credits.txt)
+
+云顶世界酒店与相邻的云顶丽苑是独立于云顶大酒店的建筑群。丽苑八栋楼按公开的六层资料和 OSM 轮廓重建。云顶世界酒店、万龙双龙酒店、盛龙公寓、万龙阅读空间、雪板寄存处及部分无名建筑以地图轮廓为准，未有楼层和立面测绘的细节为估绘。大地图标出已匹配名称的建筑，万龙抵达道路增补了三栋原范围外的 OSM 建筑。地形和滑行路线不随建筑替换而变更。[云顶丽苑项目资料](https://news.dichan.sina.com.cn/news/4a3ce935-4a1f-4288-b299-83c1b76b8a11) · [云顶世界酒店资料](https://s.visitbeijing.com.cn/index.php/hotel/101011126) · [万龙度假区介绍](https://www.visitbeijing.com.cn/article/47QqMGAMxI7)
 
 ## 第三方参考与许可
 

@@ -64,12 +64,31 @@ function drawRiderMarker(ctx,opts,sim,x,y,heading,removed) {
   ctx.restore();
 }
 
+// Project the same polygons used by the collision index in the lightweight view.
+export function drawBuildingFootprints(ctx,buildings,position,scale,w,h,night){
+  ctx.fillStyle=night?'#455269':'#c0b5a4';
+  ctx.strokeStyle=night?'#8390a2':'#857967';
+  ctx.lineWidth=1;
+  ctx.beginPath();
+  for(const {x,z,radius,footprint} of buildings){
+    const [cx,cy]=position(x,z),r=radius*scale;
+    if(cx+r<0||cx-r>w||cy+r<0||cy-r>h)continue;
+    ctx.moveTo(...position(...footprint[0]));
+    for(let i=1;i<footprint.length;i++)ctx.lineTo(...position(...footprint[i]));
+    ctx.closePath();
+  }
+  ctx.fill();ctx.stroke();
+}
+
 export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainClimate(),pisteProgress) {
   const helmet=new LiftHelmet();
   const ctx=canvas.getContext('2d');
   if(!ctx)throw new Error('Canvas 2D is unavailable');
   canvas.hidden=false;
   const sim=new Descent(data,opts), navigation=createSkiNavigation(data);
+  const buildings=data.buildings.filter(b=>b.footprint.length>=3).map(({x,z,footprint})=>({
+    x,z,footprint,radius:Math.max(...footprint.map(([px,pz])=>Math.hypot(px-x,pz-z)))
+  }));
   const input={steer:0,trim:0,brake:false,boost:false,lookX:0,lookY:0};
   let station=null,ride=null,paused=false,active=false,videoCanvasLocked=false;
   let yaw=0,zoom=1,panX=0,panY=0,frame=0,last=0,hudAge=0,snowMarks=[];
@@ -200,6 +219,7 @@ export function createFlatWorld(canvas,data,opts,onEvent,climate=createMountainC
       trace(trail.points,difficultyColor[trail.difficulty]||'#627f91',1.6);
     }
     if(sim.mode!=='summit')trace(sim.route.points,night?'#ffc77f':'#a45e23',2.7);
+    drawBuildingFootprints(ctx,buildings,position,scale,w,h,night);
     ctx.setLineDash([4,6]);
     for(const lift of data.lifts)trace(lift.points,night?'#adb8c8':'#678490',1);
     ctx.setLineDash([]);

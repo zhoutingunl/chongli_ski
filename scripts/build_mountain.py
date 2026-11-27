@@ -30,6 +30,9 @@ LAT_FACTOR = 1 - E2 * math.sin(ORIGIN_LAT * RADIANS) ** 2
 EAST_SCALE = RADIANS * A * math.cos(ORIGIN_LAT * RADIANS) / math.sqrt(LAT_FACTOR)
 NORTH_SCALE = RADIANS * A * (1 - E2) / LAT_FACTOR ** 1.5
 OSM_MAP = 'https://api.openstreetmap.org/api/0.6/map?bbox=115.35,40.905,115.456,40.99'
+# Three mapped buildings at the north end of the Wanlong arrival road.
+# Include them without widening the ski-way filter or changing any terrain.
+WANLONG_ARRIVAL_BUILDINGS = {1153883034, 1153883035, 1153883036}
 TILE_URL = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{}/{}/{}.png'
 DEST = Path(__file__).resolve().parents[1] / 'public' / 'assets' / 'geo'
 
@@ -205,7 +208,8 @@ def mapped_features(xml, terrain):
     for osm_id, way in ways.items():
         attributes = tags(way)
         points = [coordinates[i] for i in way_nodes[osm_id]]
-        if not points or not on_mountain(points[0]):
+        extra_building = 'building' in attributes and osm_id in WANLONG_ARRIVAL_BUILDINGS
+        if not points or not (on_mountain(points[0]) or extra_building):
             continue
         obj_id = f'w{osm_id}'
         source_name = attributes.get('name', '')

@@ -8,7 +8,7 @@ import {nearbyLiftStation} from './lift-access.js';
 import {placeLiftSupports} from './lift-supports.js';
 import * as THREE from 'three';
 import {createRider} from './rider.js';
-import {createLandmark,createLift,setResortNight} from './resort.js';
+import {createLandmark,createLift,createResortDistricts,setResortNight} from './resort.js';
 import {Descent} from './simulation.js';
 import {PisteTraffic} from './piste-traffic.js';
 import {createPisteGuests} from './piste-guests.js';
@@ -68,6 +68,8 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     const focus=box.getCenter(new THREE.Vector3());focus.y=group.position.y+size.y*.46;
     landmarkViews.set(k.id,{focus,yaw:group.rotation.y,distance:Math.max(22,Math.hypot(size.x,size.z)*.70),kind:k.kind});
   }
+  const districts=createResortDistricts(data);
+  for(const group of districts.groups)scene.add(group);
   const lifts=[];
   for(const lift of data.lifts){
     const points=placeLiftSupports(lift.points,data).map(([x,z])=>new THREE.Vector3(x,data.height(x,z),z));
@@ -78,10 +80,10 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
     const casters=[];obj.group.traverse(child=>{if(child.isMesh&&child.castShadow)casters.push(child);});
     lifts.push({...obj,meta:lift,distance,center,casters,radius:points[0].distanceTo(points.at(-1))*.5+200});
   }
-  bindScenicBuildings([...landmarks,...lifts.map(l=>l.group)],scenic);
+  bindScenicBuildings([...landmarks,...districts.groups,...lifts.map(l=>l.group)],scenic);
   const helmet=new LiftHelmet();
   const navigation=createSkiNavigation(data);
-  const details=courseDetails(scene,data,navigation);
+  const details=courseDetails(scene,data,navigation,districts.modeled);
   const trailGuide=createTrailGuide(scene,data,renderer,pisteProgress,surface.detail);
   const snowAir=createSnowAir(scene,data),fx=makeSnowFX(scene,data,snowAir,surface.grooveMaterial);
   let renderLighting,lightingLimited=false;
@@ -355,6 +357,7 @@ export async function createWorld(el,data,opts,onEvent,onProgress=()=>{},climate
   function refreshLOD(){
     surface.locate?.(sim.x,sim.z,opts.quality);
     details.locate(camera.position.x,camera.position.z);
+    districts.locate(camera.position.x,camera.position.z,opts.quality);
     forest.locate(camera.position.x,camera.position.z,opts.quality,sim.x,sim.z,sun.castShadow?160:0);
     const max=opts.quality==='lite'?1400:2400;
     for(const l of lifts){

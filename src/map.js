@@ -1,4 +1,5 @@
 import {clamp,resortName,difficultyColor} from './mountain.js';
+import {resortBuildingPlaces} from './resort-buildings.js';
 
 import {label as translated,t} from './language.js';
 
@@ -32,6 +33,7 @@ export class TrailMap {
   constructor(canvas,data,mini=false,progress=null) {
     this.el=canvas; this.ctx=canvas.getContext('2d'); this.data=data; this.mini=mini;this.progress=progress;
     this.box=pisteBounds(data);
+    this.buildingPlaces=mini?[]:resortBuildingPlaces(data.buildings);
     this.lines=data.contourLines ||= contours(data,this.box);
     this.zoom=1; this.panX=0; this.panZ=0; this.points=new Map();
     if(!mini) this.enablePan();
@@ -106,8 +108,10 @@ export class TrailMap {
       }
     }
     const points=this.data.landmarks.filter(l=>l.kind==='hall'||(!mini&&l.kind==='lodge'));
+    const occupied=[];
     for(const l of points){
       const x=px(l.x),z=pz(l.z),base=l.kind==='hall';
+      if(!mini&&(x<0||x>w||z<0||z>h))continue;
       if(!base){c.strokeStyle='#f2e2b8';c.strokeRect(x-2.5,z-2.5,5,5);}
       const fontSize=mini?11:base?15:12;
       c.font=(base?'500 ':'')+fontSize+'px "PingFang SC","Microsoft YaHei",sans-serif';
@@ -116,6 +120,24 @@ export class TrailMap {
       const tx=clamp(x+(l.resort==='genting'?9:-9),c.textAlign==='right'?c.measureText(label).width+4:4,c.textAlign==='left'?w-c.measureText(label).width-4:w-4);
       const ty=clamp(z+(base?-5:12),9,h-10);
       c.lineWidth=3;c.strokeStyle='rgba(23,38,42,.85)';c.strokeText(label,tx,ty);c.fillStyle=base?'#f5f6ee':'#dfceb1';c.fillText(label,tx,ty);
+      const tw=c.measureText(label).width,left=c.textAlign==='right'?tx-tw:tx;
+      occupied.push([left-3,ty-fontSize*.55,left+tw+3,ty+fontSize*.55]);
+    }
+    if(!mini){
+      c.font='11px "PingFang SC","Microsoft YaHei",sans-serif';c.textBaseline='middle';
+      for(const l of this.buildingPlaces){
+        const x=px(l.x),z=pz(l.z);
+        if(x<5||x>w-5||z<5||z>h-5)continue;
+        c.fillStyle='#dbc69f';c.fillRect(x-2,z-2,4,4);
+        const name=t(l.name,l.en),tw=c.measureText(name).width;
+        const offsets=l.resort==='genting'?[[7,0],[7,-12],[-7,12]]:[[-7,0],[-7,12],[7,-12]];
+        for(const [dx,dy] of offsets){
+          const left=x+dx-(dx<0?tw:0),ty=z+dy,right=left+tw;
+          if(left<3||right>w-3||ty<8||ty>h-8||occupied.some(([a,b,d,e])=>left<d+3&&right>a-3&&ty+6>b&&ty-6<e))continue;
+          c.textAlign='left';c.lineWidth=3;c.strokeStyle='rgba(23,38,42,.86)';c.strokeText(name,left,ty);
+          c.fillStyle='#e1ceb0';c.fillText(name,left,ty);occupied.push([left,ty-6,right,ty+6]);break;
+        }
+      }
     }
     if(this.position&&!mini){
       const x=px(this.position.x),y=pz(this.position.z);
